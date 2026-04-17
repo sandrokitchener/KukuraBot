@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robot Test App</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <p id="app-eyebrow" class="eyebrow">Ollama robot-control test</p>
+        <h1 id="app-title">Robot Console</h1>
+        <p id="app-description" class="lede">
+          Test a local robot-control wrapper for robot-chat vs robot-command behavior. Edit the prompt
+          and response schema files directly whenever you want.
+        </p>
+
+        <div class="meta-grid">
+          <div class="meta-card">
+            <span class="meta-label">Model</span>
+            <strong id="model-name">Loading...</strong>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Prompt file</span>
+            <strong id="prompt-file">config/system-prompt.txt</strong>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Schema file</span>
+            <strong id="schema-file">config/command-response-format.json</strong>
+          </div>
+        </div>
+
+        <form id="chat-form" class="chat-form">
+          <label for="user-input">Message</label>
+          <textarea
+            id="user-input"
+            rows="4"
+            placeholder="Try: go to the living room"
+          ></textarea>
+          <button id="send-button" type="submit">Ask Assistant</button>
+        </form>
+
+        <div id="status" class="status" data-state="idle">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status-text">Ready.</span>
+          <span id="status-timer" class="status-timer"></span>
+        </div>
+
+        <section class="response-grid">
+          <article class="response-card">
+            <div class="response-head">
+              <h2>Chat</h2>
+            </div>
+            <div id="chat-log" class="chat-log" aria-live="polite">
+              <article class="message message-assistant message-empty">
+                <div id="empty-message-role" class="message-role">Assistant</div>
+                <pre id="empty-message-bubble" class="message-bubble">Waiting for first message.</pre>
+                <div id="empty-message-meta" class="message-meta">Prompt ready.</div>
+              </article>
+            </div>
+          </article>
+
+          <article class="response-card">
+            <div class="response-head">
+              <h2>Parsed JSON</h2>
+            </div>
+            <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

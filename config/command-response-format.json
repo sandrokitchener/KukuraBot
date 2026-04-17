@@ -1,0 +1,18 @@
+{
+  "fields": [
+    {
+      "name": "command",
+      "type": "\"move\" | \"detect\""
+    },
+    {
+      "name": "waypoint",
+      "type": "string"
+    }
+  ],
+  "allowedCommands": {
+    "move": "go to a location",
+    "detect": "scan/search an area"
+  },
+  "waypointNormalization": "lowercase with underscores",
+  "defaultWaypoint": "current_position"
+}
