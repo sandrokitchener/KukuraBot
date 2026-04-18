@@ -18,6 +18,15 @@
 
         <div class="meta-grid">
           <div class="meta-card">
+            <span class="meta-label">Profile</span>
+            <strong id="profile-name">Loading...</strong>
+            <div id="profile-source" class="meta-note"></div>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Provider</span>
+            <strong id="provider-name">Loading...</strong>
+          </div>
+          <div class="meta-card">
             <span class="meta-label">Model</span>
             <strong id="model-name">Loading...</strong>
           </div>
@@ -29,7 +38,36 @@
             <span class="meta-label">Schema file</span>
             <strong id="schema-file">config/command-response-format.json</strong>
           </div>
+          <div class="meta-card">
+            <span class="meta-label">Command types</span>
+            <strong id="command-types-file">config/command-types.txt</strong>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Waypoints</span>
+            <strong id="waypoints-file">config/valid-waypoints.txt</strong>
+          </div>
         </div>
+
+        <details class="settings-panel">
+          <summary>Settings</summary>
+          <div class="settings-row">
+            <label for="profile-select">Model profile</label>
+            <select id="profile-select"></select>
+            <button id="save-profile-button" type="button">Use profile</button>
+          </div>
+          <p id="profile-lock-note" class="settings-note">Selection saves to config/runtime.json.</p>
+          <div id="settings-status" class="settings-status">Loading profiles...</div>
+        </details>
+
+        <section class="speech-panel">
+          <div class="speech-head">
+            <h2>Speech Input</h2>
+            <span id="speech-profile-name" class="speech-chip">Loading...</span>
+          </div>
+          <p id="speech-status" class="speech-status">Starting microphone...</p>
+          <pre id="speech-preview" class="speech-preview">Waiting for microphone.</pre>
+          <p id="speech-files" class="speech-files">Speech config files: config/speech-profiles.json, config/speech-runtime.json, config/activation_phrases.txt</p>
+        </section>
 
         <form id="chat-form" class="chat-form">
           <label for="user-input">Message</label>

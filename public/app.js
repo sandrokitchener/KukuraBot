@@ -1,9 +1,26 @@
-const modelName = document.querySelector('#model-name')
+import { createSpeechInputController } from './speech-input.js'
+import { createCommandCuePlayer } from './command-cue.js'
+
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
 const appDescription = document.querySelector('#app-description')
+const profileName = document.querySelector('#profile-name')
+const profileSource = document.querySelector('#profile-source')
+const providerName = document.querySelector('#provider-name')
+const modelName = document.querySelector('#model-name')
 const promptFile = document.querySelector('#prompt-file')
 const schemaFile = document.querySelector('#schema-file')
+const commandTypesFile = document.querySelector('#command-types-file')
+const waypointsFile = document.querySelector('#waypoints-file')
+const profileSelect = document.querySelector('#profile-select')
+const saveProfileButton = document.querySelector('#save-profile-button')
+const profileLockNote = document.querySelector('#profile-lock-note')
+const settingsStatus = document.querySelector('#settings-status')
+const speechPanel = document.querySelector('.speech-panel')
+const speechProfileName = document.querySelector('#speech-profile-name')
+const speechStatus = document.querySelector('#speech-status')
+const speechPreview = document.querySelector('#speech-preview')
+const speechFiles = document.querySelector('#speech-files')
 const form = document.querySelector('#chat-form')
 const input = document.querySelector('#user-input')
 const sendButton = document.querySelector('#send-button')
@@ -16,14 +33,21 @@ const emptyMessageRole = document.querySelector('#empty-message-role')
 const emptyMessageBubble = document.querySelector('#empty-message-bubble')
 const emptyMessageMeta = document.querySelector('#empty-message-meta')
 const EMPTY_CHAT_SELECTOR = '.message-empty'
+const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
+const DEFAULT_SPEECH_ACTIVE_PROFILE = {
+  silenceDurationMs: 500,
+  minimumSpeechMs: 300,
+  speechThreshold: 0.015,
+}
 
 let thinkingState = null
+const commandCuePlayer = createCommandCuePlayer('/sounds/robot-bark.mp3')
 let appConfig = {
   assistantName: 'Assistant',
   pageTitle: 'Robot Test App',
   consoleTitle: 'Robot Console',
   sendButtonLabel: 'Ask Assistant',
-  thinkingStatus: 'Assistant is thinking...',
+  thinkingStatus: 'Assistant is thinking',
   introEyebrow: 'Ollama robot-control test',
   introDescription:
     'Test a local robot-control wrapper for robot-chat vs robot-command behavior. Edit the prompt and response schema files directly whenever you want.',
@@ -31,36 +55,82 @@ let appConfig = {
   emptyChatMeta: 'Prompt ready.',
   waitingForJsonMessage: 'Waiting for valid JSON.',
 }
+let runtimeConfig = {
+  activeProfile: {
+    id: '',
+    label: 'No profile',
+    provider: 'Unknown',
+    model: 'Unknown',
+    baseUrl: '',
+    source: 'default',
+    selectionLocked: false,
+  },
+  availableProfiles: [],
+  speech: {
+    activeProfile: null,
+    availableProfiles: [],
+    profileFile: 'config/speech-profiles.json',
+    runtimeFile: 'config/speech-runtime.json',
+    activationPhrasesFile: 'config/activation_phrases.txt',
+    activationPhrases: DEFAULT_ACTIVATION_PHRASES,
+  },
+}
+let speechController = null
 
 boot()
 
+form.addEventListener('submit', handleChatSubmit)
+saveProfileButton.addEventListener('click', handleProfileSave)
+
 async function boot() {
   try {
-    const response = await fetch('/api/config')
-    const payload = await response.json()
-    appConfig = payload.app || appConfig
-    applyAppConfig()
-    modelName.textContent = payload.model
-    promptFile.textContent = payload.systemPromptFile
-    schemaFile.textContent = payload.commandFormatFile
-    setStatus('Ready.')
+    const payload = await fetchConfig()
+    applyPayload(payload)
+    speechController = await createSpeechInputController({
+      input,
+      speechConfig: runtimeConfig.speech,
+      onStatus: setSpeechStatus,
+      onTranscript: updateSpeechPreview,
+      onVoiceCommand: handleVoiceCommand,
+      submitLabel: appConfig.sendButtonLabel,
+    })
+    await speechController.start()
+    setStatus(`Ready on ${runtimeConfig.activeProfile.label}.`)
   } catch (error) {
     setStatus(`Config load failed: ${formatError(error)}`, 'error')
+    setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
   }
 }
 
-form.addEventListener('submit', async (event) => {
+async function handleChatSubmit(event) {
   event.preventDefault()
 
-  const message = input.value.trim()
+  sendButton.disabled = true
+  input.disabled = true
+
+  let message = input.value.trim()
+
+  try {
+    if (!message && speechController?.prepareInputForSubmit) {
+      message = (await speechController.prepareInputForSubmit())?.trim() || ''
+    }
+  } catch (error) {
+    setStatus(`Speech transcription failed: ${formatError(error)}`, 'error')
+    sendButton.disabled = false
+    input.disabled = false
+    input.focus()
+    return
+  }
+
   if (!message) {
     setStatus('Enter a message first.', 'error')
+    sendButton.disabled = false
+    input.disabled = false
+    input.focus()
     return
   }
 
   clearEmptyChat()
-  sendButton.disabled = true
-  input.disabled = true
   appendMessage({
     role: 'You',
     text: message,
@@ -73,7 +143,7 @@ form.addEventListener('submit', async (event) => {
     text: 'Thinking.',
     type: 'assistant',
     pending: true,
-    meta: 'Starting request...',
+    meta: `Using ${runtimeConfig.activeProfile.label}.`,
   })
 
   input.value = ''
@@ -95,11 +165,12 @@ form.addEventListener('submit', async (event) => {
 
     finishThinkingFeedback(pendingMessage, {
       text: payload.response,
-      meta: `Reply received in ${formatElapsed(Date.now() - thinkingState.startedAt)} via ${payload.model}.`,
+      meta: `Reply received in ${formatElapsed(Date.now() - thinkingState.startedAt)} via ${payload.profileLabel} (${payload.model}).`,
     })
+    playCommandCueIfNeeded(payload.parsed)
     parsedOutput.textContent =
       payload.parsed ? JSON.stringify(payload.parsed, null, 2) : 'Not JSON.'
-    setStatus(`Done via ${payload.model}.`, 'idle')
+    setStatus(`Done via ${payload.profileLabel}.`, 'idle')
   } catch (error) {
     finishThinkingFeedback(pendingMessage, {
       text: `Error: ${formatError(error)}`,
@@ -114,7 +185,158 @@ form.addEventListener('submit', async (event) => {
     input.focus()
     thinkingState = null
   }
-})
+}
+
+async function handleProfileSave() {
+  const nextProfileId = profileSelect.value
+
+  if (!nextProfileId) {
+    settingsStatus.textContent = 'Select a profile first.'
+    return
+  }
+
+  if (nextProfileId === runtimeConfig.activeProfile.id) {
+    settingsStatus.textContent = `Already using ${runtimeConfig.activeProfile.label}.`
+    return
+  }
+
+  saveProfileButton.disabled = true
+  profileSelect.disabled = true
+  settingsStatus.textContent = 'Saving profile...'
+
+  try {
+    const response = await fetch('/api/settings/profile', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ profileId: nextProfileId }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not update profile.')
+    }
+
+    applyPayload(payload)
+    settingsStatus.textContent = `Using ${runtimeConfig.activeProfile.label}.`
+    setStatus(`Profile changed to ${runtimeConfig.activeProfile.label}.`)
+  } catch (error) {
+    settingsStatus.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+  } finally {
+    applyProfileSelectionState()
+  }
+}
+
+async function fetchConfig() {
+  const response = await fetch('/api/config')
+  const payload = await response.json()
+
+  if (!response.ok) {
+    throw new Error(payload.error || 'Could not load app config.')
+  }
+
+  return payload
+}
+
+function applyPayload(payload) {
+  appConfig = payload.app || appConfig
+  runtimeConfig = {
+    activeProfile: payload.activeProfile || runtimeConfig.activeProfile,
+    availableProfiles: payload.availableProfiles || [],
+    speech: {
+      ...runtimeConfig.speech,
+      ...(payload.speech || {}),
+      activeProfile: payload.speech?.activeProfile
+        ? { ...DEFAULT_SPEECH_ACTIVE_PROFILE, ...payload.speech.activeProfile }
+        : runtimeConfig.speech.activeProfile,
+      activationPhrases: payload.speech?.activationPhrases || runtimeConfig.speech.activationPhrases,
+    },
+  }
+
+  applyAppConfig()
+  applyModelConfig(payload)
+  applySpeechConfig()
+}
+
+function applyModelConfig(payload) {
+  profileName.textContent = runtimeConfig.activeProfile.label
+  profileSource.textContent = `Source: ${formatProfileSource(runtimeConfig.activeProfile.source)}`
+  providerName.textContent = runtimeConfig.activeProfile.provider
+  modelName.textContent = payload.model || runtimeConfig.activeProfile.model
+  promptFile.textContent = payload.systemPromptFile
+  schemaFile.textContent = payload.commandFormatFile
+  commandTypesFile.textContent = payload.commandTypesFile
+  waypointsFile.textContent = payload.validWaypointsFile
+  renderProfileOptions()
+  applyProfileSelectionState()
+}
+
+function applySpeechConfig() {
+  const activeSpeechProfile = runtimeConfig.speech.activeProfile
+
+  speechProfileName.textContent = activeSpeechProfile?.label || 'Speech unavailable'
+  speechFiles.textContent =
+    `Speech config files: ${runtimeConfig.speech.profileFile}, ${runtimeConfig.speech.runtimeFile}, ${runtimeConfig.speech.activationPhrasesFile}`
+
+  if (!activeSpeechProfile) {
+    setSpeechStatus('No speech profile configured.', true)
+    speechPreview.textContent = 'Speech input unavailable.'
+    return
+  }
+
+  if (activeSpeechProfile.provider === 'whisper-browser') {
+    const activationPhrases = runtimeConfig.speech.activationPhrases?.join(', ') || 'none'
+
+    speechPreview.textContent =
+      `Listening mode: buffered local recording\n` +
+      `Model: ${activeSpeechProfile.modelId}\n` +
+      `Device: ${activeSpeechProfile.device || 'wasm default'}\n` +
+      `Activation phrases: ${activationPhrases}\n` +
+      `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
+      `Manual fallback: click ${appConfig.sendButtonLabel}\n` +
+      `Live transcript: none while recording`
+    return
+  }
+
+  speechPreview.textContent =
+    `Listening mode: ${activeSpeechProfile.useVad ? 'VAD commits' : 'streaming updates'}\n` +
+    `Model path: ${activeSpeechProfile.modelUrl}`
+}
+
+function renderProfileOptions() {
+  profileSelect.replaceChildren()
+
+  for (const profile of runtimeConfig.availableProfiles) {
+    const option = document.createElement('option')
+    option.value = profile.id
+    option.textContent = `${profile.label} (${profile.provider})`
+    option.selected = profile.id === runtimeConfig.activeProfile.id
+    profileSelect.append(option)
+  }
+}
+
+function applyProfileSelectionState() {
+  const locked = runtimeConfig.activeProfile.selectionLocked
+  profileSelect.disabled = locked
+  saveProfileButton.disabled = locked
+  profileLockNote.textContent = locked
+    ? 'Profile locked by APP_MODEL_PROFILE or --profile.'
+    : 'Selection saves to config/runtime.json.'
+  settingsStatus.textContent = `Using ${runtimeConfig.activeProfile.label} (${runtimeConfig.activeProfile.model}).`
+}
+
+function formatProfileSource(source) {
+  switch (source) {
+    case 'override':
+      return 'startup override'
+    case 'runtime':
+      return 'runtime config'
+    default:
+      return 'default'
+  }
+}
 
 function formatError(error) {
   if (error instanceof Error) {
@@ -122,6 +344,55 @@ function formatError(error) {
   }
 
   return String(error)
+}
+
+function setSpeechStatus(message, isError = false) {
+  speechPanel.dataset.state = isError ? 'error' : 'ready'
+  speechStatus.textContent = message
+}
+
+function updateSpeechPreview(text, phase) {
+  speechPreview.textContent = phase === 'commit' ? `Committed: ${text}` : `Live: ${text}`
+}
+
+function isValidCommandPayload(parsed) {
+  return !!(
+    parsed
+    && typeof parsed === 'object'
+    && typeof parsed.command === 'string'
+    && parsed.command.trim()
+  )
+}
+
+function playCommandCueIfNeeded(parsed) {
+  if (!isValidCommandPayload(parsed)) {
+    return
+  }
+
+  commandCuePlayer.play().catch((error) => {
+    console.warn('Command cue failed:', error)
+  })
+}
+
+function handleVoiceCommand(message, context) {
+  if (!message) {
+    return
+  }
+
+  if (sendButton.disabled) {
+    setSpeechStatus(`Voice command heard but app is busy: ${message}`, true)
+    return
+  }
+
+  input.value = message
+  setSpeechStatus(`Activation phrase heard (${context.activationPhrase}). Sending ${appConfig.sendButtonLabel}...`)
+
+  if (typeof form.requestSubmit === 'function') {
+    form.requestSubmit()
+    return
+  }
+
+  form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
 }
 
 function appendMessage({ role, text, type, meta, pending = false, error = false }) {
@@ -168,7 +439,7 @@ function startThinkingFeedback(messageNode) {
   const phases = [
     'Thinking',
     'Reading prompt and schema',
-    'Calling Ollama',
+    `Calling ${runtimeConfig.activeProfile.label}`,
     'Still working',
   ]
   let frame = 0
@@ -179,7 +450,7 @@ function startThinkingFeedback(messageNode) {
     const phaseIndex = Math.min(Math.floor(elapsedMs / 2500), phases.length - 1)
     bubble.textContent = `${phases[phaseIndex]}${dots}`
     meta.textContent = `${formatElapsed(elapsedMs)} elapsed.`
-    setStatus(appConfig.thinkingStatus, 'busy', elapsedMs)
+    setStatus(`${appConfig.thinkingStatus} via ${runtimeConfig.activeProfile.label}.`, 'busy', elapsedMs)
     scrollChatToBottom()
     frame += 1
   }
@@ -229,3 +500,8 @@ function applyAppConfig() {
   emptyMessageMeta.textContent = appConfig.emptyChatMeta
   parsedOutput.textContent = appConfig.waitingForJsonMessage
 }
+
+window.addEventListener('beforeunload', () => {
+  speechController?.dispose?.()
+  speechController?.stop()
+})

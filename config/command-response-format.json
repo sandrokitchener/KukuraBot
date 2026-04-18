@@ -2,7 +2,7 @@
   "fields": [
     {
       "name": "command",
-      "type": "\"move\" | \"detect\""
+      "type": "\"move\" | \"detect\" | \"trick\" | \"follow\" | \"talk\""
     },
     {
       "name": "waypoint",
@@ -11,8 +11,53 @@
   ],
   "allowedCommands": {
     "move": "go to a location",
-    "detect": "scan/search an area"
+    "detect": "scan/search an area",
+    "trick": "perform a trick"
   },
+  "conditionalFields": {
+    "detect": [
+      {
+        "name": "object_to_detect",
+        "type": "string"
+      }
+    ],
+    "trick": [
+      {
+        "name": "trick",
+        "type": "string"
+      }
+    ]
+  },
+  "conditionalDefaults": {
+    "trick": {
+      "waypoint": "current_position",
+      "trick": "random"
+    }
+  },
+  "conditionalNotes": {
+    "trick": [
+      "If the user names a specific trick, set \"trick\" to that normalized trick name.",
+      "If the user asks for a trick without naming one, set \"trick\" to \"random\"."
+    ]
+  },
+  "examples": [
+    {
+      "input": "do a backflip",
+      "output": {
+        "command": "trick",
+        "waypoint": "current_position",
+        "trick": "backflip"
+      }
+    },
+    {
+      "input": "do a trick",
+      "output": {
+        "command": "trick",
+        "waypoint": "current_position",
+        "trick": "random"
+      }
+    }
+  ],
   "waypointNormalization": "lowercase with underscores",
   "defaultWaypoint": "current_position"
 }

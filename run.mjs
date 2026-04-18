@@ -6,6 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
 const HOST = cliOptions.host || process.env.APP_HOST || process.env.KUKURA_HOST || '127.0.0.1'
 const PORT = Number(cliOptions.port || process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
+const MODEL_PROFILE = cliOptions.profile || process.env.APP_MODEL_PROFILE || ''
 const APP_URL = `http://${HOST}:${PORT}`
 
 const server = spawn(process.execPath, ['server.mjs'], {
@@ -15,6 +16,7 @@ const server = spawn(process.execPath, ['server.mjs'], {
     ...process.env,
     APP_HOST: HOST,
     APP_PORT: String(PORT),
+    APP_MODEL_PROFILE: MODEL_PROFILE,
     KUKURA_HOST: HOST,
     KUKURA_PORT: String(PORT),
   },
@@ -99,6 +101,12 @@ function parseCliArgs(argv) {
 
     if (value === '--port' && argv[index + 1]) {
       options.port = argv[index + 1]
+      index += 1
+      continue
+    }
+
+    if (value === '--profile' && argv[index + 1]) {
+      options.profile = argv[index + 1]
       index += 1
     }
   }

@@ -1,0 +1,37 @@
+{
+  "defaultProfile": "local_whisper_base_en",
+  "profiles": {
+    "local_whisper_base_en": {
+      "label": "Whisper Base EN (Browser)",
+      "provider": "whisper-browser",
+      "libraryUrl": "/vendor/transformers/transformers.min.js",
+      "modelId": "Xenova/whisper-base.en",
+      "device": "webgpu",
+      "dtype": "fp32",
+      "fallbackDevice": "wasm",
+      "fallbackDtype": "q8",
+      "language": "english",
+      "task": "transcribe",
+      "chunkLengthSeconds": 20,
+      "strideLengthSeconds": 5,
+      "maxBufferSeconds": 20,
+      "silenceDurationMs": 500,
+      "minimumSpeechMs": 300,
+      "speechThreshold": 0.015,
+      "autoStart": true,
+      "onnxRuntimeBaseUrl": "/vendor/transformers-ort/"
+    },
+    "local_moonshine_tiny": {
+      "label": "Moonshine Tiny (Local Browser)",
+      "provider": "moonshine-browser",
+      "libraryUrl": "/vendor/moonshine/moonshine.min.js",
+      "modelUrl": "model/tiny",
+      "precision": "quantized",
+      "useVad": false,
+      "autoStart": true,
+      "moonshineAssetBaseUrl": "/vendor/moonshine/",
+      "onnxRuntimeBaseUrl": "/vendor/onnxruntime/",
+      "vadAssetBaseUrl": "/vendor/vad/"
+    }
+  }
+}

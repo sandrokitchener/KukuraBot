@@ -1,0 +1,8 @@
+- living_room
+- garage
+- current_position
+- source
+- front door
+- master bedroom
+- game room
+- guest room

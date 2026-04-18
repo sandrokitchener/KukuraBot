@@ -4,9 +4,23 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadAppConfig } from './lib/app-config.mjs'
 import { loadPublicConfig, processUserInput } from './lib/app-service.mjs'
+import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
+const MOONSHINE_DIST_DIR = path.join(__dirname, 'node_modules', '@moonshine-ai', 'moonshine-js', 'dist')
+const ONNX_RUNTIME_DIST_DIR = path.join(__dirname, 'node_modules', 'onnxruntime-web', 'dist')
+const VAD_DIST_DIR = path.join(__dirname, 'node_modules', '@ricky0123', 'vad-web', 'dist')
+const TRANSFORMERS_DIST_DIR = path.join(__dirname, 'node_modules', '@huggingface', 'transformers', 'dist')
+const TRANSFORMERS_ORT_DIST_DIR = path.join(
+  __dirname,
+  'node_modules',
+  '@huggingface',
+  'transformers',
+  'node_modules',
+  'onnxruntime-web',
+  'dist',
+)
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '127.0.0.1'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const appConfig = await loadAppConfig()
@@ -16,8 +30,20 @@ const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.onnx': 'application/octet-stream',
   '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
 }
+
+const STATIC_ROOTS = [
+  { prefix: '/vendor/transformers/', rootDir: TRANSFORMERS_DIST_DIR },
+  { prefix: '/vendor/transformers-ort/', rootDir: TRANSFORMERS_ORT_DIST_DIR },
+  { prefix: '/vendor/moonshine/', rootDir: MOONSHINE_DIST_DIR },
+  { prefix: '/vendor/onnxruntime/', rootDir: ONNX_RUNTIME_DIST_DIR },
+  { prefix: '/vendor/vad/', rootDir: VAD_DIST_DIR },
+]
 
 createServer(async (request, response) => {
   try {
@@ -32,8 +58,27 @@ createServer(async (request, response) => {
       return sendJson(response, 200, await processUserInput(body?.input))
     }
 
+    if (request.method === 'POST' && requestUrl.pathname === '/api/settings/profile') {
+      const body = await readJsonBody(request)
+      const profileId = typeof body?.profileId === 'string' ? body.profileId.trim() : ''
+
+      if (!profileId) {
+        return sendJson(response, 400, { error: 'Select a profile first.' })
+      }
+
+      try {
+        await setActiveModelProfile(profileId)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not update profile.'
+        const statusCode = /locked/i.test(message) ? 409 : 400
+        return sendJson(response, statusCode, { error: message })
+      }
+
+      return sendJson(response, 200, await loadPublicConfig())
+    }
+
     if (request.method === 'GET') {
-      return serveStaticFile(requestUrl.pathname, response)
+      return serveStaticRequest(requestUrl.pathname, response)
     }
 
     sendJson(response, 405, { error: 'Method not allowed.' })
@@ -42,15 +87,30 @@ createServer(async (request, response) => {
       error: error instanceof Error ? error.message : 'Unexpected server error.',
     })
   }
-}).listen(PORT, HOST, () => {
-  console.log(`${appConfig.serverReadyLabel} running at http://${HOST}:${PORT}`)
+}).listen(PORT, HOST, async () => {
+  const profileConfig = await resolveActiveModelProfile()
+  console.log(
+    `${appConfig.serverReadyLabel} running at http://${HOST}:${PORT} using ${profileConfig.activeProfile.label} (${profileConfig.activeProfile.model})`,
+  )
 })
 
-async function serveStaticFile(pathname, response) {
-  const normalized = pathname === '/' ? '/index.html' : pathname
-  const resolved = path.normalize(path.join(PUBLIC_DIR, normalized))
+async function serveStaticRequest(pathname, response) {
+  for (const { prefix, rootDir } of STATIC_ROOTS) {
+    if (pathname.startsWith(prefix)) {
+      const requestedPath = pathname.slice(prefix.length)
+      return serveStaticFile(requestedPath, response, rootDir)
+    }
+  }
 
-  if (!resolved.startsWith(PUBLIC_DIR)) {
+  return serveStaticFile(pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, ''), response, PUBLIC_DIR)
+}
+async function serveStaticFile(requestedPath, response, rootDir) {
+  const cleanedPath = requestedPath.replace(/^\/+/, '')
+  const resolved = path.normalize(path.join(rootDir, cleanedPath))
+  const normalizedRoot = path.normalize(rootDir)
+  const rootPrefix = `${normalizedRoot}${path.sep}`
+
+  if (resolved !== normalizedRoot && !resolved.startsWith(rootPrefix)) {
     return sendJson(response, 403, { error: 'Forbidden.' })
   }
 

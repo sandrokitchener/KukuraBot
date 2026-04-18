@@ -1,0 +1,24 @@
+{
+  "defaultProfile": "local_ollama",
+  "profiles": {
+    "local_ollama": {
+      "label": "Local Ollama",
+      "provider": "ollama",
+      "baseUrl": "http://127.0.0.1:11434",
+      "model": "nemotron-3-nano:latest",
+      "think": false,
+      "temperature": 0.15,
+      "maxTokens": 120,
+      "keepAlive": "30m"
+    },
+    "home_llama_gguf": {
+      "label": "Home Llama GGUF",
+      "provider": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "model": "llama-gguf",
+      "apiKeyEnv": "",
+      "temperature": 0.15,
+      "maxTokens": 120
+    }
+  }
+}

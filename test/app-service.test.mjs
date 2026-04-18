@@ -2,7 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  queryOllama,
+  composeSystemPrompt,
+  loadPublicConfig,
+  renderCommandTypes,
   renderTemplate,
   renderCommandFormat,
   tryParseJson,
@@ -18,7 +20,34 @@ test('renderCommandFormat renders fields and rules', () => {
     allowedCommands: {
       move: 'Move robot to waypoint.',
       speak: 'Speak short status.',
+      trick: 'Perform a trick.',
     },
+    conditionalFields: {
+      detect: [{ name: 'object_to_detect', type: 'string' }],
+      trick: [{ name: 'trick', type: 'string' }],
+    },
+    conditionalDefaults: {
+      trick: {
+        waypoint: 'current_position',
+        trick: 'random',
+      },
+    },
+    conditionalNotes: {
+      trick: [
+        'If the user names a specific trick, set "trick" to that normalized trick name.',
+        'If the user asks for a trick without naming one, set "trick" to "random".',
+      ],
+    },
+    examples: [
+      {
+        input: 'do a backflip',
+        output: {
+          command: 'trick',
+          waypoint: 'current_position',
+          trick: 'backflip',
+        },
+      },
+    ],
     waypointNormalization: 'known waypoint names',
     defaultWaypoint: 'home',
   })
@@ -26,6 +55,18 @@ test('renderCommandFormat renders fields and rules', () => {
   assert.match(result, /"command": "string"/)
   assert.match(result, /"move" -> Move robot to waypoint\./)
   assert.match(result, /default waypoint to "home"/)
+  assert.match(result, /If "command" is "detect", also include:/)
+  assert.match(result, /"object_to_detect": string/)
+  assert.match(result, /"trick" -> Perform a trick\./)
+  assert.match(result, /If "command" is "trick", also include:/)
+  assert.match(result, /"trick": string/)
+  assert.match(result, /If "command" is "trick" and no better value is provided, default to:/)
+  assert.match(result, /"waypoint": "current_position"/)
+  assert.match(result, /"trick": "random"/)
+  assert.match(result, /If "command" is "trick": If the user names a specific trick/)
+  assert.match(result, /Always include every base field/)
+  assert.match(result, /User: "do a backflip"/)
+  assert.match(result, /Output: \{"command":"trick","waypoint":"current_position","trick":"backflip"\}/)
 })
 
 test('tryParseJson returns null on invalid JSON', () => {
@@ -43,80 +84,43 @@ test('normalizeAppConfig derives brand strings from assistantName', () => {
 })
 
 test('renderTemplate replaces assistant placeholders', () => {
-  const rendered = renderTemplate('Hello {{ASSISTANT_NAME}}', {
+  const rendered = renderTemplate('Hello {{ASSISTANT_NAME}} {{COMMAND_TYPES}}', {
     ASSISTANT_NAME: 'Rover',
+    COMMAND_TYPES: 'tricks',
   })
 
-  assert.equal(rendered, 'Hello Rover')
+  assert.equal(rendered, 'Hello Rover tricks')
 })
 
-test('queryOllama returns message content when present', async () => {
-  const originalFetch = global.fetch
-  let requestBody = null
+test('renderCommandTypes resolves valid waypoint placeholders', () => {
+  const rendered = renderCommandTypes(
+    'Pick from {{VALID_WAYPOINTS}}',
+    '- kitchen\n- garage',
+  )
 
-  global.fetch = async (_url, options) => {
-    requestBody = JSON.parse(options.body)
-
-    return new Response(
-      JSON.stringify({
-        message: {
-          content: '{"command":"move","waypoint":"kitchen"}',
-        },
-      }),
-      {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      },
-    )
-  }
-
-  try {
-    const result = await queryOllama({
-      input: 'go to kitchen',
-      modelConfig: {
-        ollamaBaseUrl: 'http://127.0.0.1:11434',
-        model: 'test-model',
-      },
-      systemPrompt: 'system',
-    })
-
-    assert.equal(result, '{"command":"move","waypoint":"kitchen"}')
-    assert.equal(requestBody.think, false)
-  } finally {
-    global.fetch = originalFetch
-  }
+  assert.equal(rendered, 'Pick from - kitchen\n- garage')
 })
 
-test('queryOllama falls back to extracted thinking output when content empty', async () => {
-  const originalFetch = global.fetch
+test('composeSystemPrompt keeps command contract config-driven', async () => {
+  const { systemPrompt } = await composeSystemPrompt()
 
-  global.fetch = async () =>
-    new Response(
-      JSON.stringify({
-        message: {
-          content: '',
-          thinking: `Need compact reply.
-Let's output something like "{\"command\":\"speak\"}"`,
-        },
-      }),
-      {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      },
-    )
+  assert.equal((systemPrompt.match(/Conditional rules:/g) ?? []).length, 1)
+  assert.equal((systemPrompt.match(/"object_to_detect": string/g) ?? []).length, 1)
+  assert.equal((systemPrompt.match(/"trick": string/g) ?? []).length, 1)
+  assert.doesNotMatch(systemPrompt, /- Base format:/)
+  assert.doesNotMatch(systemPrompt, /User: come here/)
+})
 
-  try {
-    const result = await queryOllama({
-      input: 'say status',
-      modelConfig: {
-        ollamaBaseUrl: 'http://127.0.0.1:11434',
-        model: 'test-model',
-      },
-      systemPrompt: 'system',
-    })
+test('loadPublicConfig exposes active speech profile metadata', async () => {
+  const payload = await loadPublicConfig()
 
-    assert.equal(result, '{"command":"speak"}')
-  } finally {
-    global.fetch = originalFetch
-  }
+  assert.equal(payload.speech.activeProfile.provider, 'whisper-browser')
+  assert.equal(payload.speech.activeProfile.modelId, 'Xenova/whisper-base.en')
+  assert.equal(payload.speech.activeProfile.device, 'webgpu')
+  assert.equal(payload.speech.activeProfile.silenceDurationMs, 500)
+  assert.equal(payload.speech.profileFile, 'config/speech-profiles.json')
+  assert.equal(payload.speech.runtimeFile, 'config/speech-runtime.json')
+  assert.equal(payload.speech.activationPhrasesFile, 'config/activation_phrases.txt')
+  assert.ok(Array.isArray(payload.speech.activationPhrases))
+  assert.ok(payload.speech.activationPhrases.length > 0)
 })

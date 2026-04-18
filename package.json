@@ -11,5 +11,10 @@
     "server": "node server.mjs",
     "cli": "node cli.mjs",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.1.0",
+    "@moonshine-ai/moonshine-js": "^0.1.29",
+    "@ricky0123/vad-web": "^0.0.24"
   }
 }
