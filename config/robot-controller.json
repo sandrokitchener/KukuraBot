@@ -1,0 +1,36 @@
+{
+  "name": "robot controller",
+  "sceneFile": "isaacsim/sim_environment.usd",
+  "rigProfile": "dogzilla_blockout_proxy_v1",
+  "rigRootPrim": "/dogzilla_proxy_blockout/DOGZILLA_PROXY",
+  "bodyPrim": "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link",
+  "waypointsFile": "config/isaacsim-waypoints.json",
+  "jointLimitsFile": "config/dogzilla-proxy-joint-limits.json",
+  "motion": {
+    "linearSpeedMetersPerSecond": 0.12,
+    "angularSpeedDegreesPerSecond": 45,
+    "arrivalToleranceMeters": 0.03,
+    "updateRateHz": 60
+  },
+  "supportedActions": [
+    "robot_controller.goto_waypoint",
+    "robot_controller.move_base",
+    "robot_controller.stop",
+    "robot_controller.pose_body",
+    "robot_controller.play_gait",
+    "articulation.play_named_action",
+    "robot_controller.reset"
+  ],
+  "namedActions": {
+    "backflip": {
+      "durationSeconds": 1.35,
+      "notes": [
+        "Duration drives proxy-rig runtime playback timing for the Isaac blockout scene."
+      ]
+    }
+  },
+  "notes": [
+    "This is the app-facing controller contract scaffold for the Isaac blockout scene.",
+    "The controller script name is 'robot controller' in user-facing config, but the Python file remains robot_controller.py."
+  ]
+}

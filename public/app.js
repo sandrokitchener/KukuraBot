@@ -1,5 +1,6 @@
 import { createSpeechInputController } from './speech-input.js'
 import { createCommandCuePlayer } from './command-cue.js'
+import { splitRecentChatHistory } from './chat-history.js'
 
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
@@ -33,6 +34,7 @@ const emptyMessageRole = document.querySelector('#empty-message-role')
 const emptyMessageBubble = document.querySelector('#empty-message-bubble')
 const emptyMessageMeta = document.querySelector('#empty-message-meta')
 const EMPTY_CHAT_SELECTOR = '.message-empty'
+const MESSAGE_SELECTOR = '.message:not(.message-empty)'
 const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
 const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   silenceDurationMs: 500,
@@ -163,14 +165,16 @@ async function handleChatSubmit(event) {
       throw new Error(payload.error || 'Request failed.')
     }
 
+    const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
+    const completionState = payload.isaacDispatch?.status === 'error' ? 'error' : 'idle'
+
     finishThinkingFeedback(pendingMessage, {
       text: payload.response,
-      meta: `Reply received in ${formatElapsed(Date.now() - thinkingState.startedAt)} via ${payload.profileLabel} (${payload.model}).`,
+      meta: completionMeta,
     })
     playCommandCueIfNeeded(payload.parsed)
-    parsedOutput.textContent =
-      payload.parsed ? JSON.stringify(payload.parsed, null, 2) : 'Not JSON.'
-    setStatus(`Done via ${payload.profileLabel}.`, 'idle')
+    parsedOutput.textContent = formatParsedOutput(payload)
+    setStatus(buildCompletionStatus(payload), completionState)
   } catch (error) {
     finishThinkingFeedback(pendingMessage, {
       text: `Error: ${formatError(error)}`,
@@ -346,6 +350,74 @@ function formatError(error) {
   return String(error)
 }
 
+function buildAssistantMeta(payload, startedAt) {
+  const parts = [
+    `Reply received in ${formatElapsed(Date.now() - startedAt)} via ${payload.profileLabel} (${payload.model}).`,
+  ]
+  const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
+
+  if (isaacSummary) {
+    parts.push(isaacSummary)
+  }
+
+  return parts.join(' ')
+}
+
+function buildCompletionStatus(payload) {
+  const base = `Done via ${payload.profileLabel}.`
+  const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
+
+  return isaacSummary ? `${base} ${isaacSummary}` : base
+}
+
+function formatParsedOutput(payload) {
+  const sections = [
+    payload.parsed ? JSON.stringify(payload.parsed, null, 2) : 'Not JSON.',
+  ]
+
+  if (payload.isaacSim) {
+    sections.push(`Isaac preview:\n${JSON.stringify(payload.isaacSim, null, 2)}`)
+  }
+
+  if (payload.isaacDispatch) {
+    sections.push(`Isaac dispatch:\n${JSON.stringify(payload.isaacDispatch, null, 2)}`)
+  }
+
+  return sections.join('\n\n')
+}
+
+function formatIsaacSummary(isaacSim, isaacDispatch) {
+  if (isaacDispatch?.status === 'sent') {
+    return 'Isaac command sent.'
+  }
+
+  if (isaacDispatch?.status === 'dry-run') {
+    return 'Isaac dispatch dry-run.'
+  }
+
+  if (isaacDispatch?.status === 'preview-not-ready') {
+    return 'Isaac not sent because preview not ready.'
+  }
+
+  if (isaacDispatch?.status === 'disabled') {
+    return 'Isaac transport disabled.'
+  }
+
+  if (isaacDispatch?.status === 'error') {
+    return `Isaac dispatch failed: ${isaacDispatch.error || `HTTP ${isaacDispatch.responseStatus || 'unknown'}`}.`
+  }
+
+  if (isaacSim?.status === 'ready') {
+    return 'Isaac preview ready.'
+  }
+
+  if (isaacSim?.status) {
+    return `Isaac preview ${isaacSim.status}.`
+  }
+
+  return ''
+}
+
 function setSpeechStatus(message, isError = false) {
   speechPanel.dataset.state = isError ? 'error' : 'ready'
   speechStatus.textContent = message
@@ -420,8 +492,9 @@ function appendMessage({ role, text, type, meta, pending = false, error = false 
   metaNode.textContent = meta
 
   article.append(roleNode, bubbleNode, metaNode)
-  chatLog.append(article)
-  scrollChatToBottom()
+  chatLog.prepend(article)
+  trimChatHistory()
+  scrollChatToTop()
   return article
 }
 
@@ -451,7 +524,7 @@ function startThinkingFeedback(messageNode) {
     bubble.textContent = `${phases[phaseIndex]}${dots}`
     meta.textContent = `${formatElapsed(elapsedMs)} elapsed.`
     setStatus(`${appConfig.thinkingStatus} via ${runtimeConfig.activeProfile.label}.`, 'busy', elapsedMs)
-    scrollChatToBottom()
+    scrollChatToTop()
     frame += 1
   }
 
@@ -472,7 +545,7 @@ function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
   messageNode.classList.toggle('message-error', error)
   messageNode.querySelector('.message-bubble').textContent = text
   messageNode.querySelector('.message-meta').textContent = meta
-  scrollChatToBottom()
+  scrollChatToTop()
 }
 
 function setStatus(message, state = 'idle', elapsedMs = null) {
@@ -485,8 +558,17 @@ function formatElapsed(elapsedMs) {
   return `${(elapsedMs / 1000).toFixed(1)}s`
 }
 
-function scrollChatToBottom() {
-  chatLog.scrollTop = chatLog.scrollHeight
+function trimChatHistory() {
+  const messages = Array.from(chatLog.querySelectorAll(MESSAGE_SELECTOR))
+  const { overflow } = splitRecentChatHistory(messages)
+
+  for (const staleMessage of overflow) {
+    staleMessage.remove()
+  }
+}
+
+function scrollChatToTop() {
+  chatLog.scrollTop = 0
 }
 
 function applyAppConfig() {

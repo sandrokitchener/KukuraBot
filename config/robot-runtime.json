@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "dryRun": true,
+  "requiresOperatorConfirmation": true,
+  "robotId": "dogzilla-local",
+  "robotModel": "dogzilla-s1-or-s2",
+  "transport": "ros2-bridge",
+  "selectedMotionProfile": "default",
+  "selectedWaypointSet": "home",
+  "selectedActionMap": "default",
+  "notes": [
+    "Scaffold only. Nothing in the app reads this file yet.",
+    "Leave enabled=false until the real ROS2 bridge path is verified on hardware."
+  ]
+}

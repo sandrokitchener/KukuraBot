@@ -1,0 +1,97 @@
+{
+  "activeProfile": "default",
+  "profiles": {
+    "default": {
+      "protocolVersion": 1,
+      "target": "isaacsim",
+      "commands": {
+        "move": {
+          "action": "robot_controller.goto_waypoint",
+          "requiredFields": [
+            "fields.waypoint"
+          ],
+          "resolvers": [
+            "waypoint",
+            "sceneWaypoint"
+          ],
+          "defaults": {
+            "controller": "robot controller",
+            "navigationMode": "waypoint",
+            "stopOnArrival": true
+          },
+          "payloadTemplate": {
+            "waypointName": "{{fields.waypoint}}",
+            "targetKind": "named_waypoint",
+            "robotWaypoint": "{{waypoint.definition}}",
+            "sceneWaypoint": "{{sceneWaypoint.definition}}"
+          }
+        },
+        "detect": {
+          "action": "perception.detect_in_zone",
+          "requiredFields": [
+            "fields.object_to_detect"
+          ],
+          "resolvers": [
+            "waypoint"
+          ],
+          "defaults": {
+            "sensorRig": "main_camera",
+            "searchMode": "single_pass"
+          },
+          "payloadTemplate": {
+            "label": "{{fields.object_to_detect}}",
+            "searchOrigin": "{{fields.waypoint}}",
+            "searchOriginPose": "{{waypoint.definition}}"
+          }
+        },
+        "trick": {
+          "action": "articulation.play_named_action",
+          "requiredFields": [
+            "fields.trick"
+          ],
+          "resolvers": [
+            "trickAction"
+          ],
+          "defaults": {
+            "playMode": "once",
+            "fallbackPolicy": "reject_unverified"
+          },
+          "payloadTemplate": {
+            "actionName": "{{fields.trick}}",
+            "actionId": "{{trickAction.actionId}}",
+            "actionVerified": "{{trickAction.verified}}"
+          }
+        },
+        "follow": {
+          "action": "robot_controller.move_base",
+          "requiredFields": [
+            "fields.waypoint"
+          ],
+          "resolvers": [
+            "sceneWaypoint"
+          ],
+          "defaults": {
+            "controller": "robot controller",
+            "gait": "walk",
+            "linearX": 0.08,
+            "linearY": 0.0,
+            "angularZ": 0.0
+          },
+          "payloadTemplate": {
+            "targetName": "{{fields.waypoint}}",
+            "sceneWaypoint": "{{sceneWaypoint.definition}}"
+          }
+        },
+        "talk": {
+          "action": "dialog.say",
+          "defaults": {
+            "voice": "default"
+          },
+          "payloadTemplate": {
+            "text": "{{source.rawResponse}}"
+          }
+        }
+      }
+    }
+  }
+}

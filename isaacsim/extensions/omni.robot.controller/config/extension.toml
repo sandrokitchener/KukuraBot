@@ -1,0 +1,17 @@
+[package]
+version = "1.0.0"
+title = "robot controller"
+description = "Autoload robot controller bridge for Isaac Sim"
+category = "Simulation"
+authors = ["OpenAI Codex"]
+keywords = ["robot", "controller", "isaac"]
+
+[core]
+reloadable = true
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.usd" = {}
+
+[[python.module]]
+name = "omni.robot.controller"

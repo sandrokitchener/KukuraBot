@@ -4,9 +4,11 @@ import assert from 'node:assert/strict'
 import {
   composeSystemPrompt,
   loadPublicConfig,
+  processUserInput,
   renderCommandTypes,
   renderTemplate,
   renderCommandFormat,
+  shouldAutoDispatchIsaacSim,
   tryParseJson,
 } from '../lib/app-service.mjs'
 import { normalizeAppConfig } from '../lib/app-config.mjs'
@@ -123,4 +125,34 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.speech.activationPhrasesFile, 'config/activation_phrases.txt')
   assert.ok(Array.isArray(payload.speech.activationPhrases))
   assert.ok(payload.speech.activationPhrases.length > 0)
+})
+
+test('shouldAutoDispatchIsaacSim only enables dispatch when chat dispatch is configured', () => {
+  assert.equal(shouldAutoDispatchIsaacSim(null), false)
+  assert.equal(shouldAutoDispatchIsaacSim({ dispatchPlan: { dispatchOnChat: false } }), false)
+  assert.equal(shouldAutoDispatchIsaacSim({ dispatchPlan: { dispatchOnChat: true } }), true)
+})
+
+test('processUserInput dispatches Isaac command when preview opts into chat dispatch', async () => {
+  let dispatchedPreview = null
+  const result = await processUserInput('go to the garage', {
+    queryModelImpl: async () => '{"command":"move","waypoint":"garage"}',
+    buildIsaacSimPreviewImpl: async () => ({
+      status: 'ready',
+      action: 'robot_controller.goto_waypoint',
+      dispatchPlan: {
+        dispatchOnChat: true,
+      },
+    }),
+    dispatchIsaacSimCommandImpl: async (preview) => {
+      dispatchedPreview = preview
+      return {
+        status: 'sent',
+      }
+    },
+  })
+
+  assert.equal(result.parsed.command, 'move')
+  assert.equal(result.isaacDispatch.status, 'sent')
+  assert.deepEqual(dispatchedPreview, result.isaacSim)
 })

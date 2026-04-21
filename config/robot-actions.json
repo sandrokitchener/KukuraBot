@@ -1,0 +1,40 @@
+{
+  "activeMap": "default",
+  "maps": {
+    "default": {
+      "tricks": {
+        "random": {
+          "actionId": null,
+          "verified": false,
+          "notes": [
+            "Placeholder only. Choose a safe fallback action later."
+          ]
+        },
+        "backflip": {
+          "actionId": "proxy_backflip_v1",
+          "verified": true,
+          "notes": [
+            "Proxy rig-only named action handled by Isaac runtime animation, not hardware DOGZILLA firmware.",
+            "Verified against the current blockout rig animation path."
+          ]
+        },
+        "wave": {
+          "actionId": null,
+          "verified": false,
+          "notes": [
+            "Name kept for future mapping. Real DOGZILLA action id not verified yet."
+          ]
+        }
+      },
+      "system": {
+        "reset_pose": {
+          "actionId": 255,
+          "verified": true,
+          "notes": [
+            "DOGZILLA docs describe action 255 as stop and restore initial posture."
+          ]
+        }
+      }
+    }
+  }
+}

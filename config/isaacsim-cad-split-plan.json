@@ -1,0 +1,55 @@
+{
+  "source": {
+    "fileName": "DOGZILLA S2.STEP",
+    "format": "STEP AP214",
+    "authoringTool": "SolidWorks 2021"
+  },
+  "assessment": {
+    "summary": "Likely usable for CAD import and visual setup, but not likely to arrive as a clean articulated quadruped.",
+    "quickFindings": {
+      "productCount": 1,
+      "advancedFaceCount": 9535,
+      "assemblyUsageCount": 0,
+      "notes": [
+        "Single PRODUCT entry suggests flattened or weak assembly hierarchy.",
+        "Many ADVANCED_FACE entities suggest dense CAD geometry.",
+        "No quick-hit assembly usage entities were found in a simple scan."
+      ]
+    }
+  },
+  "importPlan": {
+    "firstStep": "Import STEP into Isaac Sim CAD Converter and save as USD.",
+    "secondStep": "Inspect imported prim tree before attempting joints or drives.",
+    "thirdStep": "Use Robot Wizard only after identifying candidate link groupings."
+  },
+  "manualLinkBuckets": {
+    "base_link": {
+      "description": "Main torso / chassis shell",
+      "candidatePrimPatterns": []
+    },
+    "head_link": {
+      "description": "Head shell or camera mount shell",
+      "candidatePrimPatterns": []
+    },
+    "front_left_leg": {
+      "description": "Left front leg parts grouped after import review",
+      "candidatePrimPatterns": []
+    },
+    "front_right_leg": {
+      "description": "Right front leg parts grouped after import review",
+      "candidatePrimPatterns": []
+    },
+    "rear_left_leg": {
+      "description": "Left rear leg parts grouped after import review",
+      "candidatePrimPatterns": []
+    },
+    "rear_right_leg": {
+      "description": "Right rear leg parts grouped after import review",
+      "candidatePrimPatterns": []
+    }
+  },
+  "notes": [
+    "Fill candidatePrimPatterns only after first Isaac import reveals real USD prim names.",
+    "Prefer a simple proxy articulation first if CAD hierarchy arrives messy."
+  ]
+}

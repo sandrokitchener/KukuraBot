@@ -1,0 +1,27 @@
+{
+  "bridge": {
+    "enabled": false,
+    "dryRun": true,
+    "packageName": "dogzilla_bridge",
+    "nodeName": "dogzilla_bridge",
+    "namespace": "/dogzilla"
+  },
+  "topics": {
+    "cmdVel": "/dogzilla/cmd_vel",
+    "action": "/dogzilla/action",
+    "stabilize": "/dogzilla/stabilize",
+    "state": "/dogzilla/state"
+  },
+  "services": {
+    "setPose": "/dogzilla/set_pose",
+    "setGait": "/dogzilla/set_gait",
+    "getState": "/dogzilla/get_state"
+  },
+  "actions": {
+    "navigateNamedTarget": "/dogzilla/navigate_named_target"
+  },
+  "notes": [
+    "These are our intended bridge names, not verified Yahboom internal ROS2 interfaces.",
+    "Edit freely once the actual robot-side contract is clearer."
+  ]
+}

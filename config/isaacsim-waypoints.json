@@ -1,0 +1,61 @@
+{
+  "activeSet": "dogzilla_blockout",
+  "sets": {
+    "dogzilla_blockout": {
+      "frame": "world",
+      "waypoints": {
+        "home": {
+          "position": [0.0, 0.0, 0.0],
+          "yawDegrees": 0.0,
+          "verified": true
+        },
+        "living_room": {
+          "position": [0.0, 0.28, 0.0],
+          "yawDegrees": 0.0,
+          "verified": false
+        },
+        "garage": {
+          "position": [0.22, -0.18, 0.0],
+          "yawDegrees": -35.0,
+          "verified": false
+        },
+        "bedroom": {
+          "position": [-82, -806, -0.76],
+          "yawDegrees": 0.0,
+          "verified": false,
+          "notes": [
+            "Placeholder. Replace with your actual sim_environment bedroom coordinates."
+          ]
+        },
+        "front_pad": {
+          "position": [0.0, 0.35, 0.0],
+          "yawDegrees": 0.0,
+          "verified": true
+        },
+        "rear_pad": {
+          "position": [0.0, -0.35, 0.0],
+          "yawDegrees": 180.0,
+          "verified": true
+        },
+        "left_pad": {
+          "position": [-0.22, 0.0, 0.0],
+          "yawDegrees": 90.0,
+          "verified": true
+        },
+        "right_pad": {
+          "position": [0.22, 0.0, 0.0],
+          "yawDegrees": -90.0,
+          "verified": true
+        },
+        "current_position": {
+          "special": "stay_put",
+          "verified": true
+        },
+        "source": {
+          "special": "operator_source",
+          "verified": false
+        }
+      }
+    }
+  }
+}

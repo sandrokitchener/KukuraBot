@@ -1,0 +1,12 @@
+dogzilla_bridge:
+  ros__parameters:
+    enabled: false
+    dry_run: true
+    robot_model: "dogzilla-s1-or-s2"
+    namespace: "/dogzilla"
+    command_timeout_sec: 1.0
+    waypoint_file: "config/robot-waypoints.json"
+    action_file: "config/robot-actions.json"
+    motion_file: "config/robot-motion.json"
+    bridge_contract_file: "config/robot-ros2.json"
+    notes: "Dummy scaffold only. Safe to edit. Not wired into runtime yet."

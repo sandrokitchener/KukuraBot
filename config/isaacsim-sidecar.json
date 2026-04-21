@@ -1,0 +1,42 @@
+{
+  "transport": {
+    "kind": "http",
+    "enabled": true,
+    "dryRun": false,
+    "dispatchOnChat": true,
+    "baseUrl": "http://127.0.0.1:8891",
+    "healthPath": "/healthz",
+    "commandsPath": "/commands",
+    "timeoutMs": 3000
+  },
+  "launch": {
+    "managedByApp": true,
+    "pythonPath": "python",
+    "scriptPath": "sidecars/isaac_bridge/server.py",
+    "scriptArgs": [],
+    "workdir": ".",
+    "sidecarReadyTimeoutMs": 10000,
+    "isaacSimLaunchEnabled": true,
+    "isaacSimLaunchScriptPath": "scripts/launch-isaac-robot-controller.bat",
+    "isaacSimLaunchArgs": [
+      "--/app/window/hideUi=true",
+      "--/app/window/width=960",
+      "--/app/window/height=600"
+    ],
+    "notes": [
+      "npm start now boots sidecar, waits for health, then opens Isaac Sim with robot controller startup flow.",
+      "hideUi startup flag keeps app-launched Isaac Sim in viewport-only mode.",
+      "Window width and height flags keep app-launched Isaac Sim in a small window."
+    ]
+  },
+  "upstream": {
+    "integrationMode": "external-python-sidecar",
+    "isaacEntryPath": "isaacsim/runtime/robot_controller.py",
+    "stagePath": "isaacsim/sim_environment.usd",
+    "notes": [
+      "Best app-facing address is the sidecar baseUrl, not a direct Omniverse project path.",
+      "isaacEntryPath can later point at your Isaac-side Python hook or extension script.",
+      "Stage path should match whichever Isaac scene you want robot controller to drive."
+    ]
+  }
+}

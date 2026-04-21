@@ -1,0 +1,70 @@
+{
+  "timeCodesPerSecond": 24,
+  "startTimeCode": 0,
+  "endTimeCode": 48,
+  "sampleStep": 4,
+  "body": {
+    "baseTranslate": [0.0, 0.0, 0.145],
+    "bobAmplitude": 0.004
+  },
+  "defaults": {
+    "frontHip": -8,
+    "frontUpper": -24,
+    "frontLower": 48,
+    "rearHip": 8,
+    "rearUpper": 24,
+    "rearLower": -48
+  },
+  "gait": {
+    "type": "walk",
+    "phaseOffsets": {
+      "front_left": 0.0,
+      "rear_right": 0.25,
+      "front_right": 0.5,
+      "rear_left": 0.75
+    }
+  },
+  "amplitudes": {
+    "hipSwing": 8,
+    "upperSwing": 10,
+    "upperLift": 10,
+    "lowerSwing": 14,
+    "lowerLift": 22
+  },
+  "ik": {
+    "upperLength": 0.09,
+    "lowerLength": 0.1,
+    "hipShare": 0.25,
+    "stepReach": 0.024,
+    "liftHeight": 0.028,
+    "referenceSpeed": 0.12
+  },
+  "reactions": {
+    "responseRate": 8,
+    "pitchFromForwardSpeed": 16,
+    "pitchFromAcceleration": 0.4,
+    "rollFromLateralSpeed": 18,
+    "rollFromAngularSpeed": -0.08,
+    "heightCompression": 0.01,
+    "bobAmplitude": 0.006,
+    "maxPitchDegrees": 9,
+    "maxRollDegrees": 7
+  },
+  "namedActions": {
+    "backflip": {
+      "durationSeconds": 1.35,
+      "spinDegrees": 360,
+      "launchHeight": 0.085,
+      "crouchDepth": 0.028,
+      "tuckReach": 0.038,
+      "tuckLift": 0.078,
+      "landingStretch": 0.014
+    }
+  },
+  "notes": [
+    "This is a simple stylized walk cycle for the cube blockout, not a physically accurate gait.",
+    "Front and rear legs mirror joint direction around the default standing pose.",
+    "Limits and default pose are based on DOGZILLA docs where possible, but the walk cycle itself is still an animation approximation.",
+    "IK and reaction settings drive the blockout proxy runtime, blending grounded feet with lightweight physics-style body motion."
+  ]
+}

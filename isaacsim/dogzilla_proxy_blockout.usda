@@ -1,0 +1,439 @@
+#usda 1.0
+(
+    customLayerData = {
+        dictionary cameraSettings = {
+            dictionary Front = {
+                double3 position = (5, 0, 0)
+                double radius = 5
+            }
+            dictionary Perspective = {
+                double3 position = (0.9633165658734024, -0.37932998221634967, 0.30096281383673823)
+                double3 target = (-1.65844035985498, 0.5903660689044703, -0.06656433399186695)
+            }
+            dictionary Right = {
+                double3 position = (0, -5, 0)
+                double radius = 5
+            }
+            dictionary Top = {
+                double3 position = (0, 0, 5)
+                double radius = 5
+            }
+            string boundCamera = "/OmniverseKit_Persp"
+        }
+        dictionary omni_layer = {
+            string authoring_layer = "./dogzilla_proxy_blockout.usda"
+        }
+        dictionary renderSettings = {
+        }
+    }
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def Xform "Ground"
+    {
+        double3 xformOp:translate = (0, 0, -0.01)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Xform "DOGZILLA_PROXY" (
+        displayName = "DOGZILLA Proxy Blockout"
+        kind = "assembly"
+    )
+    {
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Xform "body_link"
+        {
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0, 0, 0.145)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+            def Cube "body_visual"
+            {
+                color3f[] primvars:displayColor = [(0.38, 0.4, 0.44)]
+                double size = 1
+                double3 xformOp:scale = (0.115, 0.17, 0.05)
+                uniform token[] xformOpOrder = ["xformOp:scale"]
+            }
+
+            def Xform "front_left_hip"
+            {
+                custom string proxy_joint_role = "hip"
+                custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                custom double proxy_limit_rotateX_max = 25
+                custom double proxy_limit_rotateX_min = -25
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double xformOp:rotateX = -8
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.052, 0.064, -0.01)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                def Cube "hip_visual"
+                {
+                    color3f[] primvars:displayColor = [(0.92, 0.28, 0.28)]
+                    double size = 1
+                    double3 xformOp:scale = (0.02, 0.02, 0.024)
+                    double3 xformOp:translate = (0, 0, -0.012)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                }
+
+                def Xform "front_left_upper"
+                {
+                    custom string proxy_joint_role = "upper"
+                    custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                    custom double proxy_limit_rotateX_max = 45
+                    custom double proxy_limit_rotateX_min = -45
+                    quatd xformOp:orient = (1, 0, 0, 0)
+                    double xformOp:rotateX = -24
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0, 0, -0.024)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                    def Cube "upper_visual"
+                    {
+                        color3f[] primvars:displayColor = [(0.92, 0.35, 0.35)]
+                        double size = 1
+                        double3 xformOp:scale = (0.02, 0.02, 0.065)
+                        double3 xformOp:translate = (0, 0, -0.0325)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                    }
+
+                    def Xform "front_left_lower"
+                    {
+                        custom string proxy_joint_role = "lower"
+                        custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                        custom double proxy_limit_rotateX_max = 70
+                        custom double proxy_limit_rotateX_min = -70
+                        quatd xformOp:orient = (1, 0, 0, 0)
+                        double xformOp:rotateX = 48
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (0, 0, -0.065)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                        def Cube "lower_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.96, 0.47, 0.47)]
+                            double size = 1
+                            double3 xformOp:scale = (0.018, 0.018, 0.075)
+                            double3 xformOp:translate = (0, 0, -0.0375)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+
+                        def Cube "foot_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.98, 0.7, 0.7)]
+                            double size = 1
+                            double3 xformOp:scale = (0.024, 0.024, 0.012)
+                            double3 xformOp:translate = (0, 0, -0.08)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+                    }
+                }
+            }
+
+            def Xform "front_right_hip"
+            {
+                custom string proxy_joint_role = "hip"
+                custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                custom double proxy_limit_rotateX_max = 25
+                custom double proxy_limit_rotateX_min = -25
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double xformOp:rotateX = -8
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.052, 0.064, -0.01)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                def Cube "hip_visual"
+                {
+                    color3f[] primvars:displayColor = [(0.3, 0.78, 0.36)]
+                    double size = 1
+                    double3 xformOp:scale = (0.02, 0.02, 0.024)
+                    double3 xformOp:translate = (0, 0, -0.012)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                }
+
+                def Xform "front_right_upper"
+                {
+                    custom string proxy_joint_role = "upper"
+                    custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                    custom double proxy_limit_rotateX_max = 45
+                    custom double proxy_limit_rotateX_min = -45
+                    quatd xformOp:orient = (1, 0, 0, 0)
+                    double xformOp:rotateX = -24
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0, 0, -0.024)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                    def Cube "upper_visual"
+                    {
+                        color3f[] primvars:displayColor = [(0.4, 0.84, 0.45)]
+                        double size = 1
+                        double3 xformOp:scale = (0.02, 0.02, 0.065)
+                        double3 xformOp:translate = (0, 0, -0.0325)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                    }
+
+                    def Xform "front_right_lower"
+                    {
+                        custom string proxy_joint_role = "lower"
+                        custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                        custom double proxy_limit_rotateX_max = 70
+                        custom double proxy_limit_rotateX_min = -70
+                        quatd xformOp:orient = (1, 0, 0, 0)
+                        double xformOp:rotateX = 48
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (0, 0, -0.065)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                        def Cube "lower_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.56, 0.92, 0.6)]
+                            double size = 1
+                            double3 xformOp:scale = (0.018, 0.018, 0.075)
+                            double3 xformOp:translate = (0, 0, -0.0375)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+
+                        def Cube "foot_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.78, 0.98, 0.8)]
+                            double size = 1
+                            double3 xformOp:scale = (0.024, 0.024, 0.012)
+                            double3 xformOp:translate = (0, 0, -0.08)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+                    }
+                }
+            }
+
+            def Xform "rear_left_hip"
+            {
+                custom string proxy_joint_role = "hip"
+                custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                custom double proxy_limit_rotateX_max = 25
+                custom double proxy_limit_rotateX_min = -25
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double xformOp:rotateX = 8
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.052, -0.064, -0.01)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                def Cube "hip_visual"
+                {
+                    color3f[] primvars:displayColor = [(0.32, 0.52, 0.96)]
+                    double size = 1
+                    double3 xformOp:scale = (0.02, 0.02, 0.024)
+                    double3 xformOp:translate = (0, 0, -0.012)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                }
+
+                def Xform "rear_left_upper"
+                {
+                    custom string proxy_joint_role = "upper"
+                    custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                    custom double proxy_limit_rotateX_max = 45
+                    custom double proxy_limit_rotateX_min = -45
+                    quatd xformOp:orient = (1, 0, 0, 0)
+                    double xformOp:rotateX = 24
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0, 0, -0.024)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                    def Cube "upper_visual"
+                    {
+                        color3f[] primvars:displayColor = [(0.4, 0.62, 0.98)]
+                        double size = 1
+                        double3 xformOp:scale = (0.02, 0.02, 0.065)
+                        double3 xformOp:translate = (0, 0, -0.0325)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                    }
+
+                    def Xform "rear_left_lower"
+                    {
+                        custom string proxy_joint_role = "lower"
+                        custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                        custom double proxy_limit_rotateX_max = 70
+                        custom double proxy_limit_rotateX_min = -70
+                        quatd xformOp:orient = (1, 0, 0, 0)
+                        double xformOp:rotateX = -48
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (0, 0, -0.065)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                        def Cube "lower_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.58, 0.76, 0.99)]
+                            double size = 1
+                            double3 xformOp:scale = (0.018, 0.018, 0.075)
+                            double3 xformOp:translate = (0, 0, -0.0375)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+
+                        def Cube "foot_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.8, 0.88, 1)]
+                            double size = 1
+                            double3 xformOp:scale = (0.024, 0.024, 0.012)
+                            double3 xformOp:translate = (0, 0, -0.08)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+                    }
+                }
+            }
+
+            def Xform "rear_right_hip"
+            {
+                custom string proxy_joint_role = "hip"
+                custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                custom double proxy_limit_rotateX_max = 25
+                custom double proxy_limit_rotateX_min = -25
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double xformOp:rotateX = 8
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.052, -0.064, -0.01)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                def Cube "hip_visual"
+                {
+                    color3f[] primvars:displayColor = [(0.95, 0.78, 0.28)]
+                    double size = 1
+                    double3 xformOp:scale = (0.02, 0.02, 0.024)
+                    double3 xformOp:translate = (0, 0, -0.012)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                }
+
+                def Xform "rear_right_upper"
+                {
+                    custom string proxy_joint_role = "upper"
+                    custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                    custom double proxy_limit_rotateX_max = 45
+                    custom double proxy_limit_rotateX_min = -45
+                    quatd xformOp:orient = (1, 0, 0, 0)
+                    double xformOp:rotateX = 24
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0, 0, -0.024)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                    def Cube "upper_visual"
+                    {
+                        color3f[] primvars:displayColor = [(0.97, 0.84, 0.38)]
+                        double size = 1
+                        double3 xformOp:scale = (0.02, 0.02, 0.065)
+                        double3 xformOp:translate = (0, 0, -0.0325)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                    }
+
+                    def Xform "rear_right_lower"
+                    {
+                        custom string proxy_joint_role = "lower"
+                        custom string proxy_limit_basis = "DOGZILLA docs: 3 servos per leg, single-leg workspace, RViz joint chain; limit is conservative inference"
+                        custom double proxy_limit_rotateX_max = 70
+                        custom double proxy_limit_rotateX_min = -70
+                        quatd xformOp:orient = (1, 0, 0, 0)
+                        double xformOp:rotateX = -48
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (0, 0, -0.065)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX", "xformOp:orient", "xformOp:scale"]
+
+                        def Cube "lower_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.98, 0.9, 0.54)]
+                            double size = 1
+                            double3 xformOp:scale = (0.018, 0.018, 0.075)
+                            double3 xformOp:translate = (0, 0, -0.0375)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+
+                        def Cube "foot_visual"
+                        {
+                            color3f[] primvars:displayColor = [(0.99, 0.95, 0.72)]
+                            double size = 1
+                            double3 xformOp:scale = (0.024, 0.024, 0.012)
+                            double3 xformOp:translate = (0, 0, -0.08)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    def DistantLight "defaultLight"
+    {
+        float inputs:intensity = 2500
+        quatd xformOp:orient = (0.6830127, 0.1830127, 0.1830127, 0.6830127)
+        uniform token[] xformOpOrder = ["xformOp:orient"]
+    }
+}
+
+def "Render" (
+    hide_in_stage_window = true
+    no_delete = true
+)
+{
+    def "OmniverseKit"
+    {
+        def "HydraTextures" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
+                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
+                hide_in_stage_window = true
+                no_delete = true
+            )
+            {
+                rel camera = </OmniverseKit_Persp>
+                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
+                token omni:rtx:background:source:type = "domeLight"
+                bool omni:rtx:dlss:frameGeneration = 0
+                bool omni:rtx:material:db:nonVisualMaterialCSV:enabled = 0
+                bool omni:rtx:material:db:syncLoads = 1
+                token omni:rtx:post:dlss:execMode = "performance"
+                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
+                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
+                bool omni:rtx:pt:lightcache:cached:dontResolveConflicts = 1
+                int omni:rtx:pt:maxSamplesPerLaunch = 2073600
+                int omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
+                bool omni:rtx:rt:demoire = 0
+                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
+                bool omni:rtx:scene:hydra:materialSyncLoads = 1
+                bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
+                uint omni:rtx:viewTile:limit = 4294967295
+                rel orderedVars = </Render/Vars/LdrColor>
+                custom bool overrideClipRange = 0
+                uniform int2 resolution = (1280, 720)
+            }
+        }
+    }
+
+    def RenderSettings "OmniverseGlobalRenderSettings" (
+        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
+        no_delete = true
+    )
+    {
+        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
+    }
+
+    def "Vars"
+    {
+        def RenderVar "LdrColor" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            uniform string sourceName = "LdrColor"
+        }
+    }
+}
+

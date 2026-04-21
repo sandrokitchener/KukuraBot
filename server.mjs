@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadAppConfig } from './lib/app-config.mjs'
+import { buildIsaacSimPreview } from './lib/isaacsim-command-compiler.mjs'
+import { dispatchIsaacSimCommand, getIsaacSidecarHealth } from './lib/isaacsim-sidecar-client.mjs'
 import { loadPublicConfig, processUserInput } from './lib/app-service.mjs'
 import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
 
@@ -75,6 +77,25 @@ createServer(async (request, response) => {
       }
 
       return sendJson(response, 200, await loadPublicConfig())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/isaac/health') {
+      return sendJson(response, 200, await getIsaacSidecarHealth())
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/isaac/dispatch') {
+      const body = await readJsonBody(request)
+      const preview =
+        body?.preview && typeof body.preview === 'object'
+          ? body.preview
+          : await buildIsaacSimPreview({
+            input: body?.input,
+            rawResponse: body?.rawResponse,
+            parsed: body?.parsed,
+          })
+      const dispatch = await dispatchIsaacSimCommand(preview)
+      const statusCode = dispatch.status === 'error' ? 502 : 200
+      return sendJson(response, statusCode, { preview, dispatch })
     }
 
     if (request.method === 'GET') {

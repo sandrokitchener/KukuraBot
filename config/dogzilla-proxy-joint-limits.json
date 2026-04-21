@@ -1,0 +1,37 @@
+{
+  "sourceNotes": [
+    "DOGZILLA docs confirm 3 servos per leg and the leg chain hip -> upper -> lower.",
+    "DOGZILLA docs expose single-leg foot workspace x:[-35,35], y:[-18,18], z:[75,115].",
+    "RViz/URDF docs show lf_hip_joint axis xyz='-1 0 0', so this proxy uses rotateX as the primary joint axis.",
+    "Joint angle limits below are conservative inferred limits, not exact factory hard stops."
+  ],
+  "defaultPose": {
+    "frontLegs": {
+      "hipRotateX": -8,
+      "upperRotateX": -24,
+      "lowerRotateX": 48
+    },
+    "rearLegs": {
+      "hipRotateX": 8,
+      "upperRotateX": 24,
+      "lowerRotateX": -48
+    }
+  },
+  "limits": {
+    "hipRotateX": {
+      "min": -25,
+      "max": 25,
+      "confidence": "inferred"
+    },
+    "upperRotateX": {
+      "min": -45,
+      "max": 45,
+      "confidence": "inferred"
+    },
+    "lowerRotateX": {
+      "min": -70,
+      "max": 70,
+      "confidence": "inferred"
+    }
+  }
+}

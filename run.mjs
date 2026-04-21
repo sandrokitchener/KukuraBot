@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { loadIsaacSidecarConfig } from './lib/isaacsim-config.mjs'
+import { startManagedIsaacEnvironment } from './lib/isaacsim-launcher.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
@@ -8,6 +10,12 @@ const HOST = cliOptions.host || process.env.APP_HOST || process.env.KUKURA_HOST 
 const PORT = Number(cliOptions.port || process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const MODEL_PROFILE = cliOptions.profile || process.env.APP_MODEL_PROFILE || ''
 const APP_URL = `http://${HOST}:${PORT}`
+const isaacSidecarConfig = await loadIsaacSidecarConfig()
+const managedIsaacEnvironment = await startManagedIsaacEnvironment({
+  sidecarConfig: isaacSidecarConfig,
+  rootDir: __dirname,
+  logger: console,
+})
 
 const server = spawn(process.execPath, ['server.mjs'], {
   cwd: __dirname,
@@ -33,6 +41,8 @@ server.once('spawn', () => {
 })
 
 server.on('exit', (code, signal) => {
+  void managedIsaacEnvironment.stop()
+
   if (signal) {
     process.exit(0)
     return
@@ -42,12 +52,15 @@ server.on('exit', (code, signal) => {
 })
 
 server.on('error', (error) => {
+  void managedIsaacEnvironment.stop()
   console.error(`Launcher failed: ${error instanceof Error ? error.message : String(error)}`)
   process.exit(1)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    void managedIsaacEnvironment.stop()
+
     if (!server.killed) {
       server.kill(signal)
     }

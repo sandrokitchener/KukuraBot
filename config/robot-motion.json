@@ -1,0 +1,64 @@
+{
+  "activeProfile": "default",
+  "profiles": {
+    "default": {
+      "gaits": [
+        "walk",
+        "trot"
+      ],
+      "paceModes": [
+        "slow",
+        "normal",
+        "high"
+      ],
+      "limits": {
+        "xStep": {
+          "min": -25,
+          "max": 25
+        },
+        "yStep": {
+          "min": -18,
+          "max": 18
+        },
+        "turnRate": {
+          "min": -100,
+          "max": 100
+        },
+        "bodyX": {
+          "min": -35,
+          "max": 35
+        },
+        "bodyY": {
+          "min": -18,
+          "max": 18
+        },
+        "bodyHeight": {
+          "min": 75,
+          "max": 115
+        },
+        "roll": {
+          "min": -20,
+          "max": 20
+        },
+        "pitch": {
+          "min": -15,
+          "max": 15
+        },
+        "yaw": {
+          "min": -11,
+          "max": 11
+        }
+      },
+      "twistCalibration": {
+        "deadband": 0.05,
+        "linearXFullScaleStep": 25,
+        "linearYFullScaleStep": 18,
+        "angularZFullScaleStep": 100
+      },
+      "notes": [
+        "Ranges above come from DOGZILLA tutorial docs and are meant as editable defaults.",
+        "Twist calibration is dummy scaffolding until the real robot is tuned."
+      ]
+    }
+  }
+}

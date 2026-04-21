@@ -1,0 +1,59 @@
+{
+  "activeSet": "home",
+  "sets": {
+    "home": {
+      "defaultFrame": "map",
+      "waypoints": {
+        "living_room": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "verified": false,
+          "notes": [
+            "Dummy pose. Replace with a real mapped pose later."
+          ]
+        },
+        "garage": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "verified": false,
+          "notes": [
+            "Dummy pose. Replace with a real mapped pose later."
+          ]
+        },
+        "bedroom": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "verified": false,
+          "notes": [
+            "Placeholder. Replace with your actual sim_environment bedroom coordinates."
+          ]
+        },
+        "current_position": {
+          "kind": "special",
+          "mode": "stay_put",
+          "verified": true,
+          "notes": [
+            "Semantic target only. Should not trigger navigation."
+          ]
+        },
+        "source": {
+          "kind": "special",
+          "mode": "operator_source",
+          "verified": false,
+          "notes": [
+            "Placeholder for speaker or operator-relative behavior."
+          ]
+        }
+      }
+    }
+  }
+}
