@@ -64,6 +64,13 @@
             <h2>Speech Input</h2>
             <span id="speech-profile-name" class="speech-chip">Loading...</span>
           </div>
+          <div class="settings-row">
+            <label for="speech-profile-select">Speech profile</label>
+            <select id="speech-profile-select"></select>
+            <button id="save-speech-profile-button" type="button">Use speech profile</button>
+          </div>
+          <p id="speech-lock-note" class="settings-note">Selection saves to config/speech-runtime.json.</p>
+          <div id="speech-settings-status" class="settings-status">Loading speech profiles...</div>
           <p id="speech-status" class="speech-status">Starting microphone...</p>
           <pre id="speech-preview" class="speech-preview">Waiting for microphone.</pre>
           <p id="speech-files" class="speech-files">Speech config files: config/speech-profiles.json, config/speech-runtime.json, config/activation_phrases.txt</p>

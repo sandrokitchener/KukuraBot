@@ -7,6 +7,14 @@ import { buildIsaacSimPreview } from './lib/isaacsim-command-compiler.mjs'
 import { dispatchIsaacSimCommand, getIsaacSidecarHealth } from './lib/isaacsim-sidecar-client.mjs'
 import { loadPublicConfig, processUserInput } from './lib/app-service.mjs'
 import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
+import {
+  resolveActiveSpeechProfile,
+  saveSpeechRuntimeConfig,
+} from './lib/speech-profile-config.mjs'
+import {
+  getSpeechSidecarHealth,
+  transcribeSpeechInput,
+} from './lib/speech-sidecar-client.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
@@ -79,8 +87,68 @@ createServer(async (request, response) => {
       return sendJson(response, 200, await loadPublicConfig())
     }
 
+    if (request.method === 'POST' && requestUrl.pathname === '/api/settings/speech-profile') {
+      const body = await readJsonBody(request)
+      const profileId = typeof body?.profileId === 'string' ? body.profileId.trim() : ''
+
+      if (!profileId) {
+        return sendJson(response, 400, { error: 'Select a speech profile first.' })
+      }
+
+      try {
+        const speechConfig = await resolveActiveSpeechProfile()
+        const profileExists = speechConfig.availableProfiles.some((profile) => profile.id === profileId)
+
+        if (!profileExists) {
+          return sendJson(response, 400, { error: `Unknown speech profile "${profileId}".` })
+        }
+
+        if (speechConfig.selectionLocked) {
+          return sendJson(response, 409, { error: 'Speech profile locked by APP_SPEECH_PROFILE.' })
+        }
+
+        await saveSpeechRuntimeConfig({ activeProfile: profileId })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not update speech profile.'
+        const statusCode = /locked/i.test(message) ? 409 : 400
+        return sendJson(response, statusCode, { error: message })
+      }
+
+      return sendJson(response, 200, await loadPublicConfig())
+    }
+
     if (request.method === 'GET' && requestUrl.pathname === '/api/isaac/health') {
       return sendJson(response, 200, await getIsaacSidecarHealth())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/speech/health') {
+      return sendJson(response, 200, await getSpeechSidecarHealth())
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/speech/transcribe') {
+      const body = await readJsonBody(request)
+      const speechConfig = await resolveActiveSpeechProfile()
+      const activeSpeechProfile = speechConfig.activeProfile
+
+      if (activeSpeechProfile.provider !== 'parakeet-sidecar') {
+        return sendJson(response, 400, {
+          error: `Active speech profile "${activeSpeechProfile.label}" does not use server transcription.`,
+        })
+      }
+
+      const result = await transcribeSpeechInput({
+        audioBase64: typeof body?.audioBase64 === 'string' ? body.audioBase64.trim() : '',
+        mimeType: typeof body?.mimeType === 'string' ? body.mimeType.trim() : 'audio/wav',
+        sampleRate: Number.isFinite(body?.sampleRate) ? body.sampleRate : 16000,
+        timestamps: activeSpeechProfile.timestamps ?? true,
+        modelId: activeSpeechProfile.modelId,
+        language: activeSpeechProfile.language,
+        task: activeSpeechProfile.task,
+        device: activeSpeechProfile.device,
+      })
+
+      const statusCode = result.status === 'ok' ? 200 : result.status === 'invalid-audio' ? 400 : 502
+      return sendJson(response, statusCode, result)
     }
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/isaac/dispatch') {

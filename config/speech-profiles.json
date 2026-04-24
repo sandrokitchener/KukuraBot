@@ -2,7 +2,7 @@
   "defaultProfile": "local_whisper_base_en",
   "profiles": {
     "local_whisper_base_en": {
-      "label": "Whisper Base EN (Browser)",
+      "label": "Whisper Original (Browser)",
       "provider": "whisper-browser",
       "libraryUrl": "/vendor/transformers/transformers.min.js",
       "modelId": "Xenova/whisper-base.en",
@@ -20,6 +20,20 @@
       "speechThreshold": 0.015,
       "autoStart": true,
       "onnxRuntimeBaseUrl": "/vendor/transformers-ort/"
+    },
+    "parakeet_tdt_0_6b_v3": {
+      "label": "Parakeet Test (Sidecar)",
+      "provider": "parakeet-sidecar",
+      "modelId": "nvidia/parakeet-tdt-0.6b-v3",
+      "device": "auto",
+      "timestamps": true,
+      "language": "",
+      "task": "transcribe",
+      "maxBufferSeconds": 20,
+      "silenceDurationMs": 500,
+      "minimumSpeechMs": 300,
+      "speechThreshold": 0.015,
+      "autoStart": true
     },
     "local_moonshine_tiny": {
       "label": "Moonshine Tiny (Local Browser)",

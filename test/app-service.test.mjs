@@ -122,6 +122,7 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.speech.activeProfile.silenceDurationMs, 500)
   assert.equal(payload.speech.profileFile, 'config/speech-profiles.json')
   assert.equal(payload.speech.runtimeFile, 'config/speech-runtime.json')
+  assert.equal(payload.speech.sidecarConfigFile, 'config/speech-sidecar.json')
   assert.equal(payload.speech.activationPhrasesFile, 'config/activation_phrases.txt')
   assert.ok(Array.isArray(payload.speech.activationPhrases))
   assert.ok(payload.speech.activationPhrases.length > 0)

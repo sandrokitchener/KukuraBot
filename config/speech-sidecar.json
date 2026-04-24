@@ -1,0 +1,22 @@
+{
+  "transport": {
+    "kind": "http",
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:8892",
+    "healthPath": "/healthz",
+    "transcribePath": "/transcribe",
+    "timeoutMs": 60000
+  },
+  "launch": {
+    "managedByApp": false,
+    "pythonPath": "python",
+    "scriptPath": "sidecars/parakeet_bridge/server.py",
+    "scriptArgs": [],
+    "workdir": ".",
+    "sidecarReadyTimeoutMs": 120000,
+    "notes": [
+      "Official NVIDIA NeMo support for parakeet-tdt-0.6b-v3 targets Linux environments.",
+      "On Windows, point pythonPath at WSL, Docker, or another Linux-capable runtime before enabling managed startup."
+    ]
+  }
+}

@@ -24,6 +24,20 @@
       "rear_left": 0.75
     }
   },
+  "gaitStyles": {
+    "walk": {
+      "cadence": 0.9
+    },
+    "trot": {
+      "cadence": 1.8
+    },
+    "strafe": {
+      "cadence": 1.25
+    },
+    "turn": {
+      "cadence": 1.15
+    }
+  },
   "amplitudes": {
     "hipSwing": 8,
     "upperSwing": 10,
@@ -36,19 +50,24 @@
     "lowerLength": 0.1,
     "hipShare": 0.25,
     "stepReach": 0.024,
+    "lateralReach": 0.01,
+    "turnReach": 0.012,
+    "hipSway": 0.005,
+    "hipLift": 0.004,
     "liftHeight": 0.028,
-    "referenceSpeed": 0.12
+    "referenceSpeed": 0.12,
+    "referenceAngularSpeedDegrees": 45
   },
   "reactions": {
     "responseRate": 8,
     "pitchFromForwardSpeed": 16,
     "pitchFromAcceleration": 0.4,
-    "rollFromLateralSpeed": 18,
+    "rollFromLateralSpeed": 10,
     "rollFromAngularSpeed": -0.08,
     "heightCompression": 0.01,
     "bobAmplitude": 0.006,
     "maxPitchDegrees": 9,
-    "maxRollDegrees": 7
+    "maxRollDegrees": 5
   },
   "namedActions": {
     "backflip": {

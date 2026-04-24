@@ -7,8 +7,8 @@
                 double radius = 5
             }
             dictionary Perspective = {
-                double3 position = (0.9633165658734024, -0.37932998221634967, 0.30096281383673823)
-                double3 target = (-1.65844035985498, 0.5903660689044703, -0.06656433399186695)
+                double3 position = (0.35559049356923644, 0.32132253810496264, 0.45460711332671455)
+                double3 target = (-0.05178154625773612, 0.03228713522606386, 0.11594164028715415)
             }
             dictionary Right = {
                 double3 position = (0, -5, 0)
@@ -24,6 +24,7 @@
             string authoring_layer = "./dogzilla_proxy_blockout.usda"
         }
         dictionary renderSettings = {
+            token "rtx:rendermode" = "PathTracing"
         }
     }
     defaultPrim = "World"
@@ -363,6 +364,39 @@ def Xform "World"
                     }
                 }
             }
+
+            def Camera "Camera"
+            {
+                float2 clippingRange = (0.01, 10000000)
+                float focalLength = 18.147562
+                float focusDistance = 400
+                quatd xformOp:orient = (0.7069775113905493, 0.7069775113905493, 0.01352029541192474, 0.01352029541192474)
+                double3 xformOp:scale = (0.1, 0.1, 0.1)
+                double3 xformOp:translate = (5.186539044559628e-18, 0.11550547359618948, 0.047201819847612125)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Lidar "Lidar"
+            {
+                bool drawLines = 0
+                bool drawPoints = 0
+                bool enabled = 1
+                bool enableSemantics = 1
+                bool highLod = 0
+                float horizontalFov = 360
+                float horizontalResolution = 0.4
+                float maxRange = 100
+                float minRange = 0.05
+                float rotationRate = 0
+                float verticalFov = 30
+                float verticalResolution = 4
+                token visibility = "inherited"
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.020366225554163078, 0, 0.06955634313453124)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                float yawOffset = 0
+            }
         }
     }
 
@@ -404,12 +438,14 @@ def "Render" (
                 bool omni:rtx:pt:lightcache:cached:dontResolveConflicts = 1
                 int omni:rtx:pt:maxSamplesPerLaunch = 2073600
                 int omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                token omni:rtx:rendermode = "PathTracing"
                 color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
                 bool omni:rtx:rt:demoire = 0
                 bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
                 bool omni:rtx:scene:hydra:materialSyncLoads = 1
                 bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
                 uint omni:rtx:viewTile:limit = 4294967295
+                token omni:rtx:wireframe:mode
                 rel orderedVars = </Render/Vars/LdrColor>
                 custom bool overrideClipRange = 0
                 uniform int2 resolution = (1280, 720)
@@ -436,4 +472,3 @@ def "Render" (
         }
     }
 }
-

@@ -21,6 +21,7 @@ class ProxyRigMotionSolver:
         self.walk_config = walk_config
         self.defaults = walk_config["defaults"]
         self.phase_offsets = walk_config["gait"]["phaseOffsets"]
+        self.gait_styles = walk_config.get("gaitStyles", {})
         self.ik = walk_config.get("ik", {})
         self.reactions = walk_config.get("reactions", {})
         self.named_actions = walk_config.get("namedActions", {})
@@ -29,8 +30,12 @@ class ProxyRigMotionSolver:
         self.lower_length = float(self.ik.get("lowerLength", 0.1))
         self.hip_share = float(self.ik.get("hipShare", 0.25))
         self.step_reach = float(self.ik.get("stepReach", 0.024))
+        self.lateral_reach = float(self.ik.get("lateralReach", 0.018))
+        self.turn_reach = float(self.ik.get("turnReach", 0.018))
+        self.hip_sway = float(self.ik.get("hipSway", 0.012))
         self.lift_height = float(self.ik.get("liftHeight", 0.028))
         self.reference_speed = float(self.ik.get("referenceSpeed", 0.12))
+        self.reference_angular_speed = float(self.ik.get("referenceAngularSpeedDegrees", 45.0))
         self.response_rate = float(self.reactions.get("responseRate", 8.0))
         self.phase = 0.0
         self.filtered_roll = 0.0
@@ -66,11 +71,16 @@ class ProxyRigMotionSolver:
         lateral_speed = float(motion.get("lateralSpeed", 0.0))
         angular_speed = float(motion.get("angularSpeed", 0.0))
         speed_ratio = self._clamp(speed / max(self.reference_speed, 1e-6), 0.0, 1.6)
+        forward_ratio = self._clamp(forward_speed / max(self.reference_speed, 1e-6), -1.6, 1.6)
+        lateral_ratio = self._clamp(lateral_speed / max(self.reference_speed, 1e-6), -1.6, 1.6)
+        turn_ratio = self._clamp(angular_speed / max(self.reference_angular_speed, 1e-6), -1.4, 1.4)
 
         if moving:
-            cadence = 0.9 if gait == "walk" else 1.8
+            gait_style = self._select_gait_style(gait, forward_ratio, lateral_ratio, turn_ratio)
+            cadence = float(self.gait_styles.get(gait_style, {}).get("cadence", 0.9))
             self.phase = (self.phase + dt * cadence * max(0.35, speed_ratio)) % 1.0
         else:
+            gait_style = "idle"
             self.phase = 0.0
 
         acceleration = (speed - self.previous_speed) / dt
@@ -103,15 +113,30 @@ class ProxyRigMotionSolver:
         for leg_name, group in self.LEG_GROUPS.items():
             target_x = self.rest_targets[group]["x"]
             target_z = self.rest_targets[group]["z"]
+            hip_offset_x = 0.0
+            hip_offset_y = 0.0
+            hip_offset_z = 0.0
 
             if moving:
                 phase = (self.phase + self.phase_offsets[leg_name]) % 1.0
                 swing = math.sin(phase * math.tau)
                 lift = max(0.0, math.sin(phase * math.tau))
-                target_x += stride * swing
+                side_sign = self._side_sign(leg_name)
+                fore_sign = self._fore_sign(leg_name)
+                target_x += stride * self._clamp(forward_ratio, -1.0, 1.0) * swing
+                target_x += self.turn_reach * self._clamp(turn_ratio, -1.0, 1.0) * side_sign * swing
                 target_z += lift_height * lift
+                hip_offset_x += self.lateral_reach * self._clamp(lateral_ratio, -1.0, 1.0) * swing
+                hip_offset_x += self.hip_sway * self._clamp(lateral_ratio, -1.0, 1.0) * lift * -side_sign
+                hip_offset_y += self.hip_sway * self._clamp(turn_ratio, -1.0, 1.0) * swing * fore_sign
+                hip_offset_z += float(self.ik.get("hipLift", 0.008)) * lift
 
             legs[leg_name] = self._solve_leg(group, target_x, target_z)
+            legs[leg_name]["hipTranslateOffset"] = [
+                self._clamp(hip_offset_x, -0.035, 0.035),
+                self._clamp(hip_offset_y, -0.025, 0.025),
+                self._clamp(hip_offset_z, 0.0, 0.018),
+            ]
 
         return {
             "body": {
@@ -141,6 +166,7 @@ class ProxyRigMotionSolver:
             target_x = rest["x"] - tuck_reach * tuck + landing_stretch * landing
             target_z = rest["z"] + tuck_lift * tuck
             legs[leg_name] = self._solve_leg(group, target_x, target_z)
+            legs[leg_name]["hipTranslateOffset"] = [0.0, 0.0, 0.0]
 
         return {
             "body": {
@@ -162,6 +188,21 @@ class ProxyRigMotionSolver:
         x = self.upper_length * math.sin(shoulder) + self.lower_length * math.sin(knee)
         z = -(self.upper_length * math.cos(shoulder) + self.lower_length * math.cos(knee))
         return {"x": x, "z": z}
+
+    def _select_gait_style(self, gait: str, forward_ratio: float, lateral_ratio: float, turn_ratio: float) -> str:
+        if abs(turn_ratio) > 0.25 and abs(turn_ratio) >= abs(forward_ratio) + abs(lateral_ratio):
+            return "turn"
+        if abs(lateral_ratio) > 0.35 and abs(lateral_ratio) >= abs(forward_ratio) * 0.7:
+            return "strafe"
+        return "trot" if gait == "trot" else "walk"
+
+    @staticmethod
+    def _side_sign(leg_name: str) -> float:
+        return -1.0 if leg_name.endswith("_left") else 1.0
+
+    @staticmethod
+    def _fore_sign(leg_name: str) -> float:
+        return 1.0 if leg_name.startswith("front_") else -1.0
 
     def _solve_leg(self, group: str, target_x: float, target_z: float) -> dict[str, float]:
         x = float(target_x)

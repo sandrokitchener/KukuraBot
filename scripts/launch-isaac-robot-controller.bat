@@ -10,6 +10,6 @@ echo Launching Isaac Sim with robot controller extension...
 echo Extension folder: %EXT_FOLDER%
 echo Open script: %OPEN_SCRIPT%
 
-call "%ISAAC_SIM_BAT%" --ext-folder "%EXT_FOLDER%" --enable omni.robot.controller --exec "%OPEN_SCRIPT%" %*
+call "%ISAAC_SIM_BAT%" --ext-folder "%EXT_FOLDER%" --enable isaacsim.sensors.physx --enable omni.robot.controller --exec "%OPEN_SCRIPT%" %*
 
 endlocal

@@ -19,14 +19,13 @@
     "isaacSimLaunchEnabled": true,
     "isaacSimLaunchScriptPath": "scripts/launch-isaac-robot-controller.bat",
     "isaacSimLaunchArgs": [
-      "--/app/window/hideUi=true",
-      "--/app/window/width=960",
-      "--/app/window/height=600"
+      "--/app/window/width=640",
+      "--/app/window/height=640"
     ],
     "notes": [
       "npm start now boots sidecar, waits for health, then opens Isaac Sim with robot controller startup flow.",
-      "hideUi startup flag keeps app-launched Isaac Sim in viewport-only mode.",
-      "Window width and height flags keep app-launched Isaac Sim in a small window."
+      "App-managed Isaac launch stays windowed and the open-stage script hides editor panels after startup.",
+      "Window width and height flags keep app-launched Isaac Sim in a tiny square window."
     ]
   },
   "upstream": {

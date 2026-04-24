@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { loadIsaacSidecarConfig } from './lib/isaacsim-config.mjs'
 import { startManagedIsaacEnvironment } from './lib/isaacsim-launcher.mjs'
+import { loadSpeechSidecarConfig } from './lib/speech-sidecar-config.mjs'
+import { startManagedSpeechSidecar } from './lib/speech-sidecar-launcher.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
@@ -11,8 +13,14 @@ const PORT = Number(cliOptions.port || process.env.APP_PORT || process.env.KUKUR
 const MODEL_PROFILE = cliOptions.profile || process.env.APP_MODEL_PROFILE || ''
 const APP_URL = `http://${HOST}:${PORT}`
 const isaacSidecarConfig = await loadIsaacSidecarConfig()
+const speechSidecarConfig = await loadSpeechSidecarConfig()
 const managedIsaacEnvironment = await startManagedIsaacEnvironment({
   sidecarConfig: isaacSidecarConfig,
+  rootDir: __dirname,
+  logger: console,
+})
+const managedSpeechEnvironment = await startManagedSpeechSidecar({
+  sidecarConfig: speechSidecarConfig,
   rootDir: __dirname,
   logger: console,
 })
@@ -41,6 +49,7 @@ server.once('spawn', () => {
 })
 
 server.on('exit', (code, signal) => {
+  void managedSpeechEnvironment.stop()
   void managedIsaacEnvironment.stop()
 
   if (signal) {
@@ -52,6 +61,7 @@ server.on('exit', (code, signal) => {
 })
 
 server.on('error', (error) => {
+  void managedSpeechEnvironment.stop()
   void managedIsaacEnvironment.stop()
   console.error(`Launcher failed: ${error instanceof Error ? error.message : String(error)}`)
   process.exit(1)
@@ -59,6 +69,7 @@ server.on('error', (error) => {
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    void managedSpeechEnvironment.stop()
     void managedIsaacEnvironment.stop()
 
     if (!server.killed) {

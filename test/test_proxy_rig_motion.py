@@ -83,6 +83,63 @@ class ProxyRigMotionSolverTests(unittest.TestCase):
             self.assertGreaterEqual(leg_pose["lower"], -70.0)
             self.assertLessEqual(leg_pose["lower"], 70.0)
 
+    def test_strafe_pose_offsets_hips_and_leans_body(self):
+        self.solver.phase = 0.12
+        pose = self.solver.evaluate(
+            {
+                "status": "manual_move",
+                "gait": "walk",
+                "bodyPose": {
+                    "height_offset": 0.0,
+                    "roll_degrees": 0.0,
+                    "pitch_degrees": 0.0,
+                },
+                "motion": {
+                    "moving": True,
+                    "speed": 0.12,
+                    "forwardSpeed": 0.0,
+                    "lateralSpeed": 0.12,
+                    "angularSpeed": 0.0,
+                },
+                "activeAction": None,
+            },
+            1.0 / 24.0,
+        )
+
+        offsets = [leg["hipTranslateOffset"][0] for leg in pose["legs"].values()]
+        self.assertTrue(any(abs(offset) > 0.004 for offset in offsets))
+        self.assertNotAlmostEqual(pose["body"]["rollDegrees"], 0.0)
+        self.assertNotIn("yawDegrees", pose["body"])
+
+    def test_turn_pose_moves_left_and_right_legs_differently(self):
+        self.solver.phase = 0.2
+        pose = self.solver.evaluate(
+            {
+                "status": "manual_move",
+                "gait": "walk",
+                "bodyPose": {
+                    "height_offset": 0.0,
+                    "roll_degrees": 0.0,
+                    "pitch_degrees": 0.0,
+                },
+                "motion": {
+                    "moving": True,
+                    "speed": 0.02,
+                    "forwardSpeed": 0.0,
+                    "lateralSpeed": 0.0,
+                    "angularSpeed": 45.0,
+                },
+                "activeAction": None,
+            },
+            1.0 / 24.0,
+        )
+
+        front_left = pose["legs"]["front_left"]
+        front_right = pose["legs"]["front_right"]
+        self.assertNotAlmostEqual(front_left["hip"], front_right["hip"])
+        self.assertTrue(any(abs(leg["hipTranslateOffset"][1]) > 0.002 for leg in pose["legs"].values()))
+        self.assertNotIn("yawDegrees", pose["body"])
+
     def test_backflip_pose_rotates_body_and_tucks_legs(self):
         pose = self.solver.evaluate(
             {

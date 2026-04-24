@@ -19,6 +19,10 @@ const profileLockNote = document.querySelector('#profile-lock-note')
 const settingsStatus = document.querySelector('#settings-status')
 const speechPanel = document.querySelector('.speech-panel')
 const speechProfileName = document.querySelector('#speech-profile-name')
+const speechProfileSelect = document.querySelector('#speech-profile-select')
+const saveSpeechProfileButton = document.querySelector('#save-speech-profile-button')
+const speechLockNote = document.querySelector('#speech-lock-note')
+const speechSettingsStatus = document.querySelector('#speech-settings-status')
 const speechStatus = document.querySelector('#speech-status')
 const speechPreview = document.querySelector('#speech-preview')
 const speechFiles = document.querySelector('#speech-files')
@@ -73,6 +77,7 @@ let runtimeConfig = {
     availableProfiles: [],
     profileFile: 'config/speech-profiles.json',
     runtimeFile: 'config/speech-runtime.json',
+    sidecarConfigFile: 'config/speech-sidecar.json',
     activationPhrasesFile: 'config/activation_phrases.txt',
     activationPhrases: DEFAULT_ACTIVATION_PHRASES,
   },
@@ -83,20 +88,19 @@ boot()
 
 form.addEventListener('submit', handleChatSubmit)
 saveProfileButton.addEventListener('click', handleProfileSave)
+saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 
 async function boot() {
   try {
     const payload = await fetchConfig()
     applyPayload(payload)
-    speechController = await createSpeechInputController({
-      input,
-      speechConfig: runtimeConfig.speech,
-      onStatus: setSpeechStatus,
-      onTranscript: updateSpeechPreview,
-      onVoiceCommand: handleVoiceCommand,
-      submitLabel: appConfig.sendButtonLabel,
-    })
-    await speechController.start()
+
+    try {
+      await initializeSpeechController()
+    } catch (error) {
+      setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
+    }
+
     setStatus(`Ready on ${runtimeConfig.activeProfile.label}.`)
   } catch (error) {
     setStatus(`Config load failed: ${formatError(error)}`, 'error')
@@ -233,6 +237,71 @@ async function handleProfileSave() {
   }
 }
 
+async function handleSpeechProfileSave() {
+  const nextProfileId = speechProfileSelect.value
+  const activeSpeechProfile = runtimeConfig.speech.activeProfile
+
+  if (!nextProfileId) {
+    speechSettingsStatus.textContent = 'Select a speech profile first.'
+    return
+  }
+
+  if (nextProfileId === activeSpeechProfile?.id) {
+    speechSettingsStatus.textContent = `Already using ${activeSpeechProfile.label}.`
+    return
+  }
+
+  saveSpeechProfileButton.disabled = true
+  speechProfileSelect.disabled = true
+  speechSettingsStatus.textContent = 'Saving speech profile...'
+
+  try {
+    const response = await fetch('/api/settings/speech-profile', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ profileId: nextProfileId }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not update speech profile.')
+    }
+
+    applyPayload(payload)
+    try {
+      await initializeSpeechController()
+      speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label}.`
+    } catch (error) {
+      speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label} with speech error.`
+      setSpeechStatus(formatError(error), true)
+    }
+    setStatus(`Speech profile changed to ${runtimeConfig.speech.activeProfile.label}.`)
+  } catch (error) {
+    speechSettingsStatus.textContent = formatError(error)
+    setSpeechStatus(formatError(error), true)
+  } finally {
+    const locked = runtimeConfig.speech.activeProfile?.selectionLocked
+    speechProfileSelect.disabled = locked
+    saveSpeechProfileButton.disabled = locked
+  }
+}
+
+async function initializeSpeechController() {
+  await speechController?.dispose?.()
+  speechController?.stop?.()
+  speechController = await createSpeechInputController({
+    input,
+    speechConfig: runtimeConfig.speech,
+    onStatus: setSpeechStatus,
+    onTranscript: updateSpeechPreview,
+    onVoiceCommand: handleVoiceCommand,
+    submitLabel: appConfig.sendButtonLabel,
+  })
+  await speechController.start()
+}
+
 async function fetchConfig() {
   const response = await fetch('/api/config')
   const payload = await response.json()
@@ -266,7 +335,7 @@ function applyPayload(payload) {
 
 function applyModelConfig(payload) {
   profileName.textContent = runtimeConfig.activeProfile.label
-  profileSource.textContent = `Source: ${formatProfileSource(runtimeConfig.activeProfile.source)}`
+  profileSource.textContent = `Source: ${formatSource(runtimeConfig.activeProfile.source)}`
   providerName.textContent = runtimeConfig.activeProfile.provider
   modelName.textContent = payload.model || runtimeConfig.activeProfile.model
   promptFile.textContent = payload.systemPromptFile
@@ -282,7 +351,9 @@ function applySpeechConfig() {
 
   speechProfileName.textContent = activeSpeechProfile?.label || 'Speech unavailable'
   speechFiles.textContent =
-    `Speech config files: ${runtimeConfig.speech.profileFile}, ${runtimeConfig.speech.runtimeFile}, ${runtimeConfig.speech.activationPhrasesFile}`
+    `Speech config files: ${runtimeConfig.speech.profileFile}, ${runtimeConfig.speech.runtimeFile}, ${runtimeConfig.speech.sidecarConfigFile}, ${runtimeConfig.speech.activationPhrasesFile}`
+  renderSpeechProfileOptions()
+  applySpeechSelectionState()
 
   if (!activeSpeechProfile) {
     setSpeechStatus('No speech profile configured.', true)
@@ -304,6 +375,21 @@ function applySpeechConfig() {
     return
   }
 
+  if (activeSpeechProfile.provider === 'parakeet-sidecar') {
+    const activationPhrases = runtimeConfig.speech.activationPhrases?.join(', ') || 'none'
+
+    speechPreview.textContent =
+      `Listening mode: buffered local recording\n` +
+      `Model: ${activeSpeechProfile.modelId}\n` +
+      `Runtime: local Parakeet sidecar\n` +
+      `Device: ${activeSpeechProfile.device || 'auto'}\n` +
+      `Activation phrases: ${activationPhrases}\n` +
+      `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
+      `Manual fallback: click ${appConfig.sendButtonLabel}\n` +
+      `Timestamps: ${activeSpeechProfile.timestamps ? 'enabled' : 'disabled'}`
+    return
+  }
+
   speechPreview.textContent =
     `Listening mode: ${activeSpeechProfile.useVad ? 'VAD commits' : 'streaming updates'}\n` +
     `Model path: ${activeSpeechProfile.modelUrl}`
@@ -321,6 +407,18 @@ function renderProfileOptions() {
   }
 }
 
+function renderSpeechProfileOptions() {
+  speechProfileSelect.replaceChildren()
+
+  for (const profile of runtimeConfig.speech.availableProfiles) {
+    const option = document.createElement('option')
+    option.value = profile.id
+    option.textContent = `${profile.label} (${profile.provider})`
+    option.selected = profile.id === runtimeConfig.speech.activeProfile?.id
+    speechProfileSelect.append(option)
+  }
+}
+
 function applyProfileSelectionState() {
   const locked = runtimeConfig.activeProfile.selectionLocked
   profileSelect.disabled = locked
@@ -331,7 +429,19 @@ function applyProfileSelectionState() {
   settingsStatus.textContent = `Using ${runtimeConfig.activeProfile.label} (${runtimeConfig.activeProfile.model}).`
 }
 
-function formatProfileSource(source) {
+function applySpeechSelectionState() {
+  const locked = runtimeConfig.speech.activeProfile?.selectionLocked
+  speechProfileSelect.disabled = locked
+  saveSpeechProfileButton.disabled = locked
+  speechLockNote.textContent = locked
+    ? 'Speech profile locked by APP_SPEECH_PROFILE.'
+    : 'Selection saves to config/speech-runtime.json.'
+  if (runtimeConfig.speech.activeProfile) {
+    speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label}.`
+  }
+}
+
+function formatSource(source) {
   switch (source) {
     case 'override':
       return 'startup override'
@@ -364,10 +474,14 @@ function buildAssistantMeta(payload, startedAt) {
 }
 
 function buildCompletionStatus(payload) {
-  const base = `Done via ${payload.profileLabel}.`
+  const parts = [`Done via ${payload.profileLabel}.`]
   const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
 
-  return isaacSummary ? `${base} ${isaacSummary}` : base
+  if (isaacSummary) {
+    parts.push(isaacSummary)
+  }
+
+  return parts.join(' ')
 }
 
 function formatParsedOutput(payload) {
@@ -411,7 +525,7 @@ function formatIsaacSummary(isaacSim, isaacDispatch) {
     return 'Isaac preview ready.'
   }
 
-  if (isaacSim?.status) {
+  if (isaacSim?.status && isaacSim.status !== 'no-command') {
     return `Isaac preview ${isaacSim.status}.`
   }
 
