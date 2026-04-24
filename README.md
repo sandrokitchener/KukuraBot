@@ -1,141 +1,303 @@
-# Robot Test App
+# Robo-Doge Command App + Isaac Layer
 
-Tiny local test UI for a rename-friendly robot-control wrapper with switchable local or network-served model profiles.
+This branch documents and ships the command app, speech input, and Isaac Sim path.
 
-## What it does
+It does **not** include the ROS2 implementation layer. That work stays separate.
 
-- Sends your typed message to whichever configured model profile is active.
-- Loads the assistant system prompt from `config/system-prompt.txt`.
-- Loads the command JSON format spec from `config/command-response-format.json`.
-- Loads extra command-category guidance from `config/command-types.txt`.
-- Loads valid waypoint guidance from `config/valid-waypoints.txt`.
-- Loads model profiles from `config/model-profiles.json`.
-- Loads active profile selection from `config/runtime.json`.
-- Loads speech-input profiles from `config/speech-profiles.json`.
-- Loads active speech-input selection from `config/speech-runtime.json`.
-- Loads Parakeet sidecar transport config from `config/speech-sidecar.json`.
-- Loads activation phrases from `config/activation_phrases.txt`.
-- Shows both the raw model reply and parsed JSON when the reply is valid JSON.
-- Compiles parsed JSON into an Isaac Sim sidecar preview envelope using editable mapping config.
-- Supports `ollama` profiles and `openai-compatible` profiles, which is useful for llama.cpp or other GGUF-serving endpoints.
-- Runs modular speech-to-text with swappable providers, including browser Whisper, browser Moonshine, and Parakeet through a local sidecar.
+## What This Branch Does
 
-## Why this structure
+- Runs a local browser app for natural-language robot commands.
+- Sends prompts to the active model profile.
+- Parses command JSON from model output.
+- Compiles parsed commands into Isaac Sim preview envelopes.
+- Optionally auto-dispatches those envelopes to the Isaac sidecar.
+- Supports browser speech input plus local Parakeet sidecar speech input.
 
-- `server.mjs` owns model calls and prompt composition.
-- `public/` is just a tiny UI layer.
-- Isaac-side translation is kept in separate config and sidecar scaffolding so robot/sim transport stays out of prompt logic.
-- Later voice input/output can call the same `/api/chat` backend without changing the prompt plumbing.
+## Repo Layout
 
-## Run on desktop
+- `server.mjs`
+  HTTP server and API routes.
+- `run.mjs`
+  Desktop launcher. Starts speech and Isaac sidecars, then opens the app.
+- `public/`
+  Small browser UI.
+- `lib/app-service.mjs`
+  Prompt composition and command-processing path.
+- `lib/isaacsim-*.mjs`
+  Isaac config, compile, client, and launch helpers.
+- `lib/speech-*.mjs`
+  Speech profile, sidecar, and launch helpers.
+- `sidecars/isaac_bridge/`
+  Isaac HTTP relay.
+- `sidecars/parakeet_bridge/`
+  Speech-to-text HTTP relay.
+- `isaacsim/runtime/`
+  Isaac controller and startup scripts.
+
+## Prerequisites
+
+## Node
+
+- Node.js 20+ recommended
+- `npm install`
+
+## Model backend
+
+Configure at least one model profile in:
+
+- `config/model-profiles.json`
+
+Examples already supported:
+
+- `ollama`
+- `openai-compatible`
+
+Active profile selection lives in:
+
+- `config/runtime.json`
+
+## Isaac Sim
+
+You need a working Isaac Sim install reachable by:
+
+- `scripts/launch-isaac-robot-controller.bat`
+
+This branch assumes Isaac launch is controlled through:
+
+- `config/isaacsim-sidecar.json`
+- `scripts/launch-isaac-robot-controller.bat`
+
+If your Isaac path or launch args differ, change those files instead of patching app code.
+
+## Speech
+
+Speech profiles live in:
+
+- `config/speech-profiles.json`
+
+Speech runtime selection lives in:
+
+- `config/speech-runtime.json`
+
+Parakeet sidecar transport lives in:
+
+- `config/speech-sidecar.json`
+
+Activation phrases live in:
+
+- `config/activation_phrases.txt`
+
+## First-Time Setup
+
+1. Install dependencies:
 
 ```bash
-cd <project-folder>
+npm install
+```
+
+2. Check model profiles:
+
+- `config/model-profiles.json`
+- `config/runtime.json`
+
+3. Check speech profiles:
+
+- `config/speech-profiles.json`
+- `config/speech-runtime.json`
+- `config/speech-sidecar.json`
+
+4. Check Isaac config:
+
+- `config/isaacsim-command-map.json`
+- `config/isaacsim-sidecar.json`
+- `config/isaacsim-waypoints.json`
+- `config/robot-controller.json`
+
+5. If needed, edit the launcher:
+
+- `scripts/launch-isaac-robot-controller.bat`
+
+## Run
+
+## Desktop app
+
+```bash
 npm start
 ```
 
-That one command starts server and opens browser to local app automatically.
-It also starts local Isaac Python sidecar, waits for sidecar health, and launches Isaac Sim through `scripts/launch-isaac-robot-controller.bat`.
-Default app-managed Isaac launch opens `isaacsim/sim_environment.usd`, enables the PhysX sensor extension, and passes `--/app/window/width=640` plus `--/app/window/height=640`.
-The Isaac startup script hides editor panels after the stage opens, leaving a compact viewport-focused window.
+This does:
 
-To force a profile just for this run:
+1. starts speech sidecar when configured
+2. starts Isaac sidecar when configured
+3. waits for sidecar health
+4. launches Isaac Sim through the checked-in batch script
+5. starts browser app
 
-```bash
-npm start -- --profile home_llama_gguf
-```
-
-If you want direct raw server process instead:
-
-```bash
-node server.mjs
-```
-
-Then open:
+Default app URL:
 
 ```text
 http://127.0.0.1:3037
 ```
 
-## Run on Raspberry Pi 5
-
-This app now uses only Node built-ins in runtime code, so it can run on a Pi with a normal Node install.
+## Force one model profile for a run
 
 ```bash
-cd <project-folder>
+npm start -- --profile home_llama_gguf
+```
+
+## Raw server only
+
+```bash
+node server.mjs
+```
+
+## Pi or LAN-hosted app
+
+```bash
 npm run start:pi
 ```
 
-Then open it from another machine on your LAN:
+Then open:
 
 ```text
 http://<raspberry-pi-ip>:3037
 ```
 
-If you want a quick terminal-only test on the Pi:
+## CLI smoke test
 
 ```bash
-node cli.mjs "check the kitchen"
+node cli.mjs "go to the living room"
 ```
 
-## Why this is Pi-friendly now
+## App Behavior
 
-- The Ollama/prompt/schema logic lives in `lib/app-service.mjs`.
-- Model profile resolution lives in `lib/model-profile-config.mjs`.
-- Provider-specific request code lives in `lib/model-client.mjs`.
-- The browser UI is just one client of that service.
-- A future voice process on the Pi can call the same service functions or the same `/api/chat` route.
-- No Bun-specific runtime features are required anymore.
+Current flow:
 
-## Editable files
+1. user enters text or speech
+2. backend composes system prompt from config
+3. active model returns text
+4. app tries to parse JSON
+5. Isaac compiler builds preview envelope
+6. if Isaac dispatch is enabled, app posts preview to Isaac sidecar
+
+Useful API routes:
+
+- `GET /api/config`
+- `POST /api/chat`
+- `POST /api/settings/profile`
+- `POST /api/settings/speech-profile`
+- `GET /api/isaac/health`
+- `GET /api/speech/health`
+- `POST /api/isaac/dispatch`
+- `POST /api/speech/transcribe`
+
+## Important Config Files
+
+## Prompt and command contract
 
 - `config/system-prompt.txt`
 - `config/command-response-format.json`
 - `config/command-types.txt`
 - `config/valid-waypoints.txt`
+
+## Model selection
+
 - `config/model-profiles.json`
 - `config/runtime.json`
+
+## Speech
+
 - `config/speech-profiles.json`
 - `config/speech-runtime.json`
 - `config/speech-sidecar.json`
 - `config/activation_phrases.txt`
-- `config/app.json`
+
+## Isaac
+
 - `config/isaacsim-command-map.json`
 - `config/isaacsim-sidecar.json`
 - `config/isaacsim-cad-split-plan.json`
+- `config/isaacsim-waypoints.json`
+- `config/robot-controller.json`
+- `config/isaacsim-proxy-rig.json`
+- `config/dogzilla-proxy-walk-cycle.json`
 
-If you rename assistant/app branding, edit `config/app.json`.
-If you add or tune model backends, edit `config/model-profiles.json`.
-If you want a different default selected profile, edit `config/runtime.json`.
-If you want to swap speech input engines later, start with `config/speech-profiles.json`.
-Runtime speech profile selection now saves to `config/speech-runtime.json` from app UI, so you can flip between `Whisper Original (Browser)` and `Parakeet Test (Sidecar)` inside app.
-Parakeet sidecar transport and launch options live in `config/speech-sidecar.json`.
-Whisper browser mode buffers local mic audio and transcribes it when you click `Send`.
-Parakeet mode uses same buffered recorder flow, but sends captured audio to `sidecars/parakeet_bridge/server.py`.
-Activation phrases for auto-send voice commands live in `config/activation_phrases.txt`.
-Isaac Sim translation rules live in `config/isaacsim-command-map.json`.
-Isaac sidecar transport settings live in `config/isaacsim-sidecar.json`.
+## How To Tweak Behavior
 
-## Isaac Sim Scaffold
+## Change assistant/app naming
 
-This repo now includes a thin Isaac Sim scaffold:
+Edit:
 
-- `/api/chat` returns an `isaacSim` preview object alongside parsed command JSON
-- `/api/chat` also auto-dispatches ready Isaac commands when `config/isaacsim-sidecar.json` has `dispatchOnChat` enabled
-- `GET /api/isaac/health` probes the local Python sidecar config
-- `POST /api/isaac/dispatch` sends a compiled envelope to the sidecar when enabled
-- `sidecars/isaac_bridge/server.py` is an HTTP-to-command-log relay for the Isaac runtime
+- `config/app.json`
 
-Current desktop default:
+## Change command schema or guidance
 
-- sidecar transport enabled
-- dispatch on chat enabled
-- app-managed launch enabled for sidecar + Isaac Sim
+Edit:
 
-If you want preview-only mode again, edit `config/isaacsim-sidecar.json` and toggle:
+- `config/command-response-format.json`
+- `config/command-types.txt`
+- `config/valid-waypoints.txt`
+- `config/system-prompt.txt`
+
+## Change speech engine
+
+Edit:
+
+- `config/speech-profiles.json`
+- `config/speech-runtime.json`
+
+Or switch inside app UI.
+
+## Change Isaac dispatch behavior
+
+Edit:
+
+- `config/isaacsim-sidecar.json`
+
+Main toggles:
 
 - `transport.enabled`
 - `transport.dryRun`
 - `transport.dispatchOnChat`
 - `launch.managedByApp`
 - `launch.isaacSimLaunchEnabled`
+
+## Change waypoint mapping
+
+Edit:
+
+- `config/isaacsim-waypoints.json`
+
+Keep waypoint names aligned with:
+
+- `config/valid-waypoints.txt`
+
+## Testing
+
+Run Node tests:
+
+```bash
+node --test
+```
+
+Run Python syntax smoke checks for Isaac runtime files:
+
+```bash
+python -m py_compile isaacsim/runtime/open_sim_environment.py isaacsim/runtime/proxy_rig_motion.py isaacsim/runtime/robot_controller.py isaacsim/runtime/robot_controller_startup.py
+```
+
+## Branch Boundary
+
+This branch intentionally includes:
+
+- command app changes
+- speech sidecar path
+- Isaac controller/runtime path
+
+This branch intentionally excludes:
+
+- ROS2 bridge/runtime implementation
+- ROS2 setup docs
+- ROS2 launch helpers
+
+That split keeps GitHub review focused on the command and Isaac layers only.
