@@ -3,7 +3,7 @@
   "rigs": {
     "dogzilla_blockout_proxy_v1": {
       "sceneFile": "isaacsim/sim_environment.usd",
-      "worldPrim": "/World",
+      "worldPrim": "/ObstacleRoom",
       "simRootPrim": "/dogzilla_proxy_blockout/DOGZILLA_PROXY",
       "links": {
         "body": "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link",
@@ -21,19 +21,9 @@
         "rearRightLower": "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link/rear_right_hip/rear_right_upper/rear_right_lower"
       },
       "notes": [
-        "Fresh cube-only blockout proxy scene, used from sim_environment.usd.",
+        "Fresh cube-only blockout proxy scene, now wrapped in a local room scene at sim_environment.usd.",
         "Uses 3 joint points per leg because DOGZILLA docs expose 3 servo IDs per leg.",
-        "Fine adjustment should happen directly in Isaac before adding limits or physics."
-      ]
-    },
-    "dogzilla_blockout_walk_v1": {
-      "sceneFile": "isaacsim/dogzilla_proxy_blockout_walk.usda",
-      "worldPrim": "/World",
-      "simRootPrim": "/dogzilla_proxy_blockout/DOGZILLA_PROXY",
-      "notes": [
-        "Animated walk-cycle overlay on top of the cube blockout scene.",
-        "This is a time-sampled stylized gait, not a physics controller.",
-        "Regenerate from config with isaacsim/scripts/generate_proxy_walk_cycle.py after gait edits."
+        "Runtime currently translates the proxy root/body only while other authored sensors remain in the scene."
       ]
     }
   }

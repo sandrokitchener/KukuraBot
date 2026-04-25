@@ -13,15 +13,32 @@ const promptFile = document.querySelector('#prompt-file')
 const schemaFile = document.querySelector('#schema-file')
 const commandTypesFile = document.querySelector('#command-types-file')
 const waypointsFile = document.querySelector('#waypoints-file')
+const runtimeTargetName = document.querySelector('#runtime-target-name')
+const runtimeTargetSource = document.querySelector('#runtime-target-source')
+const robotRuntimeFile = document.querySelector('#robot-runtime-file')
+const robotRos2File = document.querySelector('#robot-ros2-file')
 const profileSelect = document.querySelector('#profile-select')
 const saveProfileButton = document.querySelector('#save-profile-button')
 const profileLockNote = document.querySelector('#profile-lock-note')
 const settingsStatus = document.querySelector('#settings-status')
+const robotTargetSelect = document.querySelector('#robot-target-select')
+const saveRobotTargetButton = document.querySelector('#save-robot-target-button')
+const robotTargetLockNote = document.querySelector('#robot-target-lock-note')
+const robotTargetStatus = document.querySelector('#robot-target-status')
 const speechPanel = document.querySelector('.speech-panel')
 const speechProfileName = document.querySelector('#speech-profile-name')
+const speechProfileSelect = document.querySelector('#speech-profile-select')
+const saveSpeechProfileButton = document.querySelector('#save-speech-profile-button')
+const speechLockNote = document.querySelector('#speech-lock-note')
+const speechSettingsStatus = document.querySelector('#speech-settings-status')
 const speechStatus = document.querySelector('#speech-status')
 const speechPreview = document.querySelector('#speech-preview')
 const speechFiles = document.querySelector('#speech-files')
+const runtimePanel = document.querySelector('.runtime-panel')
+const runtimeTargetChip = document.querySelector('#runtime-target-chip')
+const runtimeFeedbackStatus = document.querySelector('#runtime-feedback-status')
+const runtimeFeedbackOutput = document.querySelector('#runtime-feedback-output')
+const runtimeFiles = document.querySelector('#runtime-files')
 const form = document.querySelector('#chat-form')
 const input = document.querySelector('#user-input')
 const sendButton = document.querySelector('#send-button')
@@ -41,8 +58,28 @@ const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   minimumSpeechMs: 300,
   speechThreshold: 0.015,
 }
+const DEFAULT_ROBOT_RUNTIME = {
+  activeTarget: {
+    id: 'isaacsim',
+    label: 'Isaac Sim',
+    kind: 'isaacsim',
+    source: 'runtime',
+    selectionLocked: false,
+  },
+  availableTargets: [],
+  enabled: true,
+  dryRun: true,
+  runtimeFile: 'config/robot-runtime.json',
+  ros2ConfigFile: 'config/robot-ros2.json',
+  waypointsFile: 'config/robot-waypoints.json',
+  motionFile: 'config/robot-motion.json',
+  feedbackPollMs: 2500,
+  selectionLocked: false,
+  source: 'runtime',
+}
 
 let thinkingState = null
+let robotFeedbackTimerId = null
 const commandCuePlayer = createCommandCuePlayer('/sounds/robot-bark.mp3')
 let appConfig = {
   assistantName: 'Assistant',
@@ -73,34 +110,43 @@ let runtimeConfig = {
     availableProfiles: [],
     profileFile: 'config/speech-profiles.json',
     runtimeFile: 'config/speech-runtime.json',
+    sidecarConfigFile: 'config/speech-sidecar.json',
     activationPhrasesFile: 'config/activation_phrases.txt',
     activationPhrases: DEFAULT_ACTIVATION_PHRASES,
   },
+  robotRuntime: { ...DEFAULT_ROBOT_RUNTIME },
 }
 let speechController = null
+const isaacCompletionState = {
+  initialized: false,
+  lastEventId: null,
+}
 
 boot()
 
 form.addEventListener('submit', handleChatSubmit)
 saveProfileButton.addEventListener('click', handleProfileSave)
+saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
+saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
 
 async function boot() {
   try {
     const payload = await fetchConfig()
     applyPayload(payload)
-    speechController = await createSpeechInputController({
-      input,
-      speechConfig: runtimeConfig.speech,
-      onStatus: setSpeechStatus,
-      onTranscript: updateSpeechPreview,
-      onVoiceCommand: handleVoiceCommand,
-      submitLabel: appConfig.sendButtonLabel,
-    })
-    await speechController.start()
-    setStatus(`Ready on ${runtimeConfig.activeProfile.label}.`)
+    startRobotFeedbackPolling()
+
+    try {
+      await initializeSpeechController()
+    } catch (error) {
+      setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
+    }
+
+    await refreshRobotFeedback()
+    setStatus(`Ready on ${runtimeConfig.activeProfile.label}. Target: ${runtimeConfig.robotRuntime.activeTarget.label}.`)
   } catch (error) {
     setStatus(`Config load failed: ${formatError(error)}`, 'error')
     setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
+    setRuntimeFeedbackStatus(`Runtime setup failed: ${formatError(error)}`, true)
   }
 }
 
@@ -145,7 +191,7 @@ async function handleChatSubmit(event) {
     text: 'Thinking.',
     type: 'assistant',
     pending: true,
-    meta: `Using ${runtimeConfig.activeProfile.label}.`,
+    meta: `Using ${runtimeConfig.activeProfile.label}. Target ${runtimeConfig.robotRuntime.activeTarget.label}.`,
   })
 
   input.value = ''
@@ -166,7 +212,10 @@ async function handleChatSubmit(event) {
     }
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
-    const completionState = payload.isaacDispatch?.status === 'error' ? 'error' : 'idle'
+    const completionState =
+      payload.isaacDispatch?.status === 'error' || payload.robotDispatch?.status === 'error'
+        ? 'error'
+        : 'idle'
 
     finishThinkingFeedback(pendingMessage, {
       text: payload.response,
@@ -175,6 +224,7 @@ async function handleChatSubmit(event) {
     playCommandCueIfNeeded(payload.parsed)
     parsedOutput.textContent = formatParsedOutput(payload)
     setStatus(buildCompletionStatus(payload), completionState)
+    await refreshRobotFeedback()
   } catch (error) {
     finishThinkingFeedback(pendingMessage, {
       text: `Error: ${formatError(error)}`,
@@ -233,6 +283,158 @@ async function handleProfileSave() {
   }
 }
 
+async function handleSpeechProfileSave() {
+  const nextProfileId = speechProfileSelect.value
+  const activeSpeechProfile = runtimeConfig.speech.activeProfile
+
+  if (!nextProfileId) {
+    speechSettingsStatus.textContent = 'Select a speech profile first.'
+    return
+  }
+
+  if (nextProfileId === activeSpeechProfile?.id) {
+    speechSettingsStatus.textContent = `Already using ${activeSpeechProfile.label}.`
+    return
+  }
+
+  saveSpeechProfileButton.disabled = true
+  speechProfileSelect.disabled = true
+  speechSettingsStatus.textContent = 'Saving speech profile...'
+
+  try {
+    const response = await fetch('/api/settings/speech-profile', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ profileId: nextProfileId }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not update speech profile.')
+    }
+
+    applyPayload(payload)
+    try {
+      await initializeSpeechController()
+      speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label}.`
+    } catch (error) {
+      speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label} with speech error.`
+      setSpeechStatus(formatError(error), true)
+    }
+    setStatus(`Speech profile changed to ${runtimeConfig.speech.activeProfile.label}.`)
+  } catch (error) {
+    speechSettingsStatus.textContent = formatError(error)
+    setSpeechStatus(formatError(error), true)
+  } finally {
+    const locked = runtimeConfig.speech.activeProfile?.selectionLocked
+    speechProfileSelect.disabled = locked
+    saveSpeechProfileButton.disabled = locked
+  }
+}
+
+async function handleRobotTargetSave() {
+  const nextTargetId = robotTargetSelect.value
+  const activeTarget = runtimeConfig.robotRuntime.activeTarget
+
+  if (!nextTargetId) {
+    robotTargetStatus.textContent = 'Select a robot target first.'
+    return
+  }
+
+  if (nextTargetId === activeTarget?.id) {
+    robotTargetStatus.textContent = `Already targeting ${activeTarget.label}.`
+    return
+  }
+
+  saveRobotTargetButton.disabled = true
+  robotTargetSelect.disabled = true
+  robotTargetStatus.textContent = 'Saving runtime target...'
+
+  try {
+    const response = await fetch('/api/settings/robot-target', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ targetId: nextTargetId }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not update robot target.')
+    }
+
+    applyPayload(payload)
+    startRobotFeedbackPolling()
+    await refreshRobotFeedback()
+    robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
+    setStatus(`Runtime target changed to ${runtimeConfig.robotRuntime.activeTarget.label}.`)
+  } catch (error) {
+    robotTargetStatus.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+  } finally {
+    applyRobotTargetSelectionState()
+  }
+}
+
+async function initializeSpeechController() {
+  await speechController?.dispose?.()
+  speechController?.stop?.()
+  speechController = await createSpeechInputController({
+    input,
+    speechConfig: runtimeConfig.speech,
+    onStatus: setSpeechStatus,
+    onTranscript: updateSpeechPreview,
+    onVoiceCommand: handleVoiceCommand,
+    submitLabel: appConfig.sendButtonLabel,
+  })
+  await speechController.start()
+}
+
+async function refreshRobotFeedback() {
+  try {
+    const activeTarget = runtimeConfig.robotRuntime.activeTarget
+
+    if (activeTarget.kind === 'isaacsim') {
+      const [healthResponse, feedbackResponse] = await Promise.all([
+        fetch('/api/isaac/health'),
+        fetch('/api/isaac/feedback'),
+      ])
+      const healthPayload = await healthResponse.json()
+      const feedbackPayload = await feedbackResponse.json()
+
+      renderRobotFeedback(healthPayload, feedbackPayload)
+      announceIsaacCompletionIfNeeded(feedbackPayload)
+      return
+    }
+
+    const [healthResponse, feedbackResponse] = await Promise.all([
+      fetch('/api/robot/health'),
+      fetch('/api/robot/feedback'),
+    ])
+    const healthPayload = await healthResponse.json()
+    const feedbackPayload = await feedbackResponse.json()
+
+    renderRobotFeedback(healthPayload, feedbackPayload)
+  } catch (error) {
+    setRuntimeFeedbackStatus(`Runtime feedback failed: ${formatError(error)}`, true)
+    runtimeFeedbackOutput.textContent = 'Runtime feedback unavailable.'
+  }
+}
+
+function startRobotFeedbackPolling() {
+  if (robotFeedbackTimerId) {
+    window.clearInterval(robotFeedbackTimerId)
+  }
+
+  const pollMs = runtimeConfig.robotRuntime.feedbackPollMs || DEFAULT_ROBOT_RUNTIME.feedbackPollMs
+  robotFeedbackTimerId = window.setInterval(() => {
+    void refreshRobotFeedback()
+  }, pollMs)
+}
+
 async function fetchConfig() {
   const response = await fetch('/api/config')
   const payload = await response.json()
@@ -257,16 +459,25 @@ function applyPayload(payload) {
         : runtimeConfig.speech.activeProfile,
       activationPhrases: payload.speech?.activationPhrases || runtimeConfig.speech.activationPhrases,
     },
+    robotRuntime: {
+      ...DEFAULT_ROBOT_RUNTIME,
+      ...(payload.robotRuntime || {}),
+      activeTarget: payload.robotRuntime?.activeTarget
+        ? { ...DEFAULT_ROBOT_RUNTIME.activeTarget, ...payload.robotRuntime.activeTarget }
+        : runtimeConfig.robotRuntime.activeTarget,
+      availableTargets: payload.robotRuntime?.availableTargets || runtimeConfig.robotRuntime.availableTargets,
+    },
   }
 
   applyAppConfig()
   applyModelConfig(payload)
   applySpeechConfig()
+  applyRobotRuntimeConfig()
 }
 
 function applyModelConfig(payload) {
   profileName.textContent = runtimeConfig.activeProfile.label
-  profileSource.textContent = `Source: ${formatProfileSource(runtimeConfig.activeProfile.source)}`
+  profileSource.textContent = `Source: ${formatSource(runtimeConfig.activeProfile.source)}`
   providerName.textContent = runtimeConfig.activeProfile.provider
   modelName.textContent = payload.model || runtimeConfig.activeProfile.model
   promptFile.textContent = payload.systemPromptFile
@@ -282,7 +493,9 @@ function applySpeechConfig() {
 
   speechProfileName.textContent = activeSpeechProfile?.label || 'Speech unavailable'
   speechFiles.textContent =
-    `Speech config files: ${runtimeConfig.speech.profileFile}, ${runtimeConfig.speech.runtimeFile}, ${runtimeConfig.speech.activationPhrasesFile}`
+    `Speech config files: ${runtimeConfig.speech.profileFile}, ${runtimeConfig.speech.runtimeFile}, ${runtimeConfig.speech.sidecarConfigFile}, ${runtimeConfig.speech.activationPhrasesFile}`
+  renderSpeechProfileOptions()
+  applySpeechSelectionState()
 
   if (!activeSpeechProfile) {
     setSpeechStatus('No speech profile configured.', true)
@@ -304,9 +517,149 @@ function applySpeechConfig() {
     return
   }
 
+  if (activeSpeechProfile.provider === 'parakeet-sidecar') {
+    const activationPhrases = runtimeConfig.speech.activationPhrases?.join(', ') || 'none'
+
+    speechPreview.textContent =
+      `Listening mode: buffered local recording\n` +
+      `Model: ${activeSpeechProfile.modelId}\n` +
+      `Runtime: local Parakeet sidecar\n` +
+      `Device: ${activeSpeechProfile.device || 'auto'}\n` +
+      `Activation phrases: ${activationPhrases}\n` +
+      `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
+      `Manual fallback: click ${appConfig.sendButtonLabel}\n` +
+      `Timestamps: ${activeSpeechProfile.timestamps ? 'enabled' : 'disabled'}`
+    return
+  }
+
   speechPreview.textContent =
     `Listening mode: ${activeSpeechProfile.useVad ? 'VAD commits' : 'streaming updates'}\n` +
     `Model path: ${activeSpeechProfile.modelUrl}`
+}
+
+function applyRobotRuntimeConfig() {
+  const robotRuntime = runtimeConfig.robotRuntime
+  const activeTarget = robotRuntime.activeTarget
+
+  runtimeTargetName.textContent = activeTarget.label
+  runtimeTargetSource.textContent = `Source: ${formatSource(activeTarget.source || robotRuntime.source)}`
+  runtimeTargetChip.textContent = activeTarget.label
+  robotRuntimeFile.textContent = robotRuntime.runtimeFile
+  robotRos2File.textContent = robotRuntime.ros2ConfigFile
+  runtimeFiles.textContent =
+    `Runtime config files: ${robotRuntime.runtimeFile}, ${robotRuntime.ros2ConfigFile}, ${robotRuntime.waypointsFile}, ${robotRuntime.motionFile}`
+  renderRobotTargetOptions()
+  applyRobotTargetSelectionState()
+}
+
+function announceIsaacCompletionIfNeeded(feedbackPayload) {
+  const event = feedbackPayload?.feedback?.runtimeFeedback?.lastEvent
+    || feedbackPayload?.runtimeFeedback?.lastEvent
+    || feedbackPayload?.feedback?.lastEvent
+    || feedbackPayload?.lastEvent
+  const eventId = event?.eventId || null
+
+  if (!isaacCompletionState.initialized) {
+    isaacCompletionState.initialized = true
+    isaacCompletionState.lastEventId = eventId
+    return
+  }
+
+  if (!eventId) {
+    return
+  }
+
+  if (isaacCompletionState.lastEventId === eventId) {
+    return
+  }
+
+  isaacCompletionState.lastEventId = eventId
+  clearEmptyChat()
+  appendMessage({
+    role: appConfig.assistantName,
+    text: event.message || `Arrived at ${formatWaypointName(event.waypoint)}.`,
+    type: 'assistant',
+    meta: `Isaac runtime reported completion${event.commandId ? ` for ${event.commandId}` : ''}${event.completedAt ? ` at ${formatEventTimestamp(event.completedAt)}` : '.'}`,
+  })
+  setStatus(event.message || `Arrived at ${formatWaypointName(event.waypoint)}.`)
+}
+
+function renderRobotFeedback(healthPayload, feedbackPayload) {
+  const activeTarget = runtimeConfig.robotRuntime.activeTarget
+  const lines = [
+    `Target: ${activeTarget.label} (${activeTarget.kind})`,
+    `Runtime enabled: ${runtimeConfig.robotRuntime.enabled ? 'yes' : 'no'}`,
+    `Dry run: ${runtimeConfig.robotRuntime.dryRun ? 'yes' : 'no'}`,
+  ]
+
+  if (activeTarget.kind === 'isaacsim') {
+    const healthStatus = healthPayload?.status || 'unknown'
+    const feedbackStatus = feedbackPayload?.status || 'unknown'
+    const runtimeFeedback = feedbackPayload?.feedback?.runtimeFeedback || feedbackPayload?.runtimeFeedback || null
+    const controller = runtimeFeedback?.controller || null
+    const lastEvent = runtimeFeedback?.lastEvent || feedbackPayload?.feedback?.lastEvent || feedbackPayload?.lastEvent || null
+
+    setRuntimeFeedbackStatus(
+      healthStatus === 'error'
+        ? `Isaac sidecar error: ${healthPayload.error || `HTTP ${healthPayload.responseStatus || 'unknown'}`}.`
+        : feedbackStatus === 'error'
+          ? `Isaac feedback error: ${feedbackPayload.error || `HTTP ${feedbackPayload.responseStatus || 'unknown'}`}.`
+          : `Isaac health ${healthStatus}. Feedback ${feedbackStatus}.`,
+      healthStatus === 'error' || feedbackStatus === 'error',
+    )
+    lines.push(`Destination: ${healthPayload.destination || feedbackPayload.destination || 'n/a'}`)
+    lines.push(`Isaac health: ${healthStatus}`)
+    lines.push(`Feedback status: ${feedbackStatus}`)
+
+    if (feedbackPayload?.feedback?.lastCommandId || feedbackPayload?.lastCommandId) {
+      lines.push(`Last command id: ${feedbackPayload?.feedback?.lastCommandId || feedbackPayload?.lastCommandId}`)
+    }
+
+    if (controller?.status) {
+      lines.push(`Controller status: ${controller.status}`)
+    }
+
+    if (controller?.targetWaypoint) {
+      lines.push(`Target waypoint: ${controller.targetWaypoint}`)
+    }
+
+    if (lastEvent?.message) {
+      lines.push(`Last event: ${lastEvent.message}`)
+    }
+
+    runtimeFeedbackOutput.textContent = `${lines.join('\n')}\n\n${JSON.stringify({
+      health: healthPayload,
+      feedback: feedbackPayload,
+    }, null, 2)}`
+    return
+  }
+
+  const healthStatus = healthPayload?.status || 'unknown'
+  const feedbackStatus = feedbackPayload?.status || 'unknown'
+  const feedbackBody = feedbackPayload?.feedback ?? null
+
+  setRuntimeFeedbackStatus(
+    healthStatus === 'error'
+      ? `ROS2 bridge error: ${healthPayload.error || `HTTP ${healthPayload.responseStatus || 'unknown'}`}.`
+      : `ROS2 health ${healthStatus}. Feedback ${feedbackStatus}.`,
+    healthStatus === 'error' || feedbackStatus === 'error',
+  )
+  lines.push(`Destination: ${healthPayload.destination || feedbackPayload.destination || 'n/a'}`)
+  lines.push(`Bridge health: ${healthStatus}`)
+  lines.push(`Feedback status: ${feedbackStatus}`)
+
+  if (feedbackBody?.lastCommandId) {
+    lines.push(`Last command id: ${feedbackBody.lastCommandId}`)
+  }
+
+  if (feedbackBody?.lastStateMessage) {
+    lines.push(`Last state: ${stringifyForOneLine(feedbackBody.lastStateMessage)}`)
+  }
+
+  runtimeFeedbackOutput.textContent = `${lines.join('\n')}\n\n${JSON.stringify({
+    health: healthPayload,
+    feedback: feedbackPayload,
+  }, null, 2)}`
 }
 
 function renderProfileOptions() {
@@ -321,6 +674,30 @@ function renderProfileOptions() {
   }
 }
 
+function renderSpeechProfileOptions() {
+  speechProfileSelect.replaceChildren()
+
+  for (const profile of runtimeConfig.speech.availableProfiles) {
+    const option = document.createElement('option')
+    option.value = profile.id
+    option.textContent = `${profile.label} (${profile.provider})`
+    option.selected = profile.id === runtimeConfig.speech.activeProfile?.id
+    speechProfileSelect.append(option)
+  }
+}
+
+function renderRobotTargetOptions() {
+  robotTargetSelect.replaceChildren()
+
+  for (const target of runtimeConfig.robotRuntime.availableTargets) {
+    const option = document.createElement('option')
+    option.value = target.id
+    option.textContent = `${target.label} (${target.kind})`
+    option.selected = target.id === runtimeConfig.robotRuntime.activeTarget.id
+    robotTargetSelect.append(option)
+  }
+}
+
 function applyProfileSelectionState() {
   const locked = runtimeConfig.activeProfile.selectionLocked
   profileSelect.disabled = locked
@@ -331,7 +708,29 @@ function applyProfileSelectionState() {
   settingsStatus.textContent = `Using ${runtimeConfig.activeProfile.label} (${runtimeConfig.activeProfile.model}).`
 }
 
-function formatProfileSource(source) {
+function applySpeechSelectionState() {
+  const locked = runtimeConfig.speech.activeProfile?.selectionLocked
+  speechProfileSelect.disabled = locked
+  saveSpeechProfileButton.disabled = locked
+  speechLockNote.textContent = locked
+    ? 'Speech profile locked by APP_SPEECH_PROFILE.'
+    : 'Selection saves to config/speech-runtime.json.'
+  if (runtimeConfig.speech.activeProfile) {
+    speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label}.`
+  }
+}
+
+function applyRobotTargetSelectionState() {
+  const locked = runtimeConfig.robotRuntime.selectionLocked || runtimeConfig.robotRuntime.activeTarget.selectionLocked
+  robotTargetSelect.disabled = locked
+  saveRobotTargetButton.disabled = locked
+  robotTargetLockNote.textContent = locked
+    ? 'Runtime target locked by ROBOT_RUNTIME_TARGET.'
+    : 'Selection saves to config/robot-runtime.json.'
+  robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
+}
+
+function formatSource(source) {
   switch (source) {
     case 'override':
       return 'startup override'
@@ -353,26 +752,45 @@ function formatError(error) {
 function buildAssistantMeta(payload, startedAt) {
   const parts = [
     `Reply received in ${formatElapsed(Date.now() - startedAt)} via ${payload.profileLabel} (${payload.model}).`,
+    `Target ${payload.runtimeTarget?.label || runtimeConfig.robotRuntime.activeTarget.label}.`,
   ]
   const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
+  const robotSummary = formatRobotSummary(payload.robotRuntime, payload.robotDispatch)
 
   if (isaacSummary) {
     parts.push(isaacSummary)
+  }
+
+  if (robotSummary) {
+    parts.push(robotSummary)
   }
 
   return parts.join(' ')
 }
 
 function buildCompletionStatus(payload) {
-  const base = `Done via ${payload.profileLabel}.`
+  const parts = [
+    `Done via ${payload.profileLabel}.`,
+    `Target ${payload.runtimeTarget?.label || runtimeConfig.robotRuntime.activeTarget.label}.`,
+  ]
   const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
+  const robotSummary = formatRobotSummary(payload.robotRuntime, payload.robotDispatch)
 
-  return isaacSummary ? `${base} ${isaacSummary}` : base
+  if (isaacSummary) {
+    parts.push(isaacSummary)
+  }
+
+  if (robotSummary) {
+    parts.push(robotSummary)
+  }
+
+  return parts.join(' ')
 }
 
 function formatParsedOutput(payload) {
   const sections = [
     payload.parsed ? JSON.stringify(payload.parsed, null, 2) : 'Not JSON.',
+    `Active target:\n${JSON.stringify(payload.runtimeTarget || runtimeConfig.robotRuntime.activeTarget, null, 2)}`,
   ]
 
   if (payload.isaacSim) {
@@ -381,6 +799,14 @@ function formatParsedOutput(payload) {
 
   if (payload.isaacDispatch) {
     sections.push(`Isaac dispatch:\n${JSON.stringify(payload.isaacDispatch, null, 2)}`)
+  }
+
+  if (payload.robotRuntime) {
+    sections.push(`ROS2 preview:\n${JSON.stringify(payload.robotRuntime, null, 2)}`)
+  }
+
+  if (payload.robotDispatch) {
+    sections.push(`ROS2 dispatch:\n${JSON.stringify(payload.robotDispatch, null, 2)}`)
   }
 
   return sections.join('\n\n')
@@ -411,8 +837,48 @@ function formatIsaacSummary(isaacSim, isaacDispatch) {
     return 'Isaac preview ready.'
   }
 
-  if (isaacSim?.status) {
+  if (isaacSim?.status && isaacSim.status !== 'no-command') {
     return `Isaac preview ${isaacSim.status}.`
+  }
+
+  return ''
+}
+
+function formatRobotSummary(robotRuntime, robotDispatch) {
+  if (robotDispatch?.status === 'sent') {
+    return 'ROS2 command sent.'
+  }
+
+  if (robotDispatch?.status === 'dry-run') {
+    return 'ROS2 dispatch dry-run.'
+  }
+
+  if (robotDispatch?.status === 'preview-not-ready') {
+    return 'ROS2 not sent because preview not ready.'
+  }
+
+  if (robotDispatch?.status === 'inactive-target') {
+    return 'ROS2 target inactive.'
+  }
+
+  if (robotDispatch?.status === 'disabled') {
+    return 'ROS2 transport disabled.'
+  }
+
+  if (robotDispatch?.status === 'error') {
+    return `ROS2 dispatch failed: ${robotDispatch.error || `HTTP ${robotDispatch.responseStatus || 'unknown'}`}.`
+  }
+
+  if (robotRuntime?.status === 'ready') {
+    return 'ROS2 preview ready.'
+  }
+
+  if (robotRuntime?.status === 'no-op') {
+    return 'ROS2 plan no-op.'
+  }
+
+  if (robotRuntime?.status && !['no-command', 'no-action'].includes(robotRuntime.status)) {
+    return `ROS2 preview ${robotRuntime.status}.`
   }
 
   return ''
@@ -421,6 +887,11 @@ function formatIsaacSummary(isaacSim, isaacDispatch) {
 function setSpeechStatus(message, isError = false) {
   speechPanel.dataset.state = isError ? 'error' : 'ready'
   speechStatus.textContent = message
+}
+
+function setRuntimeFeedbackStatus(message, isError = false) {
+  runtimePanel.dataset.state = isError ? 'error' : 'ready'
+  runtimeFeedbackStatus.textContent = message
 }
 
 function updateSpeechPreview(text, phase) {
@@ -513,7 +984,7 @@ function startThinkingFeedback(messageNode) {
     'Thinking',
     'Reading prompt and schema',
     `Calling ${runtimeConfig.activeProfile.label}`,
-    'Still working',
+    `Target ${runtimeConfig.robotRuntime.activeTarget.label}`,
   ]
   let frame = 0
 
@@ -523,7 +994,11 @@ function startThinkingFeedback(messageNode) {
     const phaseIndex = Math.min(Math.floor(elapsedMs / 2500), phases.length - 1)
     bubble.textContent = `${phases[phaseIndex]}${dots}`
     meta.textContent = `${formatElapsed(elapsedMs)} elapsed.`
-    setStatus(`${appConfig.thinkingStatus} via ${runtimeConfig.activeProfile.label}.`, 'busy', elapsedMs)
+    setStatus(
+      `${appConfig.thinkingStatus} via ${runtimeConfig.activeProfile.label}. Target ${runtimeConfig.robotRuntime.activeTarget.label}.`,
+      'busy',
+      elapsedMs,
+    )
     scrollChatToTop()
     frame += 1
   }
@@ -558,6 +1033,36 @@ function formatElapsed(elapsedMs) {
   return `${(elapsedMs / 1000).toFixed(1)}s`
 }
 
+function formatWaypointName(value) {
+  return String(value || 'the target').replaceAll('_', ' ')
+}
+
+function formatEventTimestamp(value) {
+  const parsed = new Date(value)
+
+  if (Number.isNaN(parsed.valueOf())) {
+    return String(value)
+  }
+
+  return parsed.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function stringifyForOneLine(value) {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 function trimChatHistory() {
   const messages = Array.from(chatLog.querySelectorAll(MESSAGE_SELECTOR))
   const { overflow } = splitRecentChatHistory(messages)
@@ -586,4 +1091,8 @@ function applyAppConfig() {
 window.addEventListener('beforeunload', () => {
   speechController?.dispose?.()
   speechController?.stop()
+
+  if (robotFeedbackTimerId) {
+    window.clearInterval(robotFeedbackTimerId)
+  }
 })

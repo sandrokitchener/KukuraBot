@@ -1,15 +1,44 @@
 {
-  "enabled": false,
+  "enabled": true,
   "dryRun": true,
   "requiresOperatorConfirmation": true,
   "robotId": "dogzilla-local",
-  "robotModel": "dogzilla-s1-or-s2",
-  "transport": "ros2-bridge",
+  "robotModel": "dogzilla-s2",
+  "defaultTarget": "isaacsim",
+  "previewTargets": [
+    "isaacsim",
+    "ros2_real"
+  ],
   "selectedMotionProfile": "default",
   "selectedWaypointSet": "home",
   "selectedActionMap": "default",
+  "targets": {
+    "isaacsim": {
+      "label": "Isaac Sim",
+      "kind": "isaacsim",
+      "managedByApp": true,
+      "notes": [
+        "App launches Isaac sidecar + Isaac Sim when this target is active.",
+        "Keep this target as the safe default while ROS2 hardware path is still in dry-run mode."
+      ]
+    },
+    "ros2_real": {
+      "label": "ROS2 Real Robot",
+      "kind": "ros2-bridge",
+      "managedByApp": true,
+      "notes": [
+        "App launches or connects to the ROS2 HTTP bridge when this target is active.",
+        "Use transport.baseUrl in config/robot-ros2.json to point at the machine that can reach the live DOGZILLA ROS graph."
+      ]
+    }
+  },
+  "feedback": {
+    "pollMs": 2500,
+    "historyLimit": 20
+  },
   "notes": [
-    "Scaffold only. Nothing in the app reads this file yet.",
-    "Leave enabled=false until the real ROS2 bridge path is verified on hardware."
+    "ROBOT_RUNTIME_TARGET can override defaultTarget at launch without changing this file.",
+    "ROBOT_RUNTIME_DRY_RUN can override dryRun for quick bench testing.",
+    "Keep sim and real selection here so one app can compare both paths without prompt changes."
   ]
 }

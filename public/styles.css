@@ -137,7 +137,8 @@ h1 {
   font-size: 0.9rem;
 }
 
-.speech-panel {
+.speech-panel,
+.runtime-panel {
   border: 1px solid var(--line);
   background: #ffffff;
   padding: 12px;
@@ -145,20 +146,23 @@ h1 {
   gap: 10px;
 }
 
-.speech-head {
+.speech-head,
+.runtime-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.speech-head h2 {
+.speech-head h2,
+.runtime-head h2 {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
 }
 
-.speech-chip {
+.speech-chip,
+.runtime-chip {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -170,12 +174,15 @@ h1 {
 }
 
 .speech-status,
-.speech-files {
+.speech-files,
+.runtime-status,
+.runtime-files {
   margin: 0;
   color: var(--ink-soft);
 }
 
-.speech-preview {
+.speech-preview,
+.runtime-preview {
   margin: 0;
   min-height: 88px;
   padding: 10px 12px;
@@ -188,11 +195,14 @@ h1 {
 }
 
 .speech-panel[data-state='error'] .speech-status,
-.speech-panel[data-state='error'] .speech-preview {
+.speech-panel[data-state='error'] .speech-preview,
+.runtime-panel[data-state='error'] .runtime-status,
+.runtime-panel[data-state='error'] .runtime-preview {
   color: var(--danger);
 }
 
-.speech-panel[data-state='error'] .speech-preview {
+.speech-panel[data-state='error'] .speech-preview,
+.runtime-panel[data-state='error'] .runtime-preview {
   border-color: var(--danger);
 }
 

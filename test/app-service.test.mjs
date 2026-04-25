@@ -114,7 +114,19 @@ test('composeSystemPrompt keeps command contract config-driven', async () => {
 })
 
 test('loadPublicConfig exposes active speech profile metadata', async () => {
-  const payload = await loadPublicConfig()
+  const previousSpeechProfile = process.env.APP_SPEECH_PROFILE
+  process.env.APP_SPEECH_PROFILE = 'local_whisper_base_en'
+
+  let payload
+  try {
+    payload = await loadPublicConfig()
+  } finally {
+    if (previousSpeechProfile == null) {
+      delete process.env.APP_SPEECH_PROFILE
+    } else {
+      process.env.APP_SPEECH_PROFILE = previousSpeechProfile
+    }
+  }
 
   assert.equal(payload.speech.activeProfile.provider, 'whisper-browser')
   assert.equal(payload.speech.activeProfile.modelId, 'Xenova/whisper-base.en')
@@ -122,6 +134,7 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.speech.activeProfile.silenceDurationMs, 500)
   assert.equal(payload.speech.profileFile, 'config/speech-profiles.json')
   assert.equal(payload.speech.runtimeFile, 'config/speech-runtime.json')
+  assert.equal(payload.speech.sidecarConfigFile, 'config/speech-sidecar.json')
   assert.equal(payload.speech.activationPhrasesFile, 'config/activation_phrases.txt')
   assert.ok(Array.isArray(payload.speech.activationPhrases))
   assert.ok(payload.speech.activationPhrases.length > 0)
@@ -155,4 +168,43 @@ test('processUserInput dispatches Isaac command when preview opts into chat disp
   assert.equal(result.parsed.command, 'move')
   assert.equal(result.isaacDispatch.status, 'sent')
   assert.deepEqual(dispatchedPreview, result.isaacSim)
+})
+
+test('processUserInput dispatches ROS2 command when ROS2 target is active', async () => {
+  let dispatchedPreview = null
+  const result = await processUserInput('go to the living room', {
+    queryModelImpl: async () => '{"command":"move","waypoint":"living_room"}',
+    buildIsaacSimPreviewImpl: async () => ({
+      status: 'ready',
+      dispatchPlan: {
+        dispatchOnChat: true,
+      },
+    }),
+    buildRobotRuntimePreviewImpl: async () => ({
+      status: 'ready',
+      canonicalPlan: {
+        kind: 'locomotion.goto',
+      },
+      dispatchPlan: {
+        dispatchOnChat: true,
+      },
+    }),
+    dispatchRobotCommandImpl: async (preview) => {
+      dispatchedPreview = preview
+      return {
+        status: 'sent',
+      }
+    },
+    loadRobotRuntimeConfigImpl: async () => ({
+      activeTarget: {
+        id: 'ros2_real',
+        kind: 'ros2-bridge',
+        label: 'ROS2 Real Robot',
+      },
+    }),
+  })
+
+  assert.equal(result.robotDispatch.status, 'sent')
+  assert.deepEqual(dispatchedPreview, result.robotRuntime)
+  assert.equal(result.isaacDispatch, null)
 })

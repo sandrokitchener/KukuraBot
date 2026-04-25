@@ -4,13 +4,63 @@
   "rigProfile": "dogzilla_blockout_proxy_v1",
   "rigRootPrim": "/dogzilla_proxy_blockout/DOGZILLA_PROXY",
   "bodyPrim": "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link",
+  "rigVisualYawOffsetDegrees": -90.0,
   "waypointsFile": "config/isaacsim-waypoints.json",
-  "jointLimitsFile": "config/dogzilla-proxy-joint-limits.json",
+  "lidarPrimPath": "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link/Lidar",
+  "frontReference": {
+    "frontLegPrims": [
+      "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link/front_left_hip",
+      "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link/front_right_hip"
+    ],
+    "rearLegPrims": [
+      "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link/rear_left_hip",
+      "/dogzilla_proxy_blockout/DOGZILLA_PROXY/body_link/rear_right_hip"
+    ]
+  },
   "motion": {
     "linearSpeedMetersPerSecond": 0.12,
     "angularSpeedDegreesPerSecond": 45,
     "arrivalToleranceMeters": 0.03,
     "updateRateHz": 60
+  },
+  "roomBounds": {
+    "enabled": true,
+    "minX": -2.36,
+    "maxX": 2.36,
+    "minY": -2.36,
+    "maxY": 2.36
+  },
+  "planner": {
+    "enabled": true,
+    "cellSizeMeters": 0.12,
+    "robotRadiusMeters": 0.18,
+    "clearancePaddingMeters": 0.08
+  },
+  "avoidance": {
+    "enabled": true,
+    "frontHitDistanceMeters": 0.3048,
+    "obstacleDetectionRangeMeters": 1.5,
+    "lookaheadDistanceMeters": 1.2,
+    "robotRadiusMeters": 0.18,
+    "clearancePaddingMeters": 0.08,
+    "candidateMaxHeadingDegrees": 90,
+    "candidateStepDegrees": 10,
+    "headingCostWeight": 0.35,
+    "clearanceCostWeight": 1.0,
+    "cautionDistanceMeters": 0.22,
+    "stopDistanceMeters": 0.12,
+    "frontalFovDegrees": 120,
+    "frontConeDegrees": 36,
+    "obstacleRepulsion": 0.55,
+    "sideBiasGain": 0.9,
+    "defaultBypassDirection": "left",
+    "lidarFrontYawOffsetDegrees": 90.0,
+    "allowDepthOnlyLidarHits": true,
+    "selfPrimPrefixes": [
+      "/dogzilla_proxy_blockout/DOGZILLA_PROXY"
+    ],
+    "speedFloorScale": 0.2,
+    "debugEveryTicks": 20
   },
   "supportedActions": [
     "robot_controller.goto_waypoint",
@@ -30,7 +80,9 @@
     }
   },
   "notes": [
-    "This is the app-facing controller contract scaffold for the Isaac blockout scene.",
+    "This is the app-facing controller contract scaffold for simple proxy translation in Isaac Sim.",
+    "Waypoint motion translates the root/body only. Local avoidance uses PhysX lidar hit prims inside the front-leg heading sector.",
+    "Room bounds clip keeps the translated proxy from ghosting through the outer walls.",
     "The controller script name is 'robot controller' in user-facing config, but the Python file remains robot_controller.py."
   ]
 }

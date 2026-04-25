@@ -1,5 +1,18 @@
 {
   "activeSet": "home",
+  "mappingGuidance": {
+    "frame": "map",
+    "coordinateConvention": {
+      "x": "forward from your chosen home origin or dock reference",
+      "y": "left from that same origin",
+      "yaw": "robot heading in radians or degrees converted consistently"
+    },
+    "suggestedMeasurementFlow": [
+      "Pick one anchor origin that never moves, such as a charging dock, hallway tile seam, or SLAM map origin.",
+      "Mark each named spot as the center of a safe parking bubble, not the middle of furniture.",
+      "Capture doorway clearance and arrival tolerance separately so a waypoint can stay stable even if furniture shifts."
+    ]
+  },
   "sets": {
     "home": {
       "defaultFrame": "map",
@@ -10,9 +23,13 @@
           "x": 0.0,
           "y": 0.0,
           "yaw": 0.0,
+          "arrivalToleranceMeters": 0.25,
+          "physicalSpot": "Center of the living room parking bubble",
+          "anchorHint": "Use a rug edge or couch corner as the tape-measure reference",
           "verified": false,
           "notes": [
-            "Dummy pose. Replace with a real mapped pose later."
+            "Dummy pose. Replace with a real mapped pose later.",
+            "Keep enough clearance that the body can rotate without clipping furniture."
           ]
         },
         "garage": {
@@ -21,9 +38,13 @@
           "x": 0.0,
           "y": 0.0,
           "yaw": 0.0,
+          "arrivalToleranceMeters": 0.35,
+          "physicalSpot": "Clear parking zone just inside the garage threshold",
+          "anchorHint": "Measure from a wall corner or storage rack post, not from a car position",
           "verified": false,
           "notes": [
-            "Dummy pose. Replace with a real mapped pose later."
+            "Dummy pose. Replace with a real mapped pose later.",
+            "Use a wider tolerance if the floor transition at the threshold is uneven."
           ]
         },
         "bedroom": {
@@ -32,9 +53,13 @@
           "x": 0.0,
           "y": 0.0,
           "yaw": 0.0,
+          "arrivalToleranceMeters": 0.2,
+          "physicalSpot": "Bedroom standby spot near the door swing edge",
+          "anchorHint": "Measure from the door frame or bed corner, then bias away from rugs that can fold",
           "verified": false,
           "notes": [
-            "Placeholder. Replace with your actual sim_environment bedroom coordinates."
+            "Placeholder. Replace with your actual sim_environment bedroom coordinates.",
+            "Avoid making the target the room center if turning space is tighter near the bed."
           ]
         },
         "current_position": {
@@ -50,7 +75,8 @@
           "mode": "operator_source",
           "verified": false,
           "notes": [
-            "Placeholder for speaker or operator-relative behavior."
+            "Placeholder for speaker or operator-relative behavior.",
+            "Keep this semantic target separate from map poses so follow mode can evolve independently of fixed waypoints."
           ]
         }
       }

@@ -101,6 +101,72 @@ function resampleAudio(audio, fromSampleRate, toSampleRate) {
   return result
 }
 
+function encodePcm16Wav(audio, sampleRate) {
+  const pcm = new Int16Array(audio.length)
+
+  for (let index = 0; index < audio.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, audio[index] || 0))
+    pcm[index] = sample < 0 ? Math.round(sample * 0x8000) : Math.round(sample * 0x7fff)
+  }
+
+  const buffer = new ArrayBuffer(44 + pcm.byteLength)
+  const view = new DataView(buffer)
+  const bytes = new Uint8Array(buffer)
+  let offset = 0
+
+  function writeString(value) {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset, value.charCodeAt(index))
+      offset += 1
+    }
+  }
+
+  writeString('RIFF')
+  view.setUint32(offset, 36 + pcm.byteLength, true)
+  offset += 4
+  writeString('WAVE')
+  writeString('fmt ')
+  view.setUint32(offset, 16, true)
+  offset += 4
+  view.setUint16(offset, 1, true)
+  offset += 2
+  view.setUint16(offset, 1, true)
+  offset += 2
+  view.setUint32(offset, sampleRate, true)
+  offset += 4
+  view.setUint32(offset, sampleRate * 2, true)
+  offset += 4
+  view.setUint16(offset, 2, true)
+  offset += 2
+  view.setUint16(offset, 16, true)
+  offset += 2
+  writeString('data')
+  view.setUint32(offset, pcm.byteLength, true)
+  offset += 4
+  bytes.set(new Uint8Array(pcm.buffer), offset)
+
+  return bytes
+}
+
+function encodeBytesAsBase64(bytes) {
+  const chunkSize = 0x8000
+  let binary = ''
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  }
+
+  return btoa(binary)
+}
+
+async function readJsonResponse(response) {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
 function createPcmRecorder({ maxBufferSeconds = 20, targetSampleRate = 16000, onChunk = null }) {
   let audioContext = null
   let mediaStream = null
@@ -267,7 +333,15 @@ async function createMoonshineSpeechProvider(profile, handlers) {
   }
 }
 
-async function createWhisperSpeechProvider(profile, handlers, submitLabel) {
+async function createBufferedSpeechProvider({
+  profile,
+  handlers,
+  submitLabel,
+  transcribeAudio,
+  warmup = null,
+  dispose = null,
+  startStatus = null,
+}) {
   let utteranceChunks = []
   let utteranceSamples = 0
   let isSpeechActive = false
@@ -276,10 +350,8 @@ async function createWhisperSpeechProvider(profile, handlers, submitLabel) {
   let transcriptionChain = Promise.resolve()
 
   async function processCompletedUtterance(audio, durationSeconds) {
-    const asr = await ensureTranscriber()
     handlers.onStatus(`Transcribing ${durationSeconds.toFixed(1)}s with ${profile.label}...`)
-
-    const result = await asr(audio, getTranscriptionOptions())
+    const result = await transcribeAudio(audio, durationSeconds)
     const text = typeof result?.text === 'string' ? result.text.trim() : ''
 
     if (!text) {
@@ -369,12 +441,45 @@ async function createWhisperSpeechProvider(profile, handlers, submitLabel) {
     }
   }
 
-  const { env, pipeline } = await import(profile.libraryUrl)
   const recorder = createPcmRecorder({
     maxBufferSeconds: profile.maxBufferSeconds || 20,
     targetSampleRate: 16000,
     onChunk: handleChunk,
   })
+
+  return {
+    async start() {
+      handlers.onStatus(`Requesting microphone for ${profile.label}...`)
+      await recorder.start()
+      handlers.onStatus(startStatus || `Microphone live via ${profile.label}. Click ${submitLabel} to transcribe.`)
+      warmup?.().catch((error) => {
+        handlers.onError(error)
+      })
+    },
+
+    async prepareInputForSubmit() {
+      const { audio, durationSeconds } = recorder.snapshotAndClear()
+
+      if (!audio.length || durationSeconds < 0.25) {
+        handlers.onStatus('No speech captured yet.', true)
+        return ''
+      }
+
+      return processCompletedUtterance(audio, durationSeconds)
+    },
+
+    async dispose() {
+      await dispose?.()
+    },
+
+    stop() {
+      recorder.stop()
+    },
+  }
+}
+
+async function createWhisperSpeechProvider(profile, handlers, submitLabel) {
+  const { env, pipeline } = await import(profile.libraryUrl)
 
   env.allowRemoteModels = true
   env.useBrowserCache = true
@@ -450,35 +555,81 @@ async function createWhisperSpeechProvider(profile, handlers, submitLabel) {
     }
   }
 
-  return {
-    async start() {
-      handlers.onStatus(`Requesting microphone for ${profile.label}...`)
-      await recorder.start()
-      handlers.onStatus(`Microphone live via ${profile.label}. Click ${submitLabel} to transcribe.`)
-      ensureTranscriber().catch((error) => {
-        handlers.onError(error)
-      })
+  return createBufferedSpeechProvider({
+    profile,
+    handlers,
+    submitLabel,
+    async transcribeAudio(audio) {
+      const asr = await ensureTranscriber()
+      return asr(audio, getTranscriptionOptions())
     },
-
-    async prepareInputForSubmit() {
-      const { audio, durationSeconds } = recorder.snapshotAndClear()
-
-      if (!audio.length || durationSeconds < 0.25) {
-        handlers.onStatus('No speech captured yet.', true)
-        return ''
-      }
-
-      return processCompletedUtterance(audio, durationSeconds)
+    warmup() {
+      return ensureTranscriber()
     },
-
     async dispose() {
       await transcriber?.dispose?.()
     },
+  })
+}
 
-    stop() {
-      recorder.stop()
-    },
+async function createParakeetSpeechProvider(profile, handlers, submitLabel) {
+  async function checkHealth() {
+    const response = await fetch('/api/speech/health')
+    const payload = await readJsonResponse(response)
+
+    if (!response.ok || payload?.status !== 'ok') {
+      throw new Error(payload?.error || payload?.body?.error || 'Parakeet sidecar unavailable.')
+    }
+
+    return payload
   }
+
+  async function transcribeViaSidecar(audio, sampleRate) {
+    const audioBase64 = encodeBytesAsBase64(encodePcm16Wav(audio, sampleRate))
+    const response = await fetch('/api/speech/transcribe', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        audioBase64,
+        mimeType: 'audio/wav',
+        sampleRate,
+      }),
+    })
+    const payload = await readJsonResponse(response)
+
+    if (!response.ok || payload?.status !== 'ok') {
+      throw new Error(
+        payload?.error
+        || payload?.body?.error
+        || `Parakeet transcription failed${payload?.responseStatus ? ` (${payload.responseStatus})` : ''}.`,
+      )
+    }
+
+    return payload.body || {}
+  }
+
+  return createBufferedSpeechProvider({
+    profile,
+    handlers,
+    submitLabel,
+    async transcribeAudio(audio) {
+      return transcribeViaSidecar(audio, 16000)
+    },
+    async warmup() {
+      const health = await checkHealth()
+      const bridgeStatus = health?.body?.status || 'ready'
+      handlers.onStatus(`Microphone live via ${profile.label}. Bridge ${bridgeStatus}. Click ${submitLabel} to transcribe.`)
+    },
+    startStatus: `Microphone live via ${profile.label}. Checking local speech bridge...`,
+  })
+}
+
+const SPEECH_PROVIDER_FACTORIES = {
+  'moonshine-browser': ({ profile, handlers }) => createMoonshineSpeechProvider(profile, handlers),
+  'whisper-browser': ({ profile, handlers, submitLabel }) => createWhisperSpeechProvider(profile, handlers, submitLabel),
+  'parakeet-sidecar': ({ profile, handlers, submitLabel }) => createParakeetSpeechProvider(profile, handlers, submitLabel),
 }
 
 export async function createSpeechInputController({
@@ -538,28 +689,25 @@ export async function createSpeechInputController({
   }
   const activationPhrases = speechConfig?.activationPhrases || []
 
-  switch (activeProfile.provider) {
-    case 'moonshine-browser':
-      provider = await createMoonshineSpeechProvider(activeProfile, handlers)
-      break
-    case 'whisper-browser':
-      provider = await createWhisperSpeechProvider(
-        { ...activeProfile, activationPhrases },
-        handlers,
-        submitLabel,
-      )
-      break
-    default:
-      onStatus(`Unsupported speech provider "${activeProfile.provider}".`, true)
-      return {
-        async start() {},
-        async prepareInputForSubmit() {
-          return ''
-        },
-        async dispose() {},
-        stop() {},
-      }
+  const factory = SPEECH_PROVIDER_FACTORIES[activeProfile.provider]
+
+  if (!factory) {
+    onStatus(`Unsupported speech provider "${activeProfile.provider}".`, true)
+    return {
+      async start() {},
+      async prepareInputForSubmit() {
+        return ''
+      },
+      async dispose() {},
+      stop() {},
+    }
   }
+
+  provider = await factory({
+    profile: { ...activeProfile, activationPhrases },
+    handlers,
+    submitLabel,
+  })
 
   return {
     async start() {

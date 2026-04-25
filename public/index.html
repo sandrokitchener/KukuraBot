@@ -46,6 +46,19 @@
             <span class="meta-label">Waypoints</span>
             <strong id="waypoints-file">config/valid-waypoints.txt</strong>
           </div>
+          <div class="meta-card">
+            <span class="meta-label">Runtime target</span>
+            <strong id="runtime-target-name">Loading...</strong>
+            <div id="runtime-target-source" class="meta-note"></div>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">Robot runtime file</span>
+            <strong id="robot-runtime-file">config/robot-runtime.json</strong>
+          </div>
+          <div class="meta-card">
+            <span class="meta-label">ROS2 config file</span>
+            <strong id="robot-ros2-file">config/robot-ros2.json</strong>
+          </div>
         </div>
 
         <details class="settings-panel">
@@ -57,6 +70,14 @@
           </div>
           <p id="profile-lock-note" class="settings-note">Selection saves to config/runtime.json.</p>
           <div id="settings-status" class="settings-status">Loading profiles...</div>
+
+          <div class="settings-row">
+            <label for="robot-target-select">Runtime target</label>
+            <select id="robot-target-select"></select>
+            <button id="save-robot-target-button" type="button">Use target</button>
+          </div>
+          <p id="robot-target-lock-note" class="settings-note">Selection saves to config/robot-runtime.json.</p>
+          <div id="robot-target-status" class="settings-status">Loading robot targets...</div>
         </details>
 
         <section class="speech-panel">
@@ -64,9 +85,26 @@
             <h2>Speech Input</h2>
             <span id="speech-profile-name" class="speech-chip">Loading...</span>
           </div>
+          <div class="settings-row">
+            <label for="speech-profile-select">Speech profile</label>
+            <select id="speech-profile-select"></select>
+            <button id="save-speech-profile-button" type="button">Use speech profile</button>
+          </div>
+          <p id="speech-lock-note" class="settings-note">Selection saves to config/speech-runtime.json.</p>
+          <div id="speech-settings-status" class="settings-status">Loading speech profiles...</div>
           <p id="speech-status" class="speech-status">Starting microphone...</p>
           <pre id="speech-preview" class="speech-preview">Waiting for microphone.</pre>
           <p id="speech-files" class="speech-files">Speech config files: config/speech-profiles.json, config/speech-runtime.json, config/activation_phrases.txt</p>
+        </section>
+
+        <section class="runtime-panel" data-state="ready">
+          <div class="runtime-head">
+            <h2>Runtime Feedback</h2>
+            <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
+          </div>
+          <p id="runtime-feedback-status" class="runtime-status">Checking runtime target...</p>
+          <pre id="runtime-feedback-output" class="runtime-preview">Waiting for runtime feedback.</pre>
+          <p id="runtime-files" class="runtime-files">Runtime config files: config/robot-runtime.json, config/robot-ros2.json, config/robot-waypoints.json, config/robot-motion.json</p>
         </section>
 
         <form id="chat-form" class="chat-form">

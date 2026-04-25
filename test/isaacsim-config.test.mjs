@@ -31,12 +31,11 @@ test('normalizeIsaacSidecarConfig fills managed launch defaults', () => {
   assert.deepEqual(config.launch.isaacSimLaunchArgs, [])
 })
 
-test('workspace Isaac launch config defaults to viewport-only startup', async () => {
+test('workspace Isaac launch config defaults to tiny windowed startup', async () => {
   const raw = JSON.parse(await readFile('config/isaacsim-sidecar.json', 'utf8'))
 
   assert.deepEqual(raw.launch.isaacSimLaunchArgs, [
-    '--/app/window/hideUi=true',
-    '--/app/window/width=960',
-    '--/app/window/height=600',
+    '--/app/window/width=640',
+    '--/app/window/height=640',
   ])
 })

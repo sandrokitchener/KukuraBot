@@ -1,12 +1,21 @@
 dogzilla_bridge:
   ros__parameters:
-    enabled: false
+    enabled: true
     dry_run: true
-    robot_model: "dogzilla-s1-or-s2"
+    robot_model: "dogzilla-s2"
     namespace: "/dogzilla"
-    command_timeout_sec: 1.0
+    command_plan_topic: "/dogzilla/command_plan"
+    cmd_vel_topic: "/dogzilla/cmd_vel"
+    action_topic: "/dogzilla/action"
+    stabilize_topic: "/dogzilla/stabilize"
+    state_topic: "/dogzilla/state"
+    publish_state_hz: 1.0
+    deadband: 0.05
+    linear_x_full_scale_step: 25.0
+    linear_y_full_scale_step: 18.0
+    angular_z_full_scale_step: 100.0
     waypoint_file: "config/robot-waypoints.json"
     action_file: "config/robot-actions.json"
     motion_file: "config/robot-motion.json"
     bridge_contract_file: "config/robot-ros2.json"
-    notes: "Dummy scaffold only. Safe to edit. Not wired into runtime yet."
+    notes: "Publishes periodic JSON state to /dogzilla/state and accepts canonical plan JSON on /dogzilla/command_plan."

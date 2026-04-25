@@ -3,6 +3,11 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { loadIsaacSidecarConfig } from './lib/isaacsim-config.mjs'
 import { startManagedIsaacEnvironment } from './lib/isaacsim-launcher.mjs'
+import { loadRobotRos2Config, loadRobotRuntimeConfig } from './lib/robot-runtime-config.mjs'
+import { startManagedRobotEnvironment } from './lib/robot-sidecar-launcher.mjs'
+import { resolveActiveSpeechProfile } from './lib/speech-profile-config.mjs'
+import { loadSpeechSidecarConfig } from './lib/speech-sidecar-config.mjs'
+import { startManagedSpeechSidecar } from './lib/speech-sidecar-launcher.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
@@ -11,8 +16,42 @@ const PORT = Number(cliOptions.port || process.env.APP_PORT || process.env.KUKUR
 const MODEL_PROFILE = cliOptions.profile || process.env.APP_MODEL_PROFILE || ''
 const APP_URL = `http://${HOST}:${PORT}`
 const isaacSidecarConfig = await loadIsaacSidecarConfig()
-const managedIsaacEnvironment = await startManagedIsaacEnvironment({
-  sidecarConfig: isaacSidecarConfig,
+const robotRuntimeConfig = await loadRobotRuntimeConfig({
+  env: {
+    ...process.env,
+    ...(cliOptions.robotTarget ? { ROBOT_RUNTIME_TARGET: cliOptions.robotTarget } : {}),
+  },
+})
+const robotRos2Config = await loadRobotRos2Config()
+const speechProfileConfig = await resolveActiveSpeechProfile()
+const speechSidecarConfig = await loadSpeechSidecarConfig()
+const shouldManageIsaac = !robotRuntimeConfig.enabled || (robotRuntimeConfig.activeTarget?.kind || '') === 'isaacsim'
+const shouldManageRobot = robotRuntimeConfig.enabled && (robotRuntimeConfig.activeTarget?.kind || '') === 'ros2-bridge'
+const managedIsaacEnvironment = shouldManageIsaac
+  ? await startManagedIsaacEnvironment({
+    sidecarConfig: isaacSidecarConfig,
+    rootDir: __dirname,
+    logger: console,
+  })
+  : createNoopManagedEnvironment('isaacsim')
+const managedRobotEnvironment = shouldManageRobot
+  ? await startManagedRobotEnvironment({
+    runtimeConfig: robotRuntimeConfig,
+    ros2Config: robotRos2Config,
+    rootDir: __dirname,
+    logger: console,
+  })
+  : createNoopManagedEnvironment('ros2')
+const managedSpeechEnvironment = await startManagedSpeechSidecar({
+  sidecarConfig: shouldManageSpeechSidecar(speechProfileConfig)
+    ? speechSidecarConfig
+    : {
+      ...speechSidecarConfig,
+      launch: {
+        ...speechSidecarConfig.launch,
+        managedByApp: false,
+      },
+    },
   rootDir: __dirname,
   logger: console,
 })
@@ -25,6 +64,7 @@ const server = spawn(process.execPath, ['server.mjs'], {
     APP_HOST: HOST,
     APP_PORT: String(PORT),
     APP_MODEL_PROFILE: MODEL_PROFILE,
+    ROBOT_RUNTIME_TARGET: robotRuntimeConfig.activeTargetId,
     KUKURA_HOST: HOST,
     KUKURA_PORT: String(PORT),
   },
@@ -41,7 +81,9 @@ server.once('spawn', () => {
 })
 
 server.on('exit', (code, signal) => {
+  void managedSpeechEnvironment.stop()
   void managedIsaacEnvironment.stop()
+  void managedRobotEnvironment.stop()
 
   if (signal) {
     process.exit(0)
@@ -52,14 +94,18 @@ server.on('exit', (code, signal) => {
 })
 
 server.on('error', (error) => {
+  void managedSpeechEnvironment.stop()
   void managedIsaacEnvironment.stop()
+  void managedRobotEnvironment.stop()
   console.error(`Launcher failed: ${error instanceof Error ? error.message : String(error)}`)
   process.exit(1)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    void managedSpeechEnvironment.stop()
     void managedIsaacEnvironment.stop()
+    void managedRobotEnvironment.stop()
 
     if (!server.killed) {
       server.kill(signal)
@@ -100,6 +146,10 @@ function openBrowser(url) {
   child.unref()
 }
 
+function shouldManageSpeechSidecar(speechProfileConfig) {
+  return speechProfileConfig.activeProfile?.provider === 'parakeet-sidecar'
+}
+
 function parseCliArgs(argv) {
   const options = {}
 
@@ -121,8 +171,22 @@ function parseCliArgs(argv) {
     if (value === '--profile' && argv[index + 1]) {
       options.profile = argv[index + 1]
       index += 1
+      continue
+    }
+
+    if (value === '--robot-target' && argv[index + 1]) {
+      options.robotTarget = argv[index + 1]
+      index += 1
     }
   }
 
   return options
+}
+
+function createNoopManagedEnvironment(label) {
+  return {
+    enabled: false,
+    label,
+    async stop() {},
+  }
 }

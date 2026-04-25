@@ -1,0 +1,28 @@
+{
+  "transport": {
+    "kind": "http",
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:8892",
+    "healthPath": "/healthz",
+    "transcribePath": "/transcribe",
+    "timeoutMs": 60000
+  },
+  "launch": {
+    "managedByApp": true,
+    "runtime": "wsl",
+    "wslCommand": "wsl.exe",
+    "wslDistribution": "",
+    "pythonPath": "python3",
+    "scriptPath": "sidecars/parakeet_bridge/server.py",
+    "linuxWorkdir": "",
+    "linuxScriptPath": "",
+    "scriptArgs": [],
+    "workdir": ".",
+    "sidecarReadyTimeoutMs": 120000,
+    "notes": [
+      "Official NVIDIA NeMo support for parakeet-tdt-0.6b-v3 targets Linux environments.",
+      "Managed startup uses WSL by default on Windows. Install NeMo ASR and PyTorch in your WSL distribution first.",
+      "Set wslDistribution when you want a specific distro; leave linuxWorkdir/linuxScriptPath empty to auto-map Windows repo paths to /mnt/<drive>/..."
+    ]
+  }
+}

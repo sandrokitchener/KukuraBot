@@ -46,3 +46,21 @@ test('resolveSpeechProfileSelection falls back to runtime config when no overrid
   assert.equal(result.source, 'runtime')
   assert.equal(result.selectionLocked, false)
 })
+
+test('normalizeSpeechProfilesConfig keeps parakeet profile metadata', () => {
+  const config = normalizeSpeechProfilesConfig({
+    profiles: {
+      parakeet: {
+        provider: 'parakeet-sidecar',
+        modelId: 'nvidia/parakeet-tdt-0.6b-v3',
+        timestamps: true,
+        device: 'auto',
+      },
+    },
+  })
+
+  assert.equal(config.profiles.parakeet.provider, 'parakeet-sidecar')
+  assert.equal(config.profiles.parakeet.modelId, 'nvidia/parakeet-tdt-0.6b-v3')
+  assert.equal(config.profiles.parakeet.timestamps, true)
+  assert.equal(config.profiles.parakeet.device, 'auto')
+})

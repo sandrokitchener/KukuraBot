@@ -1,16 +1,47 @@
 {
   "bridge": {
-    "enabled": false,
+    "enabled": true,
     "dryRun": true,
     "packageName": "dogzilla_bridge",
     "nodeName": "dogzilla_bridge",
-    "namespace": "/dogzilla"
+    "namespace": "/dogzilla",
+    "commandPlanTopic": "/dogzilla/command_plan",
+    "stateTopic": "/dogzilla/state"
+  },
+  "transport": {
+    "kind": "http",
+    "enabled": true,
+    "dryRun": true,
+    "dispatchOnChat": true,
+    "baseUrl": "http://127.0.0.1:8892",
+    "healthPath": "/healthz",
+    "commandsPath": "/commands",
+    "feedbackPath": "/feedback",
+    "timeoutMs": 4000
+  },
+  "launch": {
+    "managedByApp": true,
+    "pythonPath": "C:\\pixi_ws\\.pixi\\envs\\default\\python.exe",
+    "commandPath": "scripts/launch-ros2-http-bridge.bat",
+    "scriptPath": "sidecars/ros2_bridge/server.py",
+    "scriptArgs": [],
+    "workdir": ".",
+    "sidecarReadyTimeoutMs": 10000,
+    "rosWorkspacePath": "ros2",
+    "rosSetupScriptPath": "",
+    "windowsSetupScriptPath": "scripts/setup-ros2-humble-windows.ps1",
+    "launchBridgeScriptPath": "scripts/launch-ros2-dogzilla-bridge.bat",
+    "notes": [
+      "Managed launch starts the repo-local HTTP bridge sidecar that can publish into ROS2 when rclpy is available.",
+      "For a Pi-hosted robot stack, set transport.baseUrl to the remote bridge instead of launching locally."
+    ]
   },
   "topics": {
     "cmdVel": "/dogzilla/cmd_vel",
     "action": "/dogzilla/action",
     "stabilize": "/dogzilla/stabilize",
-    "state": "/dogzilla/state"
+    "state": "/dogzilla/state",
+    "commandPlan": "/dogzilla/command_plan"
   },
   "services": {
     "setPose": "/dogzilla/set_pose",
@@ -20,8 +51,24 @@
   "actions": {
     "navigateNamedTarget": "/dogzilla/navigate_named_target"
   },
+  "feedback": {
+    "pollMs": 2500,
+    "recentCommandLimit": 20
+  },
+  "windows": {
+    "preferredDistro": "humble",
+    "alternateDistro": "jazzy",
+    "installRoot": "C:\\ros2_humble",
+    "pixiWorkspace": "C:\\pixi_ws",
+    "setupScriptPath": "scripts/setup-ros2-humble-windows.ps1",
+    "notes": [
+      "Choose Humble first because DOGZILLA S2 docs and Isaac Sim on Windows both document Humble support.",
+      "Jazzy is the newer ROS2 LTS and remains useful for playground work, but cross-distro comms are not guaranteed."
+    ]
+  },
   "notes": [
     "These are our intended bridge names, not verified Yahboom internal ROS2 interfaces.",
-    "Edit freely once the actual robot-side contract is clearer."
+    "The app publishes canonical plan JSON to /dogzilla/command_plan first, then the ROS bridge node owns any fanout to lower-level topics/services.",
+    "Edit transport, launch, and topic names freely once the real robot-side contract is bench-verified."
   ]
 }
