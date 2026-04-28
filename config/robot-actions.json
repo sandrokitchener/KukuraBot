@@ -4,10 +4,66 @@
     "default": {
       "tricks": {
         "random": {
-          "actionId": null,
-          "verified": false,
+          "actionId": 14,
+          "verified": true,
           "notes": [
-            "Placeholder only. Choose a safe fallback action later."
+            "Safe default mapped to Stretch for first hardware smoke tests."
+          ]
+        },
+        "lie_down": {
+          "actionId": 1,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Lie_Down as action 1."
+          ]
+        },
+        "stand_up": {
+          "actionId": 2,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Stand_Up as action 2."
+          ]
+        },
+        "crawl": {
+          "actionId": 3,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Crawl as action 3."
+          ]
+        },
+        "sit": {
+          "actionId": 12,
+          "verified": true,
+          "notes": [
+            "Alias for Sit_Down. Official Performing actions widget map lists Sit_Down as action 12."
+          ]
+        },
+        "sit_down": {
+          "actionId": 12,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Sit_Down as action 12."
+          ]
+        },
+        "stretch": {
+          "actionId": 14,
+          "verified": true,
+          "notes": [
+            "Official app calls action 14 on boot and comments it as stretch."
+          ]
+        },
+        "swing": {
+          "actionId": 16,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Swing as action 16."
+          ]
+        },
+        "pray": {
+          "actionId": 17,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Pray as action 17."
           ]
         },
         "backflip": {

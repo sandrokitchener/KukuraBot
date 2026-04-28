@@ -51,3 +51,29 @@ test('normalizeRobotRos2Config fills transport and launch defaults', () => {
   assert.equal(config.launch.scriptPath, 'sidecars/ros2_bridge/server.py')
   assert.equal(config.windows.preferredDistro, 'humble')
 })
+
+test('normalizeRobotRos2Config accepts env overrides for remote robot bringup', () => {
+  const config = normalizeRobotRos2Config(
+    {
+      transport: {
+        baseUrl: 'http://127.0.0.1:8892',
+        dryRun: true,
+        timeoutMs: 4000,
+      },
+      launch: {
+        managedByApp: true,
+      },
+    },
+    {
+      ROBOT_ROS2_BASE_URL: 'http://192.168.8.88:8892',
+      ROBOT_ROS2_TRANSPORT_DRY_RUN: '0',
+      ROBOT_ROS2_MANAGED_BY_APP: 'false',
+      ROBOT_ROS2_TIMEOUT_MS: '9000',
+    },
+  )
+
+  assert.equal(config.transport.baseUrl, 'http://192.168.8.88:8892')
+  assert.equal(config.transport.dryRun, false)
+  assert.equal(config.transport.timeoutMs, 9000)
+  assert.equal(config.launch.managedByApp, false)
+})

@@ -41,14 +41,14 @@
     ]
   },
   "examples": [
-    {
-      "input": "do a backflip",
-      "output": {
-        "command": "trick",
-        "waypoint": "current_position",
-        "trick": "backflip"
-      }
-    },
+      {
+        "input": "sit",
+        "output": {
+          "command": "trick",
+          "waypoint": "current_position",
+          "trick": "sit"
+        }
+      },
     {
       "input": "do a trick",
       "output": {
