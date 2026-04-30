@@ -114,12 +114,12 @@ let activeThinkingCue = null
 let thinkingCueToken = 0
 const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS)
 const thinkingCuePlayer = createCommandCuePlayer(THINKING_CUE_URLS, {
-  gain: 0.18,
-  playbackRate: 0.84,
-  detune: -260,
-  distortion: 38,
-  bits: 6,
-  reduction: 0.12,
+  gain: 0.12,
+  playbackRate: 0.98,
+  detune: -70,
+  distortion: 8,
+  bits: 13,
+  reduction: 1,
 })
 let appConfig = {
   assistantName: 'Assistant',
