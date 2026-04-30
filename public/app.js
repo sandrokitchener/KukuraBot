@@ -66,6 +66,17 @@ const emptyMessageBubble = document.querySelector('#empty-message-bubble')
 const emptyMessageMeta = document.querySelector('#empty-message-meta')
 const EMPTY_CHAT_SELECTOR = '.message-empty'
 const MESSAGE_SELECTOR = '.message:not(.message-empty)'
+const COMMAND_CUE_URLS = [
+  '/sounds/robot-bark.mp3',
+  '/sounds/robot-bark-alt-1.wav',
+]
+const THINKING_CUE_URLS = [
+  '/sounds/robot-think-whimper-1.wav',
+  '/sounds/robot-think-whimper-2.wav',
+  '/sounds/robot-think-pant-1.wav',
+]
+const MOBILE_VIEWS = ['robot', 'chat', 'audio']
+const MOBILE_DEFAULT_VIEW = 'chat'
 const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
 const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   silenceDurationMs: 500,
@@ -99,7 +110,17 @@ const DEFAULT_ROBOT_RUNTIME = {
 let thinkingState = null
 let robotFeedbackTimerId = null
 let robotStateTimerId = null
-const commandCuePlayer = createCommandCuePlayer('/sounds/robot-bark.mp3')
+let activeThinkingCue = null
+let thinkingCueToken = 0
+const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS)
+const thinkingCuePlayer = createCommandCuePlayer(THINKING_CUE_URLS, {
+  gain: 0.18,
+  playbackRate: 0.84,
+  detune: -260,
+  distortion: 38,
+  bits: 6,
+  reduction: 0.12,
+})
 let appConfig = {
   assistantName: 'Assistant',
   pageTitle: 'Robot Test App',
@@ -136,11 +157,14 @@ let runtimeConfig = {
   robotRuntime: { ...DEFAULT_ROBOT_RUNTIME },
 }
 let speechController = null
+let mobileView = MOBILE_DEFAULT_VIEW
+let touchStart = null
 const isaacCompletionState = {
   initialized: false,
   lastEventId: null,
 }
 
+initAndroidAppShell()
 boot()
 
 form.addEventListener('submit', handleChatSubmit)
@@ -152,6 +176,75 @@ settingsToggle.addEventListener('click', handleSettingsToggle)
 
 for (const tab of robotTabs) {
   tab.addEventListener('click', handleRobotTabClick)
+}
+
+function initAndroidAppShell() {
+  if (!isAndroidAppShell()) {
+    return
+  }
+
+  document.documentElement.classList.add('android-app')
+  setMobileView(MOBILE_DEFAULT_VIEW)
+  document.addEventListener('touchstart', handleMobileTouchStart, { passive: true })
+  document.addEventListener('touchend', handleMobileTouchEnd, { passive: true })
+}
+
+function isAndroidAppShell() {
+  const userAgent = navigator.userAgent || ''
+  return /Android/i.test(userAgent) && (/\bwv\b/i.test(userAgent) || !!window.__TAURI_INTERNALS__)
+}
+
+function handleMobileTouchStart(event) {
+  if (!document.documentElement.classList.contains('android-app') || isInteractiveTarget(event.target)) {
+    touchStart = null
+    return
+  }
+
+  const touch = event.changedTouches?.[0]
+  touchStart = touch
+    ? {
+      x: touch.clientX,
+      y: touch.clientY,
+      at: Date.now(),
+    }
+    : null
+}
+
+function handleMobileTouchEnd(event) {
+  if (!touchStart) {
+    return
+  }
+
+  const touch = event.changedTouches?.[0]
+  const start = touchStart
+  touchStart = null
+
+  if (!touch) {
+    return
+  }
+
+  const deltaX = touch.clientX - start.x
+  const deltaY = touch.clientY - start.y
+  const elapsedMs = Date.now() - start.at
+
+  if (elapsedMs > 700 || Math.abs(deltaX) < 58 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) {
+    return
+  }
+
+  const currentIndex = MOBILE_VIEWS.indexOf(mobileView)
+  const nextIndex = deltaX < 0
+    ? Math.min(MOBILE_VIEWS.length - 1, currentIndex + 1)
+    : Math.max(0, currentIndex - 1)
+  setMobileView(MOBILE_VIEWS[nextIndex])
+}
+
+function setMobileView(view) {
+  mobileView = MOBILE_VIEWS.includes(view) ? view : MOBILE_DEFAULT_VIEW
+  document.documentElement.dataset.mobileView = mobileView
+}
+
+function isInteractiveTarget(target) {
+  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .output-scroll, .settings-drawer')
 }
 
 async function boot() {
@@ -1196,6 +1289,17 @@ function startThinkingFeedback(messageNode) {
     `Target ${runtimeConfig.robotRuntime.activeTarget.label}`,
   ]
   let frame = 0
+  stopThinkingCue()
+  const cueToken = ++thinkingCueToken
+  thinkingCuePlayer.play({ loop: true }).then((cue) => {
+    if (cueToken !== thinkingCueToken) {
+      cue?.stop?.()
+      return
+    }
+    activeThinkingCue = cue
+  }).catch((error) => {
+    console.warn('Thinking cue failed:', error)
+  })
 
   const tick = () => {
     const elapsedMs = Date.now() - startedAt
@@ -1221,6 +1325,8 @@ function startThinkingFeedback(messageNode) {
 }
 
 function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
+  stopThinkingCue()
+
   if (thinkingState) {
     window.clearInterval(thinkingState.timerId)
   }
@@ -1230,6 +1336,18 @@ function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
   messageNode.querySelector('.message-bubble').textContent = text
   messageNode.querySelector('.message-meta').textContent = meta
   scrollChatToTop()
+}
+
+function stopThinkingCue() {
+  thinkingCueToken += 1
+
+  if (activeThinkingCue) {
+    activeThinkingCue.stop()
+    activeThinkingCue = null
+    return
+  }
+
+  thinkingCuePlayer.stopAll()
 }
 
 function setStatus(message, state = 'idle', elapsedMs = null) {

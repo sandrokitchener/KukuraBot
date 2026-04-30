@@ -36,10 +36,18 @@ function createBitcrusherNode(audioContext, { bits = 6, reduction = 0.18 } = {})
   return processor
 }
 
-export function createCommandCuePlayer(audioUrl) {
+export function createCommandCuePlayer(audioUrls, options = {}) {
+  const urls = Array.isArray(audioUrls) ? audioUrls : [audioUrls]
+  const gainLevel = Number.isFinite(options.gain) ? options.gain : 0.42
+  const playbackRate = Number.isFinite(options.playbackRate) ? options.playbackRate : 0.92
+  const detune = Number.isFinite(options.detune) ? options.detune : -120
+  const distortionAmount = Number.isFinite(options.distortion) ? options.distortion : 55
+  const crusherBits = Number.isFinite(options.bits) ? options.bits : 5
+  const crusherReduction = Number.isFinite(options.reduction) ? options.reduction : 0.16
   let audioContext = null
-  let decodedBuffer = null
-  let bufferPromise = null
+  const decodedBuffers = new Map()
+  const bufferPromises = new Map()
+  const activeSources = new Set()
 
   async function ensureAudioContext() {
     if (audioContext) {
@@ -57,13 +65,13 @@ export function createCommandCuePlayer(audioUrl) {
     return audioContext
   }
 
-  async function ensureBuffer() {
-    if (decodedBuffer) {
-      return decodedBuffer
+  async function ensureBuffer(audioUrl) {
+    if (decodedBuffers.has(audioUrl)) {
+      return decodedBuffers.get(audioUrl)
     }
 
-    if (!bufferPromise) {
-      bufferPromise = (async () => {
+    if (!bufferPromises.has(audioUrl)) {
+      bufferPromises.set(audioUrl, (async () => {
         const context = await ensureAudioContext()
         const response = await fetch(audioUrl)
 
@@ -72,23 +80,35 @@ export function createCommandCuePlayer(audioUrl) {
         }
 
         const audioData = await response.arrayBuffer()
-        decodedBuffer = await context.decodeAudioData(audioData.slice(0))
+        const decodedBuffer = await context.decodeAudioData(audioData.slice(0))
+        decodedBuffers.set(audioUrl, decodedBuffer)
         return decodedBuffer
-      })()
+      })())
     }
 
-    return bufferPromise
+    return bufferPromises.get(audioUrl)
+  }
+
+  function pickUrl() {
+    const playableUrls = urls.filter(Boolean)
+    return playableUrls[Math.floor(Math.random() * playableUrls.length)]
   }
 
   return {
-    async play() {
+    async play(playOptions = {}) {
+      const audioUrl = pickUrl()
+      if (!audioUrl) {
+        return null
+      }
+
       const context = await ensureAudioContext()
-      const buffer = await ensureBuffer()
+      const buffer = await ensureBuffer(audioUrl)
 
       const source = context.createBufferSource()
       source.buffer = buffer
-      source.playbackRate.value = 0.92
-      source.detune.value = -120
+      source.loop = !!playOptions.loop
+      source.playbackRate.value = playbackRate
+      source.detune.value = detune
 
       const bandpass = context.createBiquadFilter()
       bandpass.type = 'bandpass'
@@ -100,10 +120,10 @@ export function createCommandCuePlayer(audioUrl) {
       highpass.frequency.value = 260
 
       const distortion = context.createWaveShaper()
-      distortion.curve = createDistortionCurve(55)
+      distortion.curve = createDistortionCurve(distortionAmount)
       distortion.oversample = '4x'
 
-      const bitcrusher = createBitcrusherNode(context, { bits: 5, reduction: 0.16 })
+      const bitcrusher = createBitcrusherNode(context, { bits: crusherBits, reduction: crusherReduction })
 
       const compressor = context.createDynamicsCompressor()
       compressor.threshold.value = -22
@@ -113,7 +133,7 @@ export function createCommandCuePlayer(audioUrl) {
       compressor.release.value = 0.1
 
       const gain = context.createGain()
-      gain.gain.value = 0.42
+      gain.gain.value = gainLevel
 
       source.connect(highpass)
       highpass.connect(bandpass)
@@ -122,8 +142,10 @@ export function createCommandCuePlayer(audioUrl) {
       bitcrusher.connect(compressor)
       compressor.connect(gain)
       gain.connect(context.destination)
+      activeSources.add(source)
 
       source.addEventListener('ended', () => {
+        activeSources.delete(source)
         source.disconnect()
         highpass.disconnect()
         bandpass.disconnect()
@@ -134,6 +156,24 @@ export function createCommandCuePlayer(audioUrl) {
       }, { once: true })
 
       source.start()
+      return {
+        stop() {
+          try {
+            source.stop()
+          } catch {
+            activeSources.delete(source)
+          }
+        },
+      }
+    },
+    stopAll() {
+      for (const source of Array.from(activeSources)) {
+        try {
+          source.stop()
+        } catch {
+          activeSources.delete(source)
+        }
+      }
     },
   }
 }
