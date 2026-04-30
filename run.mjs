@@ -42,7 +42,7 @@ const managedRobotEnvironment = shouldManageRobot
     logger: console,
   })
   : createNoopManagedEnvironment('ros2')
-const managedSpeechEnvironment = await startManagedSpeechSidecar({
+const managedSpeechEnvironment = await startOptionalManagedSpeechSidecar({
   sidecarConfig: shouldManageSpeechSidecar(speechProfileConfig)
     ? speechSidecarConfig
     : {
@@ -150,6 +150,16 @@ function shouldManageSpeechSidecar(speechProfileConfig) {
   return speechProfileConfig.activeProfile?.provider === 'parakeet-sidecar'
 }
 
+async function startOptionalManagedSpeechSidecar(options) {
+  try {
+    return await startManagedSpeechSidecar(options)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    options.logger?.warn?.(`Speech sidecar unavailable; continuing without managed speech sidecar. ${message}`)
+    return createNoopManagedEnvironment('speech', message)
+  }
+}
+
 function parseCliArgs(argv) {
   const options = {}
 
@@ -183,10 +193,11 @@ function parseCliArgs(argv) {
   return options
 }
 
-function createNoopManagedEnvironment(label) {
+function createNoopManagedEnvironment(label, error = '') {
   return {
     enabled: false,
     label,
+    error,
     async stop() {},
   }
 }

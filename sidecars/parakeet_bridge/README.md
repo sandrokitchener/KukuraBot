@@ -1,5 +1,8 @@
 # Parakeet Sidecar
 
+Legacy NeMo/PyTorch bridge for `nvidia/parakeet-tdt-0.6b-v3`.
+The default app-managed path now uses `sidecars/parakeet_onnx_bridge/server.py` so Windows can run without WSL.
+
 Tiny HTTP bridge for `nvidia/parakeet-tdt-0.6b-v3`.
 
 Purpose:
@@ -12,6 +15,14 @@ Routes:
 
 - `GET /healthz`
 - `POST /transcribe`
+
+Default URL:
+
+```text
+http://127.0.0.1:8893
+```
+
+The ROS2 real-robot bridge uses `8892`, so Parakeet intentionally defaults to `8893`.
 
 Request body for `/transcribe`:
 

@@ -2,27 +2,28 @@
   "transport": {
     "kind": "http",
     "enabled": true,
-    "baseUrl": "http://127.0.0.1:8892",
+    "baseUrl": "http://127.0.0.1:8893",
     "healthPath": "/healthz",
     "transcribePath": "/transcribe",
-    "timeoutMs": 60000
+    "timeoutMs": 600000
   },
   "launch": {
     "managedByApp": true,
-    "runtime": "wsl",
+    "runtime": "python",
     "wslCommand": "wsl.exe",
     "wslDistribution": "",
-    "pythonPath": "python3",
-    "scriptPath": "sidecars/parakeet_bridge/server.py",
+    "pythonPath": "python",
+    "scriptPath": "sidecars/parakeet_onnx_bridge/server.py",
     "linuxWorkdir": "",
     "linuxScriptPath": "",
     "scriptArgs": [],
     "workdir": ".",
-    "sidecarReadyTimeoutMs": 120000,
+    "sidecarReadyTimeoutMs": 20000,
     "notes": [
-      "Official NVIDIA NeMo support for parakeet-tdt-0.6b-v3 targets Linux environments.",
-      "Managed startup uses WSL by default on Windows. Install NeMo ASR and PyTorch in your WSL distribution first.",
-      "Set wslDistribution when you want a specific distro; leave linuxWorkdir/linuxScriptPath empty to auto-map Windows repo paths to /mnt/<drive>/..."
+      "Default managed startup uses the ONNX Parakeet bridge so Windows can run without WSL.",
+      "Install onnx-asr and ONNX Runtime in this Python environment first: pip install \"onnx-asr[cpu,hub]\".",
+      "Set PARAKEET_ONNX_MODEL_ID to a local model directory or another onnx-asr model alias when needed.",
+      "The legacy NeMo/WSL bridge remains at sidecars/parakeet_bridge/server.py."
     ]
   }
 }

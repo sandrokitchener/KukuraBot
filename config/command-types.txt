@@ -1,6 +1,5 @@
 - movement:
   - go to the kitchen
-  - come here send waypoint as "source"
   - if location is not among list of valid waypoints in {{VALID_WAYPOINTS}} ask for clarification. 
   - if location implies multiple locations send multiple JSON
 - detection:
@@ -10,3 +9,9 @@
   - words like trick, backflip, or play should stay in COMMAND mode
   - if the user names a specific trick, set "trick" to that normalized trick name
   - if the user asks for a trick without naming one, set "trick" to "random"
+- patrol:
+  - loop between waypoints until interrupted
+  - if user asks for patrol but mentions only 1 waypoint ask for clarification
+  - requires minimum 2 waypoints
+- return:
+  - find user who issued return and go to them

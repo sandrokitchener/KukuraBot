@@ -30,6 +30,13 @@ test('normalizeSpeechSidecarConfig fills HTTP and launch defaults', () => {
   assert.equal(config.launch.sidecarReadyTimeoutMs, 120000)
 })
 
+test('normalizeSpeechSidecarConfig defaults Parakeet sidecar away from ROS2 bridge port', () => {
+  const config = normalizeSpeechSidecarConfig()
+
+  assert.equal(config.transport.baseUrl, 'http://127.0.0.1:8893')
+  assert.equal(config.launch.scriptPath, 'sidecars/parakeet_onnx_bridge/server.py')
+})
+
 test('normalizeSpeechSidecarConfig keeps WSL launch fields for Parakeet', () => {
   const config = normalizeSpeechSidecarConfig({
     launch: {

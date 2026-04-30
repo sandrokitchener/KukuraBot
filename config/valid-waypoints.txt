@@ -6,3 +6,4 @@
 - master bedroom
 - game room
 - guest room
+- user

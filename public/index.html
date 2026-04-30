@@ -8,13 +8,138 @@
   </head>
   <body>
     <main class="shell">
-      <section class="panel">
-        <p id="app-eyebrow" class="eyebrow">Ollama robot-control test</p>
-        <h1 id="app-title">Robot Console</h1>
-        <p id="app-description" class="lede">
-          Test a local robot-control wrapper for robot-chat vs robot-command behavior. Edit the prompt
-          and response schema files directly whenever you want.
-        </p>
+      <button
+        id="settings-toggle"
+        class="settings-toggle"
+        type="button"
+        aria-controls="settings-drawer"
+        aria-expanded="false"
+        aria-label="Toggle settings"
+        title="Settings"
+      ></button>
+
+      <section class="console-layout">
+        <aside class="control-rail" aria-label="Robot console navigation">
+          <div class="rail-brand" title="Robo-Doge">A</div>
+          <span class="rail-icon is-active" title="Command center">⌘</span>
+          <span class="rail-icon" title="Robot fleet">◎</span>
+          <span class="rail-icon" title="Navigation">◇</span>
+          <span class="rail-icon" title="Telemetry">≋</span>
+          <span class="rail-icon rail-icon-accent" title="Speech online">●</span>
+          <span class="rail-spacer" aria-hidden="true"></span>
+          <img class="rail-company-logo" src="/assets/dtx-logo-black.webp" alt="DTX" title="DTX" />
+          <span class="rail-icon" title="Diagnostics">⚙</span>
+        </aside>
+
+        <section class="command-zone">
+          <p id="app-eyebrow" class="eyebrow">Ollama robot-control test</p>
+          <h1 id="app-title">Robot Console</h1>
+          <p id="app-description" class="lede">
+            Test a local robot-control wrapper for robot-chat vs robot-command behavior. Edit the prompt
+            and response schema files directly whenever you want.
+          </p>
+
+          <form id="chat-form" class="chat-form">
+            <label for="user-input">Message</label>
+            <textarea
+              id="user-input"
+              rows="6"
+              placeholder="Try: go to the living room"
+            ></textarea>
+            <button id="send-button" type="submit">Ask Assistant</button>
+          </form>
+
+          <div id="status" class="status" data-state="idle">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="status-text">Ready.</span>
+            <span id="status-timer" class="status-timer"></span>
+          </div>
+
+          <section class="speech-panel">
+            <div class="speech-head">
+              <h2>Speech Input</h2>
+              <span id="speech-profile-name" class="speech-chip">Loading...</span>
+            </div>
+            <p id="speech-status" class="speech-status">Starting microphone...</p>
+            <pre id="speech-preview" class="speech-preview">Waiting for microphone.</pre>
+          </section>
+        </section>
+
+        <section class="robot-column">
+          <nav class="robot-tabs" aria-label="Robot tabs">
+            <button class="robot-tab is-active" type="button" aria-selected="true">Robo Doge</button>
+            <button class="robot-tab" type="button" aria-selected="false">Scout</button>
+            <button class="robot-tab" type="button" aria-selected="false">Dock</button>
+          </nav>
+
+          <section id="robot-state-panel" class="robot-state-panel" data-state="waiting">
+            <div class="robot-state-head">
+              <h2>Robot Info</h2>
+              <span id="robot-state-chip" class="robot-state-chip">Waiting</span>
+            </div>
+
+            <div class="robot-identity-grid">
+              <div>
+                <span class="robot-state-label">Robot</span>
+                <strong id="robot-state-name">No robot</strong>
+              </div>
+              <div>
+                <span class="robot-state-label">Task</span>
+                <strong id="robot-state-task">Waiting</strong>
+              </div>
+              <div>
+                <span class="robot-state-label">Seq</span>
+                <strong id="robot-state-seq">-</strong>
+              </div>
+              <div>
+                <span class="robot-state-label">Target</span>
+                <strong id="runtime-target-name">Loading...</strong>
+                <div id="runtime-target-source" class="meta-note"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="robot-map-panel">
+            <div class="robot-map-head">
+              <h2>Mini Map</h2>
+              <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
+            </div>
+            <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
+              <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
+              <span class="robot-map-axis robot-map-axis-y" aria-hidden="true"></span>
+              <span id="robot-map-dot" class="robot-map-dot" aria-hidden="true"></span>
+            </div>
+            <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>
+          </section>
+
+          <section class="output-panel">
+            <div class="response-head">
+              <h2>Output Log</h2>
+            </div>
+            <div class="output-scroll">
+              <div id="chat-log" class="chat-log" aria-live="polite">
+                <article class="message message-assistant message-empty">
+                  <div id="empty-message-role" class="message-role">Assistant</div>
+                  <pre id="empty-message-bubble" class="message-bubble">Waiting for first message.</pre>
+                  <div id="empty-message-meta" class="message-meta">Prompt ready.</div>
+                </article>
+              </div>
+
+              <div class="parsed-log">
+                <div class="response-head">
+                  <h2>Parsed JSON</h2>
+                </div>
+                <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
+              </div>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <aside id="settings-drawer" class="settings-drawer" hidden>
+        <div class="settings-drawer-head">
+          <h2>Settings</h2>
+        </div>
 
         <div class="meta-grid">
           <div class="meta-card">
@@ -47,11 +172,6 @@
             <strong id="waypoints-file">config/valid-waypoints.txt</strong>
           </div>
           <div class="meta-card">
-            <span class="meta-label">Runtime target</span>
-            <strong id="runtime-target-name">Loading...</strong>
-            <div id="runtime-target-source" class="meta-note"></div>
-          </div>
-          <div class="meta-card">
             <span class="meta-label">Robot runtime file</span>
             <strong id="robot-runtime-file">config/robot-runtime.json</strong>
           </div>
@@ -61,8 +181,7 @@
           </div>
         </div>
 
-        <details class="settings-panel">
-          <summary>Settings</summary>
+        <section class="settings-panel">
           <div class="settings-row">
             <label for="profile-select">Model profile</label>
             <select id="profile-select"></select>
@@ -78,13 +197,7 @@
           </div>
           <p id="robot-target-lock-note" class="settings-note">Selection saves to config/robot-runtime.json.</p>
           <div id="robot-target-status" class="settings-status">Loading robot targets...</div>
-        </details>
 
-        <section class="speech-panel">
-          <div class="speech-head">
-            <h2>Speech Input</h2>
-            <span id="speech-profile-name" class="speech-chip">Loading...</span>
-          </div>
           <div class="settings-row">
             <label for="speech-profile-select">Speech profile</label>
             <select id="speech-profile-select"></select>
@@ -92,59 +205,18 @@
           </div>
           <p id="speech-lock-note" class="settings-note">Selection saves to config/speech-runtime.json.</p>
           <div id="speech-settings-status" class="settings-status">Loading speech profiles...</div>
-          <p id="speech-status" class="speech-status">Starting microphone...</p>
-          <pre id="speech-preview" class="speech-preview">Waiting for microphone.</pre>
           <p id="speech-files" class="speech-files">Speech config files: config/speech-profiles.json, config/speech-runtime.json, config/activation_phrases.txt</p>
         </section>
 
         <section class="runtime-panel" data-state="ready">
           <div class="runtime-head">
             <h2>Runtime Feedback</h2>
-            <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
           </div>
           <p id="runtime-feedback-status" class="runtime-status">Checking runtime target...</p>
           <pre id="runtime-feedback-output" class="runtime-preview">Waiting for runtime feedback.</pre>
           <p id="runtime-files" class="runtime-files">Runtime config files: config/robot-runtime.json, config/robot-ros2.json, config/robot-waypoints.json, config/robot-motion.json</p>
         </section>
-
-        <form id="chat-form" class="chat-form">
-          <label for="user-input">Message</label>
-          <textarea
-            id="user-input"
-            rows="4"
-            placeholder="Try: go to the living room"
-          ></textarea>
-          <button id="send-button" type="submit">Ask Assistant</button>
-        </form>
-
-        <div id="status" class="status" data-state="idle">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span id="status-text">Ready.</span>
-          <span id="status-timer" class="status-timer"></span>
-        </div>
-
-        <section class="response-grid">
-          <article class="response-card">
-            <div class="response-head">
-              <h2>Chat</h2>
-            </div>
-            <div id="chat-log" class="chat-log" aria-live="polite">
-              <article class="message message-assistant message-empty">
-                <div id="empty-message-role" class="message-role">Assistant</div>
-                <pre id="empty-message-bubble" class="message-bubble">Waiting for first message.</pre>
-                <div id="empty-message-meta" class="message-meta">Prompt ready.</div>
-              </article>
-            </div>
-          </article>
-
-          <article class="response-card">
-            <div class="response-head">
-              <h2>Parsed JSON</h2>
-            </div>
-            <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
-          </article>
-        </section>
-      </section>
+      </aside>
     </main>
 
     <script type="module" src="/app.js"></script>

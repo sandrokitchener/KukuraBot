@@ -14,12 +14,12 @@ test('resolveManagedSpeechSidecarPlan builds launch command from config', () => 
   const plan = resolveManagedSpeechSidecarPlan(
     {
       transport: {
-        baseUrl: 'http://0.0.0.0:8892',
+        baseUrl: 'http://0.0.0.0:8893',
       },
       launch: {
         managedByApp: true,
         pythonPath: 'python',
-        scriptPath: 'sidecars/parakeet_bridge/server.py',
+        scriptPath: 'sidecars/parakeet_onnx_bridge/server.py',
         scriptArgs: ['--warm'],
         workdir: '.',
         sidecarReadyTimeoutMs: 15000,
@@ -33,11 +33,11 @@ test('resolveManagedSpeechSidecarPlan builds launch command from config', () => 
   assert.equal(plan.sidecar.command, 'python')
   assert.equal(plan.sidecar.cwd, rootDir)
   assert.deepEqual(plan.sidecar.args, [
-    path.join(rootDir, 'sidecars', 'parakeet_bridge', 'server.py'),
+    path.join(rootDir, 'sidecars', 'parakeet_onnx_bridge', 'server.py'),
     '--host',
     '0.0.0.0',
     '--port',
-    '8892',
+    '8893',
     '--warm',
   ])
   assert.equal(plan.sidecarReadyTimeoutMs, 15000)
@@ -48,7 +48,7 @@ test('resolveManagedSpeechSidecarPlan builds Windows-friendly WSL launch command
   const plan = resolveManagedSpeechSidecarPlan(
     {
       transport: {
-        baseUrl: 'http://127.0.0.1:8892',
+        baseUrl: 'http://127.0.0.1:8893',
       },
       launch: {
         managedByApp: true,
@@ -56,7 +56,7 @@ test('resolveManagedSpeechSidecarPlan builds Windows-friendly WSL launch command
         wslCommand: 'wsl.exe',
         wslDistribution: 'Ubuntu-22.04',
         pythonPath: '/home/sandr/parakeet/.venv/bin/python',
-        scriptPath: 'sidecars/parakeet_bridge/server.py',
+        scriptPath: 'sidecars/parakeet_onnx_bridge/server.py',
         scriptArgs: ['--warm'],
         workdir: '.',
       },
@@ -67,7 +67,7 @@ test('resolveManagedSpeechSidecarPlan builds Windows-friendly WSL launch command
   assert.equal(plan.sidecar.runtime, 'wsl')
   assert.equal(plan.sidecar.command, 'wsl.exe')
   assert.equal(plan.sidecar.cwd, rootDir)
-  assert.equal(plan.sidecar.scriptPath, path.join(rootDir, 'sidecars', 'parakeet_bridge', 'server.py'))
+  assert.equal(plan.sidecar.scriptPath, path.join(rootDir, 'sidecars', 'parakeet_onnx_bridge', 'server.py'))
   assert.deepEqual(plan.sidecar.args, [
     '-d',
     'Ubuntu-22.04',
@@ -75,11 +75,11 @@ test('resolveManagedSpeechSidecarPlan builds Windows-friendly WSL launch command
     '/mnt/c/Users/sandr/OneDrive/Documents/Robo-Doge',
     '--',
     '/home/sandr/parakeet/.venv/bin/python',
-    '/mnt/c/Users/sandr/OneDrive/Documents/Robo-Doge/sidecars/parakeet_bridge/server.py',
+    '/mnt/c/Users/sandr/OneDrive/Documents/Robo-Doge/sidecars/parakeet_onnx_bridge/server.py',
     '--host',
     '127.0.0.1',
     '--port',
-    '8892',
+    '8893',
     '--warm',
   ])
 })
@@ -101,12 +101,12 @@ test('startManagedSpeechSidecar reuses running bridge when already healthy', asy
     sidecarConfig: {
       transport: {
         enabled: true,
-        baseUrl: 'http://127.0.0.1:8892',
+        baseUrl: 'http://127.0.0.1:8893',
       },
       launch: {
         managedByApp: true,
         pythonPath: 'python',
-        scriptPath: 'sidecars/parakeet_bridge/server.py',
+        scriptPath: 'sidecars/parakeet_onnx_bridge/server.py',
         workdir: '.',
       },
     },
@@ -115,7 +115,7 @@ test('startManagedSpeechSidecar reuses running bridge when already healthy', asy
     },
     probeSpeechSidecarHealthImpl: async () => ({
       status: 'ok',
-      destination: 'http://127.0.0.1:8892/healthz',
+      destination: 'http://127.0.0.1:8893/healthz',
     }),
     spawnImpl: (...args) => {
       spawnCalls.push(args)
@@ -138,12 +138,12 @@ test('startManagedSpeechSidecar starts bridge after unavailable health check', a
     sidecarConfig: {
       transport: {
         enabled: true,
-        baseUrl: 'http://127.0.0.1:8892',
+        baseUrl: 'http://127.0.0.1:8893',
       },
       launch: {
         managedByApp: true,
         pythonPath: 'python',
-        scriptPath: 'sidecars/parakeet_bridge/server.py',
+        scriptPath: 'sidecars/parakeet_onnx_bridge/server.py',
         workdir: '.',
         sidecarReadyTimeoutMs: 1000,
       },
@@ -157,14 +157,14 @@ test('startManagedSpeechSidecar starts bridge after unavailable health check', a
       if (probeCount === 1) {
         return {
           status: 'error',
-          destination: 'http://127.0.0.1:8892/healthz',
+          destination: 'http://127.0.0.1:8893/healthz',
           error: 'connect ECONNREFUSED',
         }
       }
 
       return {
         status: 'ok',
-        destination: 'http://127.0.0.1:8892/healthz',
+        destination: 'http://127.0.0.1:8893/healthz',
       }
     },
     spawnImpl: (...args) => {

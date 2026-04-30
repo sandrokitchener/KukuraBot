@@ -217,7 +217,7 @@ def make_json_safe(value):
 def main():
     parser = argparse.ArgumentParser(description="Parakeet TDT speech bridge")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8892)
+    parser.add_argument("--port", type=int, default=8893)
     args = parser.parse_args()
 
     server = ParakeetBridgeServer((args.host, args.port), ParakeetBridgeHandler)

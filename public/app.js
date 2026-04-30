@@ -39,6 +39,16 @@ const runtimeTargetChip = document.querySelector('#runtime-target-chip')
 const runtimeFeedbackStatus = document.querySelector('#runtime-feedback-status')
 const runtimeFeedbackOutput = document.querySelector('#runtime-feedback-output')
 const runtimeFiles = document.querySelector('#runtime-files')
+const robotStatePanel = document.querySelector('#robot-state-panel')
+const robotStateChip = document.querySelector('#robot-state-chip')
+const robotStateName = document.querySelector('#robot-state-name')
+const robotStateTask = document.querySelector('#robot-state-task')
+const robotStateSeq = document.querySelector('#robot-state-seq')
+const robotMapDot = document.querySelector('#robot-map-dot')
+const robotMapMeta = document.querySelector('#robot-map-meta')
+const settingsToggle = document.querySelector('#settings-toggle')
+const settingsDrawer = document.querySelector('#settings-drawer')
+const robotTabs = document.querySelectorAll('.robot-tab')
 const form = document.querySelector('#chat-form')
 const input = document.querySelector('#user-input')
 const sendButton = document.querySelector('#send-button')
@@ -55,6 +65,7 @@ const MESSAGE_SELECTOR = '.message:not(.message-empty)'
 const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
 const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   silenceDurationMs: 500,
+  activationCommandWindowMs: 8000,
   minimumSpeechMs: 300,
   speechThreshold: 0.015,
 }
@@ -74,12 +85,16 @@ const DEFAULT_ROBOT_RUNTIME = {
   waypointsFile: 'config/robot-waypoints.json',
   motionFile: 'config/robot-motion.json',
   feedbackPollMs: 2500,
+  statePollMs: 125,
+  stateSnapshotPath: '/api/robot/state',
+  stateStreamPath: '/api/robot/state/stream',
   selectionLocked: false,
   source: 'runtime',
 }
 
 let thinkingState = null
 let robotFeedbackTimerId = null
+let robotStateTimerId = null
 const commandCuePlayer = createCommandCuePlayer('/sounds/robot-bark.mp3')
 let appConfig = {
   assistantName: 'Assistant',
@@ -128,12 +143,18 @@ form.addEventListener('submit', handleChatSubmit)
 saveProfileButton.addEventListener('click', handleProfileSave)
 saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
+settingsToggle.addEventListener('click', handleSettingsToggle)
+
+for (const tab of robotTabs) {
+  tab.addEventListener('click', handleRobotTabClick)
+}
 
 async function boot() {
   try {
     const payload = await fetchConfig()
     applyPayload(payload)
     startRobotFeedbackPolling()
+    startRobotStatePolling()
 
     try {
       await initializeSpeechController()
@@ -368,6 +389,7 @@ async function handleRobotTargetSave() {
 
     applyPayload(payload)
     startRobotFeedbackPolling()
+    startRobotStatePolling()
     await refreshRobotFeedback()
     robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
     setStatus(`Runtime target changed to ${runtimeConfig.robotRuntime.activeTarget.label}.`)
@@ -433,6 +455,75 @@ function startRobotFeedbackPolling() {
   robotFeedbackTimerId = window.setInterval(() => {
     void refreshRobotFeedback()
   }, pollMs)
+}
+
+function startRobotStatePolling() {
+  if (robotStateTimerId) {
+    window.clearInterval(robotStateTimerId)
+    robotStateTimerId = null
+  }
+
+  if (!isRealRobotTargetActive()) {
+    renderRobotStateInactive()
+    return
+  }
+
+  robotStatePanel.hidden = false
+  void refreshRobotState()
+
+  const pollMs = runtimeConfig.robotRuntime.statePollMs || DEFAULT_ROBOT_RUNTIME.statePollMs
+  robotStateTimerId = window.setInterval(() => {
+    void refreshRobotState()
+  }, pollMs)
+}
+
+async function refreshRobotState() {
+  if (!isRealRobotTargetActive()) {
+    renderRobotStateInactive()
+    return
+  }
+
+  try {
+    const response = await fetch(runtimeConfig.robotRuntime.stateSnapshotPath || DEFAULT_ROBOT_RUNTIME.stateSnapshotPath)
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Robot state unavailable.')
+    }
+
+    renderRobotStateSnapshot(payload)
+  } catch (error) {
+    robotStatePanel.hidden = false
+    robotStatePanel.dataset.state = 'error'
+    robotStateChip.textContent = 'Error'
+    robotStateName.textContent = 'State stream'
+    robotStateTask.textContent = 'Unavailable'
+    robotStateSeq.textContent = '-'
+    robotMapDot.style.opacity = '0'
+    robotMapMeta.textContent = formatError(error)
+  }
+}
+
+function handleSettingsToggle() {
+  const shouldOpen = settingsDrawer.hidden
+
+  settingsDrawer.hidden = !shouldOpen
+  settingsToggle.setAttribute('aria-expanded', String(shouldOpen))
+}
+
+function handleRobotTabClick(event) {
+  for (const tab of robotTabs) {
+    const isActive = tab === event.currentTarget
+
+    tab.classList.toggle('is-active', isActive)
+    tab.setAttribute('aria-selected', String(isActive))
+  }
+
+  const selectedRobot = event.currentTarget.textContent.trim()
+
+  if (selectedRobot !== 'Robo Doge') {
+    setStatus(`${selectedRobot} selected. Telemetry stream still follows Robo Doge.`)
+  }
 }
 
 async function fetchConfig() {
@@ -512,7 +603,7 @@ function applySpeechConfig() {
       `Device: ${activeSpeechProfile.device || 'wasm default'}\n` +
       `Activation phrases: ${activationPhrases}\n` +
       `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
-      `Manual fallback: click ${appConfig.sendButtonLabel}\n` +
+      `Trigger window: ${(activeSpeechProfile.activationCommandWindowMs || 8000) / 1000}s after phrase-only wake\n` +
       `Live transcript: none while recording`
     return
   }
@@ -523,11 +614,12 @@ function applySpeechConfig() {
     speechPreview.textContent =
       `Listening mode: buffered local recording\n` +
       `Model: ${activeSpeechProfile.modelId}\n` +
+      `Sidecar model: ${activeSpeechProfile.sidecarModelId || activeSpeechProfile.modelId}\n` +
       `Runtime: local Parakeet sidecar\n` +
       `Device: ${activeSpeechProfile.device || 'auto'}\n` +
       `Activation phrases: ${activationPhrases}\n` +
       `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
-      `Manual fallback: click ${appConfig.sendButtonLabel}\n` +
+      `Trigger window: ${(activeSpeechProfile.activationCommandWindowMs || 8000) / 1000}s after phrase-only wake\n` +
       `Timestamps: ${activeSpeechProfile.timestamps ? 'enabled' : 'disabled'}`
     return
   }
@@ -660,6 +752,69 @@ function renderRobotFeedback(healthPayload, feedbackPayload) {
     health: healthPayload,
     feedback: feedbackPayload,
   }, null, 2)}`
+}
+
+function renderRobotStateSnapshot(snapshot) {
+  robotStatePanel.hidden = false
+
+  const robot = snapshot?.activeRobot
+  const activeConnections = snapshot?.stats?.activeConnections ?? 0
+
+  if (!robot) {
+    robotStatePanel.dataset.state = 'waiting'
+    robotStateChip.textContent = activeConnections > 0 ? 'Connected' : 'Waiting'
+    robotStateName.textContent = 'No robot'
+    robotStateTask.textContent = 'Waiting'
+    robotStateSeq.textContent = '-'
+    robotMapDot.style.opacity = '0'
+    robotMapMeta.textContent = `Stream: ${runtimeConfig.robotRuntime.stateStreamPath || DEFAULT_ROBOT_RUNTIME.stateStreamPath}`
+    return
+  }
+
+  const receivedAt = Date.parse(robot.receivedAt)
+  const ageMs = Number.isFinite(receivedAt) ? Date.now() - receivedAt : Infinity
+  const isStale = ageMs > 3000
+
+  robotStatePanel.dataset.state = isStale ? 'stale' : 'ready'
+  robotStateChip.textContent = isStale ? 'Stale' : 'Live'
+  robotStateName.textContent = robot.name
+  robotStateTask.textContent = robot.task
+  robotStateSeq.textContent = String(robot.seq)
+
+  renderRobotMapDot(robot)
+}
+
+function renderRobotStateInactive() {
+  robotStatePanel.hidden = false
+  robotStatePanel.dataset.state = 'waiting'
+  robotStateChip.textContent = 'Waiting'
+  robotStateName.textContent = 'No robot'
+  robotStateTask.textContent = 'Waiting'
+  robotStateSeq.textContent = '-'
+  robotMapDot.style.opacity = '0'
+  robotMapMeta.textContent = 'Real robot target required for live map.'
+}
+
+function renderRobotMapDot(robot) {
+  if (!robot.pose) {
+    robotMapDot.style.opacity = '0'
+    robotMapMeta.textContent = `Pose unavailable. Last update ${formatEventTimestamp(robot.receivedAt)}.`
+    return
+  }
+
+  const rangeMeters = 3
+  const xRatio = clamp(robot.pose.x / rangeMeters, -1, 1)
+  const yRatio = clamp(robot.pose.y / rangeMeters, -1, 1)
+  const xPercent = 50 + (xRatio * 50)
+  const yPercent = 50 - (yRatio * 50)
+
+  robotMapDot.style.left = `${xPercent}%`
+  robotMapDot.style.top = `${yPercent}%`
+  robotMapDot.style.opacity = '1'
+  robotMapDot.style.setProperty('--robot-heading', `${robot.pose.theta}rad`)
+  robotMapMeta.textContent =
+    `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
+    `Updated ${formatEventTimestamp(robot.receivedAt)}.`
 }
 
 function renderProfileOptions() {
@@ -917,6 +1072,10 @@ function playCommandCueIfNeeded(parsed) {
   })
 }
 
+function isRealRobotTargetActive() {
+  return runtimeConfig.robotRuntime.activeTarget?.kind === 'ros2-bridge'
+}
+
 function handleVoiceCommand(message, context) {
   if (!message) {
     return
@@ -928,7 +1087,7 @@ function handleVoiceCommand(message, context) {
   }
 
   input.value = message
-  setSpeechStatus(`Activation phrase heard (${context.activationPhrase}). Sending ${appConfig.sendButtonLabel}...`)
+  setSpeechStatus(`Activation phrase heard (${context.activationPhrase}). Sending voice command...`)
 
   if (typeof form.requestSubmit === 'function') {
     form.requestSubmit()
@@ -1033,6 +1192,10 @@ function formatElapsed(elapsedMs) {
   return `${(elapsedMs / 1000).toFixed(1)}s`
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
 function formatWaypointName(value) {
   return String(value || 'the target').replaceAll('_', ' ')
 }
@@ -1094,5 +1257,9 @@ window.addEventListener('beforeunload', () => {
 
   if (robotFeedbackTimerId) {
     window.clearInterval(robotFeedbackTimerId)
+  }
+
+  if (robotStateTimerId) {
+    window.clearInterval(robotStateTimerId)
   }
 })

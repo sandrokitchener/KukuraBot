@@ -53,6 +53,8 @@ test('normalizeSpeechProfilesConfig keeps parakeet profile metadata', () => {
       parakeet: {
         provider: 'parakeet-sidecar',
         modelId: 'nvidia/parakeet-tdt-0.6b-v3',
+        sidecarModelId: 'nemo-parakeet-tdt-0.6b-v3',
+        sidecarSourceUrl: 'https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx',
         timestamps: true,
         device: 'auto',
       },
@@ -61,6 +63,8 @@ test('normalizeSpeechProfilesConfig keeps parakeet profile metadata', () => {
 
   assert.equal(config.profiles.parakeet.provider, 'parakeet-sidecar')
   assert.equal(config.profiles.parakeet.modelId, 'nvidia/parakeet-tdt-0.6b-v3')
+  assert.equal(config.profiles.parakeet.sidecarModelId, 'nemo-parakeet-tdt-0.6b-v3')
+  assert.equal(config.profiles.parakeet.sidecarSourceUrl, 'https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx')
   assert.equal(config.profiles.parakeet.timestamps, true)
   assert.equal(config.profiles.parakeet.device, 'auto')
 })

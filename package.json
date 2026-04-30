@@ -9,6 +9,7 @@
     "start:bun": "bun server.mjs",
     "start:pi": "node run.mjs --host 0.0.0.0",
     "server": "node server.mjs",
+    "fake:robot-state": "node scripts/fake-robot-state-client.mjs",
     "cli": "node cli.mjs",
     "test": "node --test"
   },

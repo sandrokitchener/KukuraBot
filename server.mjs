@@ -22,6 +22,11 @@ import {
   setActiveRobotTarget,
 } from './lib/robot-runtime-config.mjs'
 import {
+  getRobotStateSnapshot,
+  handleRobotStateStreamUpgrade,
+  ROBOT_STATE_STREAM_PATH,
+} from './lib/robot-state-stream.mjs'
+import {
   resolveActiveSpeechProfile,
   saveSpeechRuntimeConfig,
 } from './lib/speech-profile-config.mjs'
@@ -57,6 +62,7 @@ const MIME_TYPES = {
   '.mjs': 'application/javascript; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
   '.onnx': 'application/octet-stream',
+  '.png': 'image/png',
   '.txt': 'text/plain; charset=utf-8',
   '.wasm': 'application/wasm',
 }
@@ -69,7 +75,7 @@ const STATIC_ROOTS = [
   { prefix: '/vendor/vad/', rootDir: VAD_DIST_DIR },
 ]
 
-createServer(async (request, response) => {
+const server = createServer(async (request, response) => {
   try {
     const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
 
@@ -171,6 +177,15 @@ createServer(async (request, response) => {
       return sendJson(response, 200, await getRobotRuntimeFeedback())
     }
 
+    if (request.method === 'GET' && requestUrl.pathname === '/api/robot/state') {
+      const robotRuntimeConfig = await loadRobotRuntimeConfig()
+      return sendJson(response, 200, {
+        ...getRobotStateSnapshot(),
+        streamPath: ROBOT_STATE_STREAM_PATH,
+        activeTarget: robotRuntimeConfig.activeTarget,
+      })
+    }
+
     if (request.method === 'GET' && requestUrl.pathname === '/api/speech/health') {
       return sendJson(response, 200, await getSpeechSidecarHealth())
     }
@@ -191,7 +206,7 @@ createServer(async (request, response) => {
         mimeType: typeof body?.mimeType === 'string' ? body.mimeType.trim() : 'audio/wav',
         sampleRate: Number.isFinite(body?.sampleRate) ? body.sampleRate : 16000,
         timestamps: activeSpeechProfile.timestamps ?? true,
-        modelId: activeSpeechProfile.modelId,
+        modelId: activeSpeechProfile.sidecarModelId || activeSpeechProfile.modelId,
         language: activeSpeechProfile.language,
         task: activeSpeechProfile.task,
         device: activeSpeechProfile.device,
@@ -241,7 +256,20 @@ createServer(async (request, response) => {
       error: error instanceof Error ? error.message : 'Unexpected server error.',
     })
   }
-}).listen(PORT, HOST, async () => {
+})
+
+server.on('upgrade', (request, socket, head) => {
+  void handleRobotStateStreamUpgrade(request, socket, head, {
+    async getRuntimeTargetKind() {
+      const robotRuntimeConfig = await loadRobotRuntimeConfig()
+      return robotRuntimeConfig.activeTarget?.kind || ''
+    },
+  }).catch((error) => {
+    rejectFailedUpgrade(socket, error)
+  })
+})
+
+server.listen(PORT, HOST, async () => {
   const profileConfig = await resolveActiveModelProfile()
   console.log(
     `${appConfig.serverReadyLabel} running at http://${HOST}:${PORT} using ${profileConfig.activeProfile.label} (${profileConfig.activeProfile.model})`,
@@ -298,4 +326,17 @@ function sendJson(response, statusCode, payload) {
     'content-type': 'application/json; charset=utf-8',
   })
   response.end(JSON.stringify(payload))
+}
+
+function rejectFailedUpgrade(socket, error) {
+  const message = error instanceof Error ? error.message : 'Unexpected robot state stream error.'
+  socket.write(
+    'HTTP/1.1 500 Robot State Stream Error\r\n' +
+    'Connection: close\r\n' +
+    'Content-Type: text/plain; charset=utf-8\r\n' +
+    `Content-Length: ${Buffer.byteLength(message)}\r\n` +
+    '\r\n' +
+    message,
+  )
+  socket.destroy()
 }

@@ -13,7 +13,7 @@ test('probeSpeechSidecarHealth calls configured health endpoint', async () => {
       transport: {
         enabled: true,
         kind: 'http',
-        baseUrl: 'http://127.0.0.1:8892',
+        baseUrl: 'http://127.0.0.1:8893',
         healthPath: '/healthz',
         timeoutMs: 1000,
       },
@@ -21,7 +21,7 @@ test('probeSpeechSidecarHealth calls configured health endpoint', async () => {
     {
       fetchImpl: async (url) => {
         calledUrl = url
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(JSON.stringify({ ok: true, modelId: 'nvidia/parakeet-tdt-0.6b-v3' }), {
           status: 200,
           headers: {
             'content-type': 'application/json',
@@ -31,9 +31,35 @@ test('probeSpeechSidecarHealth calls configured health endpoint', async () => {
     },
   )
 
-  assert.equal(calledUrl, 'http://127.0.0.1:8892/healthz')
+  assert.equal(calledUrl, 'http://127.0.0.1:8893/healthz')
   assert.equal(result.status, 'ok')
-  assert.deepEqual(result.body, { ok: true })
+  assert.deepEqual(result.body, { ok: true, modelId: 'nvidia/parakeet-tdt-0.6b-v3' })
+})
+
+test('probeSpeechSidecarHealth rejects healthy responses from the wrong sidecar', async () => {
+  const result = await probeSpeechSidecarHealth(
+    {
+      transport: {
+        enabled: true,
+        kind: 'http',
+        baseUrl: 'http://127.0.0.1:8893',
+        healthPath: '/healthz',
+        timeoutMs: 1000,
+      },
+    },
+    {
+      fetchImpl: async () => new Response(JSON.stringify({ ok: true, bridge: 'ros2' }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
+      }),
+    },
+  )
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.destination, 'http://127.0.0.1:8893/healthz')
+  assert.match(result.error, /Parakeet bridge/)
 })
 
 test('probeSpeechSidecarHealth reports unavailable sidecar as health error', async () => {
@@ -42,21 +68,21 @@ test('probeSpeechSidecarHealth reports unavailable sidecar as health error', asy
       transport: {
         enabled: true,
         kind: 'http',
-        baseUrl: 'http://127.0.0.1:8892',
+        baseUrl: 'http://127.0.0.1:8893',
         healthPath: '/healthz',
         timeoutMs: 1000,
       },
     },
     {
       fetchImpl: async () => {
-        throw new Error('connect ECONNREFUSED 127.0.0.1:8892')
+        throw new Error('connect ECONNREFUSED 127.0.0.1:8893')
       },
     },
   )
 
   assert.equal(result.attempted, true)
   assert.equal(result.status, 'error')
-  assert.equal(result.destination, 'http://127.0.0.1:8892/healthz')
+  assert.equal(result.destination, 'http://127.0.0.1:8893/healthz')
   assert.match(result.error, /ECONNREFUSED/)
 })
 
@@ -72,7 +98,7 @@ test('sendSpeechTranscriptionRequest posts audio payload to configured endpoint'
       transport: {
         enabled: true,
         kind: 'http',
-        baseUrl: 'http://127.0.0.1:8892',
+        baseUrl: 'http://127.0.0.1:8893',
         transcribePath: '/transcribe',
         timeoutMs: 1000,
       },
@@ -90,7 +116,7 @@ test('sendSpeechTranscriptionRequest posts audio payload to configured endpoint'
     },
   )
 
-  assert.equal(calls[0].url, 'http://127.0.0.1:8892/transcribe')
+  assert.equal(calls[0].url, 'http://127.0.0.1:8893/transcribe')
   assert.equal(calls[0].options.method, 'POST')
   assert.equal(result.status, 'ok')
   assert.deepEqual(result.body, { text: 'go home' })

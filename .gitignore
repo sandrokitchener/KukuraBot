@@ -2,3 +2,7 @@
 node_modules/
 npm-debug.log*
 dogzilla_flash_work_*/
+__pycache__/
+*.pyc
+sidecars/isaac_bridge/command_log.ndjson
+sidecars/isaac_bridge/runtime_feedback.json

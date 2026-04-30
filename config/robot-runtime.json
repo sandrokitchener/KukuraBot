@@ -34,6 +34,7 @@
   },
   "feedback": {
     "pollMs": 2500,
+    "statePollMs": 125,
     "historyLimit": 20
   },
   "notes": [

@@ -80,6 +80,18 @@ function extractActivatedCommand(transcript, activationPhrases) {
   return null
 }
 
+function formatActivationPrompt(activationPhrases) {
+  const phrases = activationPhrases
+    .map((phrase) => normalizeSpeechText(phrase))
+    .filter(Boolean)
+
+  if (phrases.length === 0) {
+    return 'Say a command.'
+  }
+
+  return `Say "${phrases[0]}" before a command.`
+}
+
 function resampleAudio(audio, fromSampleRate, toSampleRate) {
   if (fromSampleRate === toSampleRate) {
     return audio
@@ -347,6 +359,7 @@ async function createBufferedSpeechProvider({
   let isSpeechActive = false
   let speechDurationMs = 0
   let silenceDurationMs = 0
+  let armedActivation = null
   let transcriptionChain = Promise.resolve()
 
   async function processCompletedUtterance(audio, durationSeconds) {
@@ -364,15 +377,39 @@ async function createBufferedSpeechProvider({
     const activationMatch = extractActivatedCommand(text, profile.activationPhrases || [])
 
     if (!activationMatch) {
+      if (armedActivation && Date.now() <= armedActivation.expiresAt) {
+        const command = normalizeSpeechText(text)
+
+        if (!command) {
+          handlers.onStatus('Voice trigger armed. Waiting for command.', false)
+          return text
+        }
+
+        const activationContext = armedActivation
+        armedActivation = null
+        handlers.onStatus(`Sending voice command: ${command}`, false)
+        await handlers.onVoiceCommand?.(command, {
+          activationPhrase: activationContext.activationPhrase,
+          transcript: text,
+        })
+        return text
+      }
+
+      armedActivation = null
       handlers.onStatus(`Ignored speech without activation phrase: ${text}`, false)
       return text
     }
 
     if (!activationMatch.command) {
-      handlers.onStatus(`Activation phrase heard. Waiting for command.`, false)
+      armedActivation = {
+        activationPhrase: activationMatch.activationPhrase,
+        expiresAt: Date.now() + (profile.activationCommandWindowMs || 8000),
+      }
+      handlers.onStatus('Voice trigger armed. Say the command now.', false)
       return text
     }
 
+    armedActivation = null
     handlers.onStatus(`Sending voice command: ${activationMatch.command}`, false)
     await handlers.onVoiceCommand?.(activationMatch.command, {
       activationPhrase: activationMatch.activationPhrase,
@@ -451,7 +488,7 @@ async function createBufferedSpeechProvider({
     async start() {
       handlers.onStatus(`Requesting microphone for ${profile.label}...`)
       await recorder.start()
-      handlers.onStatus(startStatus || `Microphone live via ${profile.label}. Click ${submitLabel} to transcribe.`)
+      handlers.onStatus(startStatus || `Microphone live via ${profile.label}. ${formatActivationPrompt(profile.activationPhrases || [])}`)
       warmup?.().catch((error) => {
         handlers.onError(error)
       })
@@ -620,9 +657,11 @@ async function createParakeetSpeechProvider(profile, handlers, submitLabel) {
     async warmup() {
       const health = await checkHealth()
       const bridgeStatus = health?.body?.status || 'ready'
-      handlers.onStatus(`Microphone live via ${profile.label}. Bridge ${bridgeStatus}. Click ${submitLabel} to transcribe.`)
+      handlers.onStatus(
+        `Microphone live via ${profile.label}. Bridge ${bridgeStatus}. ${formatActivationPrompt(profile.activationPhrases || [])}`,
+      )
     },
-    startStatus: `Microphone live via ${profile.label}. Checking local speech bridge...`,
+    startStatus: `Microphone live via ${profile.label}. Checking local speech bridge. ${formatActivationPrompt(profile.activationPhrases || [])}`,
   })
 }
 
