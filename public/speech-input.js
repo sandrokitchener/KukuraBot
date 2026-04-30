@@ -1,3 +1,5 @@
+import { apiFetch } from './api-client.js'
+
 function ensureTrailingSlash(value) {
   return value.endsWith('/') ? value : `${value}/`
 }
@@ -611,7 +613,7 @@ async function createWhisperSpeechProvider(profile, handlers, submitLabel) {
 
 async function createParakeetSpeechProvider(profile, handlers, submitLabel) {
   async function checkHealth() {
-    const response = await fetch('/api/speech/health')
+    const response = await apiFetch('/api/speech/health')
     const payload = await readJsonResponse(response)
 
     if (!response.ok || payload?.status !== 'ok') {
@@ -623,7 +625,7 @@ async function createParakeetSpeechProvider(profile, handlers, submitLabel) {
 
   async function transcribeViaSidecar(audio, sampleRate) {
     const audioBase64 = encodeBytesAsBase64(encodePcm16Wav(audio, sampleRate))
-    const response = await fetch('/api/speech/transcribe', {
+    const response = await apiFetch('/api/speech/transcribe', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

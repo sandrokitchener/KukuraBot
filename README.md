@@ -100,6 +100,22 @@ node cli.mjs "check the kitchen"
 - A future voice process on the Pi can call the same service functions or the same `/api/chat` route.
 - No Bun-specific runtime features are required anymore.
 
+## Android side quest
+
+The Android build is a Tauri shell around the existing `public/` console. It does not run Node, Isaac Sim, or local sidecars on the phone; point it at a Robo-Doge backend on your PC or LAN.
+
+```bash
+bun install
+bun run dev:lan
+bun run tauri:android:init
+bun run tauri:android:build
+```
+
+Install the APK from `src-tauri/gen/android/app/build/outputs/apk/`, then open Settings and set Backend URL to `http://<pc-lan-ip>:3037`.
+The Windows build script produces the current side-load APK at `src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk`.
+
+Mobile architecture and ASR/LLM tradeoffs live in `docs/android-sidequest.md`.
+
 ## Editable files
 
 - `config/system-prompt.txt`

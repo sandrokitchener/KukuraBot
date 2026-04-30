@@ -1,6 +1,7 @@
 import { createSpeechInputController } from './speech-input.js'
 import { createCommandCuePlayer } from './command-cue.js'
 import { splitRecentChatHistory } from './chat-history.js'
+import { apiFetch, getApiBaseUrl, setApiBaseUrl } from './api-client.js'
 
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
@@ -25,6 +26,9 @@ const robotTargetSelect = document.querySelector('#robot-target-select')
 const saveRobotTargetButton = document.querySelector('#save-robot-target-button')
 const robotTargetLockNote = document.querySelector('#robot-target-lock-note')
 const robotTargetStatus = document.querySelector('#robot-target-status')
+const backendUrlInput = document.querySelector('#backend-url-input')
+const saveBackendButton = document.querySelector('#save-backend-button')
+const backendStatus = document.querySelector('#backend-status')
 const speechPanel = document.querySelector('.speech-panel')
 const speechProfileName = document.querySelector('#speech-profile-name')
 const speechProfileSelect = document.querySelector('#speech-profile-select')
@@ -143,6 +147,7 @@ form.addEventListener('submit', handleChatSubmit)
 saveProfileButton.addEventListener('click', handleProfileSave)
 saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
+saveBackendButton.addEventListener('click', handleBackendSave)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 
 for (const tab of robotTabs) {
@@ -150,6 +155,8 @@ for (const tab of robotTabs) {
 }
 
 async function boot() {
+  applyBackendControls()
+
   try {
     const payload = await fetchConfig()
     applyPayload(payload)
@@ -219,7 +226,7 @@ async function handleChatSubmit(event) {
   thinkingState = startThinkingFeedback(pendingMessage)
 
   try {
-    const response = await fetch('/api/chat', {
+    const response = await apiFetch('/api/chat', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -280,7 +287,7 @@ async function handleProfileSave() {
   settingsStatus.textContent = 'Saving profile...'
 
   try {
-    const response = await fetch('/api/settings/profile', {
+    const response = await apiFetch('/api/settings/profile', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -323,7 +330,7 @@ async function handleSpeechProfileSave() {
   speechSettingsStatus.textContent = 'Saving speech profile...'
 
   try {
-    const response = await fetch('/api/settings/speech-profile', {
+    const response = await apiFetch('/api/settings/speech-profile', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -374,7 +381,7 @@ async function handleRobotTargetSave() {
   robotTargetStatus.textContent = 'Saving runtime target...'
 
   try {
-    const response = await fetch('/api/settings/robot-target', {
+    const response = await apiFetch('/api/settings/robot-target', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -401,6 +408,43 @@ async function handleRobotTargetSave() {
   }
 }
 
+async function handleBackendSave() {
+  saveBackendButton.disabled = true
+  backendUrlInput.disabled = true
+  backendStatus.textContent = 'Checking backend...'
+
+  try {
+    const requestedBackendUrl = backendUrlInput.value.trim()
+    const nextBaseUrl = setApiBaseUrl(requestedBackendUrl)
+    if (requestedBackendUrl && !nextBaseUrl) {
+      throw new Error('Backend URL must start with http:// or https://.')
+    }
+    applyBackendControls()
+
+    const payload = await fetchConfig()
+    applyPayload(payload)
+    startRobotFeedbackPolling()
+    startRobotStatePolling()
+
+    try {
+      await initializeSpeechController()
+    } catch (error) {
+      setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
+    }
+
+    await refreshRobotFeedback()
+    const label = nextBaseUrl || 'same-origin backend'
+    backendStatus.textContent = `Connected: ${label}`
+    setStatus(`Backend connected: ${label}.`)
+  } catch (error) {
+    backendStatus.textContent = formatError(error)
+    setStatus(`Backend failed: ${formatError(error)}`, 'error')
+  } finally {
+    saveBackendButton.disabled = false
+    backendUrlInput.disabled = false
+  }
+}
+
 async function initializeSpeechController() {
   await speechController?.dispose?.()
   speechController?.stop?.()
@@ -421,8 +465,8 @@ async function refreshRobotFeedback() {
 
     if (activeTarget.kind === 'isaacsim') {
       const [healthResponse, feedbackResponse] = await Promise.all([
-        fetch('/api/isaac/health'),
-        fetch('/api/isaac/feedback'),
+        apiFetch('/api/isaac/health'),
+        apiFetch('/api/isaac/feedback'),
       ])
       const healthPayload = await healthResponse.json()
       const feedbackPayload = await feedbackResponse.json()
@@ -433,8 +477,8 @@ async function refreshRobotFeedback() {
     }
 
     const [healthResponse, feedbackResponse] = await Promise.all([
-      fetch('/api/robot/health'),
-      fetch('/api/robot/feedback'),
+      apiFetch('/api/robot/health'),
+      apiFetch('/api/robot/feedback'),
     ])
     const healthPayload = await healthResponse.json()
     const feedbackPayload = await feedbackResponse.json()
@@ -484,7 +528,7 @@ async function refreshRobotState() {
   }
 
   try {
-    const response = await fetch(runtimeConfig.robotRuntime.stateSnapshotPath || DEFAULT_ROBOT_RUNTIME.stateSnapshotPath)
+    const response = await apiFetch(runtimeConfig.robotRuntime.stateSnapshotPath || DEFAULT_ROBOT_RUNTIME.stateSnapshotPath)
     const payload = await response.json()
 
     if (!response.ok) {
@@ -527,7 +571,7 @@ function handleRobotTabClick(event) {
 }
 
 async function fetchConfig() {
-  const response = await fetch('/api/config')
+  const response = await apiFetch('/api/config')
   const payload = await response.json()
 
   if (!response.ok) {
@@ -535,6 +579,12 @@ async function fetchConfig() {
   }
 
   return payload
+}
+
+function applyBackendControls() {
+  const apiBaseUrl = getApiBaseUrl()
+  backendUrlInput.value = apiBaseUrl
+  backendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
 }
 
 function applyPayload(payload) {

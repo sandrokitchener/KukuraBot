@@ -183,6 +183,19 @@
 
         <section class="settings-panel">
           <div class="settings-row">
+            <label for="backend-url-input">Backend URL</label>
+            <input
+              id="backend-url-input"
+              type="url"
+              inputmode="url"
+              placeholder="http://192.168.1.10:3037"
+              autocomplete="off"
+            />
+            <button id="save-backend-button" type="button">Use backend</button>
+          </div>
+          <p id="backend-status" class="settings-status">Using same-origin backend.</p>
+
+          <div class="settings-row">
             <label for="profile-select">Model profile</label>
             <select id="profile-select"></select>
             <button id="save-profile-button" type="button">Use profile</button>

@@ -78,6 +78,13 @@ const STATIC_ROOTS = [
 const server = createServer(async (request, response) => {
   try {
     const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
+    applyCorsHeaders(request, response)
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204)
+      response.end()
+      return
+    }
 
     if (request.method === 'GET' && requestUrl.pathname === '/api/config') {
       return sendJson(response, 200, await loadPublicConfig())
@@ -326,6 +333,18 @@ function sendJson(response, statusCode, payload) {
     'content-type': 'application/json; charset=utf-8',
   })
   response.end(JSON.stringify(payload))
+}
+
+function applyCorsHeaders(request, response) {
+  const allowedOrigin = process.env.APP_CORS_ORIGIN || '*'
+  response.setHeader('access-control-allow-origin', allowedOrigin)
+  response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS')
+  response.setHeader(
+    'access-control-allow-headers',
+    request.headers['access-control-request-headers'] || 'content-type',
+  )
+  response.setHeader('access-control-max-age', '86400')
+  response.setHeader('access-control-allow-private-network', 'true')
 }
 
 function rejectFailedUpgrade(socket, error) {

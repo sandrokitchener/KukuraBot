@@ -5,17 +5,26 @@
   "scripts": {
     "dev": "node --watch server.mjs",
     "dev:bun": "bun --watch server.mjs",
+    "dev:lan": "bun --watch scripts/start-lan-server.mjs",
     "start": "node run.mjs",
     "start:bun": "bun server.mjs",
     "start:pi": "node run.mjs --host 0.0.0.0",
     "server": "node server.mjs",
     "fake:robot-state": "node scripts/fake-robot-state-client.mjs",
     "cli": "node cli.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:android:init": "tauri android init --ci",
+    "tauri:android:build": "node scripts/build-android-apk.mjs",
+    "tauri:android:run": "tauri android run",
     "test": "node --test"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.1.0",
     "@moonshine-ai/moonshine-js": "^0.1.29",
     "@ricky0123/vad-web": "^0.0.24"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
   }
 }
