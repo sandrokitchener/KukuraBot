@@ -157,12 +157,13 @@ The app accepts robot telemetry only when the active target is `ros2_real`.
 Run real mode:
 
 ```powershell
-$env:ROBOT_RUNTIME_TARGET="ros2_real"; npm run dev
+$env:ROBOT_RUNTIME_TARGET="ros2_real"; bun run dev:lan
 ```
 
 Then stream fake robot state from another terminal:
 
 ```powershell
+$env:ROBOT_STATE_WS_URL="ws://127.0.0.1:3037/api/robot/state/stream"
 npm run fake:robot-state
 ```
 

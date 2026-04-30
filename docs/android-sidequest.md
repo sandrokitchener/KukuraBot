@@ -8,6 +8,7 @@ The first viable mobile shape is a private LAN client:
 3. Open Settings and set Backend URL to `http://<pc-lan-ip>:3037`.
 
 This keeps model, robot bridge, Parakeet sidecar, and Isaac Sim on the PC. The phone becomes a mobile control surface.
+The script is launched with Bun, but it runs the LAN HTTP/WebSocket backend under Node because Bun 1.3.11's `node:http` upgrade path does not complete the raw WebSocket handshake used by the fake robot state stream.
 
 ## Build Commands
 
@@ -15,6 +16,20 @@ This keeps model, robot bridge, Parakeet sidecar, and Isaac Sim on the PC. The p
 bun install
 bun run tauri:android:init
 bun run tauri:android:build
+```
+
+## PC Runtime For Phone
+
+```powershell
+$env:ROBOT_RUNTIME_TARGET="ros2_real"
+bun run dev:lan
+```
+
+In another terminal, start fake map telemetry:
+
+```powershell
+$env:ROBOT_STATE_WS_URL="ws://127.0.0.1:3037/api/robot/state/stream"
+npm run fake:robot-state
 ```
 
 On Windows without Developer Mode, Tauri can fail while creating Android JNI symlinks. The `tauri:android:build` script falls back to copying the built arm64 Rust library and asks Gradle for a signed debug APK.
