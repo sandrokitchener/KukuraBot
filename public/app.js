@@ -1291,7 +1291,7 @@ function startThinkingFeedback(messageNode) {
   let frame = 0
   stopThinkingCue()
   const cueToken = ++thinkingCueToken
-  thinkingCuePlayer.play({ loop: true }).then((cue) => {
+  thinkingCuePlayer.play().then((cue) => {
     if (cueToken !== thinkingCueToken) {
       cue?.stop?.()
       return
