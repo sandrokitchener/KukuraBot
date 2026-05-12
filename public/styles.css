@@ -83,6 +83,12 @@ body {
   box-shadow: inset 0 0 0 1px rgba(54, 48, 42, 0.1), 0 10px 22px rgba(0, 0, 0, 0.14);
 }
 
+.rail-brand img {
+  width: 24px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
 .rail-icon {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.08);
@@ -121,6 +127,8 @@ body {
 .robot-state-panel,
 .robot-map-panel,
 .output-panel,
+.connection-drawer,
+.connection-panel,
 .settings-drawer,
 .settings-panel,
 .runtime-panel {
@@ -217,6 +225,95 @@ body {
   cursor: pointer;
 }
 
+.connection-toggle {
+  position: fixed;
+  z-index: 21;
+  top: 44px;
+  right: max(80px, calc((100vw - 1240px) / 2 + 80px));
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: #050505;
+  box-shadow: 0 12px 26px rgba(10, 9, 8, 0.28);
+  cursor: pointer;
+}
+
+.router-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
+  height: 18px;
+  transform: translate(-50%, -43%);
+}
+
+.router-icon::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  height: 12px;
+  border-radius: 4px;
+  background: #f7f1e8;
+  box-shadow: inset 0 -3px 0 rgba(54, 48, 42, 0.18);
+}
+
+.router-icon::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(247, 241, 232, 0.72);
+}
+
+.router-antenna {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 11px;
+  border-radius: 99px;
+  background: #f7f1e8;
+  transform-origin: bottom center;
+}
+
+.router-antenna-left {
+  left: 4px;
+  transform: rotate(-28deg);
+}
+
+.router-antenna-right {
+  right: 4px;
+  transform: rotate(28deg);
+}
+
+.router-led {
+  position: absolute;
+  z-index: 1;
+  bottom: 6px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #72d66b;
+}
+
+.router-led-one {
+  left: 8px;
+}
+
+.router-led-two {
+  left: 14px;
+  background: var(--accent);
+}
+
+.connection-toggle[aria-expanded='true'] {
+  outline: 3px solid rgba(255, 123, 86, 0.22);
+}
+
 .settings-toggle::before,
 .settings-toggle::after {
   content: "";
@@ -238,7 +335,8 @@ body {
   display: none;
 }
 
-.settings-drawer {
+.settings-drawer,
+.connection-drawer {
   position: fixed;
   z-index: 15;
   top: 92px;
@@ -250,11 +348,18 @@ body {
   box-shadow: 0 24px 70px rgba(35, 28, 22, 0.22);
 }
 
-.settings-drawer[hidden] {
+.connection-drawer {
+  width: min(560px, calc(100vw - 68px));
+}
+
+.settings-drawer[hidden],
+.connection-drawer[hidden] {
   display: none;
 }
 
+.connection-drawer-head h2,
 .settings-drawer-head h2,
+.bridge-head h2,
 .speech-head h2,
 .runtime-head h2,
 .robot-state-head h2,
@@ -266,6 +371,8 @@ body {
   font-weight: 700;
 }
 
+.connection-drawer > * + *,
+.connection-panel > * + *,
 .settings-drawer > * + *,
 .settings-panel > * + *,
 .runtime-panel > * + *,
@@ -273,9 +380,155 @@ body {
   margin-top: 12px;
 }
 
+.connection-drawer-head,
+.bridge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.connection-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  max-width: 190px;
+  padding: 0 9px;
+  border: 1px solid rgba(54, 48, 42, 0.16);
+  border-radius: 999px;
+  background: #171513;
+  color: #f7f1e8;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connection-panel {
+  padding: 12px;
+}
+
+.connection-grid {
+  display: grid;
+  grid-template-columns: 1fr minmax(90px, 0.45fr);
+  gap: 10px;
+}
+
+.connection-backend-row {
+  margin-top: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.connection-backend-row label {
+  grid-column: 1 / -1;
+}
+
+.connection-field {
+  min-width: 0;
+}
+
+.connection-field:first-child,
+.connection-field:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.bridge-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bridge-action-grid button {
+  width: 100%;
+  justify-self: stretch;
+  min-width: 0;
+  padding-inline: 10px;
+}
+
+.connection-url-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.connection-url-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+
+.connection-url-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.connection-status {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.connection-output {
+  min-height: 154px;
+  max-height: 260px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #171513;
+  color: #f7f1e8;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .eyebrow,
 .lede {
   max-width: 72ch;
+}
+
+.intro-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.intro-copy {
+  min-width: 0;
+}
+
+.mascot-chip {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 54px;
+  height: 42px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #171513;
+  box-shadow: 0 12px 24px rgba(35, 28, 22, 0.16);
+}
+
+.mascot-chip img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+}
+
+.mascot-chip span {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #171513;
+  border-radius: 50%;
+  background: #72d66b;
 }
 
 .eyebrow {
@@ -776,7 +1029,13 @@ select {
     right: 14px;
   }
 
-  .settings-drawer {
+  .connection-toggle {
+    top: 16px;
+    right: 60px;
+  }
+
+  .settings-drawer,
+  .connection-drawer {
     top: 64px;
     right: 10px;
     width: calc(100vw - 20px);
@@ -784,7 +1043,10 @@ select {
 
   .meta-grid,
   .robot-identity-grid,
-  .settings-row {
+  .settings-row,
+  .connection-grid,
+  .connection-url-grid,
+  .bridge-action-grid {
     grid-template-columns: 1fr;
   }
 
@@ -835,7 +1097,9 @@ html.android-app .robot-state-panel,
 html.android-app .robot-map-panel,
 html.android-app .output-panel,
 html.android-app .settings-drawer,
+html.android-app .connection-drawer,
 html.android-app .settings-panel,
+html.android-app .connection-panel,
 html.android-app .runtime-panel,
 html.android-app .meta-card,
 html.android-app .robot-identity-grid > div,
@@ -867,6 +1131,26 @@ html.android-app .robot-column {
 
 html.android-app .eyebrow {
   color: var(--ink-faint);
+}
+
+html.android-app .intro-head {
+  align-items: center;
+}
+
+html.android-app .mascot-chip {
+  display: none;
+}
+
+html.android-app h1::after {
+  content: "";
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  margin-left: 12px;
+  border-radius: 10px;
+  background: #171513 url("/assets/robo-doge-mascot.png") center / 24px 24px no-repeat;
+  image-rendering: pixelated;
+  vertical-align: -3px;
 }
 
 html.android-app .lede {
@@ -914,6 +1198,17 @@ html.android-app .settings-toggle {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: none;
+}
+
+html.android-app .connection-toggle {
+  top: 14px;
+  right: 60px;
+  border: 0;
+  box-shadow: none;
+}
+
+html.android-app .connection-backend-row {
+  grid-template-columns: 1fr;
 }
 
 html.android-app .status-dot,
@@ -995,6 +1290,13 @@ html.android-app[data-mobile-view='robot'] .robot-map-panel {
 }
 
 html.android-app .settings-drawer {
+  top: 62px;
+  right: 14px;
+  width: calc(100vw - 28px);
+  max-height: calc(100vh - 80px);
+}
+
+html.android-app .connection-drawer {
   top: 62px;
   right: 14px;
   width: calc(100vw - 28px);

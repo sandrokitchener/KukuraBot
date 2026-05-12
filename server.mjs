@@ -5,6 +5,11 @@ import { fileURLToPath } from 'node:url'
 import { loadAppConfig } from './lib/app-config.mjs'
 import { buildIsaacSimPreview } from './lib/isaacsim-command-compiler.mjs'
 import {
+  getDogzillaConnectionCenter,
+  runDogzillaConnectionAction,
+  saveDogzillaConnectionConfig,
+} from './lib/dogzilla-connection-center.mjs'
+import {
   dispatchIsaacSimCommand,
   getIsaacRuntimeFeedback,
   getIsaacSidecarHealth,
@@ -88,6 +93,26 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && requestUrl.pathname === '/api/config') {
       return sendJson(response, 200, await loadPublicConfig())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/connection') {
+      return sendJson(response, 200, await getDogzillaConnectionCenter())
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/connection') {
+      const body = await readJsonBody(request)
+      await saveDogzillaConnectionConfig(body || {})
+      return sendJson(response, 200, await getDogzillaConnectionCenter())
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/connection/action') {
+      const body = await readJsonBody(request)
+      const action = typeof body?.action === 'string' ? body.action.trim() : ''
+      const result = await runDogzillaConnectionAction(action, {
+        live: body?.live === true,
+      })
+      const statusCode = result.status === 'error' ? 400 : 200
+      return sendJson(response, statusCode, result)
     }
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/chat') {

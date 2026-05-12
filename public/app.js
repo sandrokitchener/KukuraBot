@@ -52,6 +52,21 @@ const robotMapDot = document.querySelector('#robot-map-dot')
 const robotMapMeta = document.querySelector('#robot-map-meta')
 const settingsToggle = document.querySelector('#settings-toggle')
 const settingsDrawer = document.querySelector('#settings-drawer')
+const connectionToggle = document.querySelector('#connection-toggle')
+const connectionDrawer = document.querySelector('#connection-drawer')
+const connectionChip = document.querySelector('#connection-chip')
+const dogzillaBackendUrlInput = document.querySelector('#dogzilla-backend-url-input')
+const saveDogzillaBackendButton = document.querySelector('#save-dogzilla-backend-button')
+const connectionBackendStatus = document.querySelector('#connection-backend-status')
+const dogzillaHostInput = document.querySelector('#dogzilla-host-input')
+const dogzillaUserInput = document.querySelector('#dogzilla-user-input')
+const dogzillaRemoteRootInput = document.querySelector('#dogzilla-remote-root-input')
+const saveDogzillaConnectionButton = document.querySelector('#save-dogzilla-connection-button')
+const connectionStatus = document.querySelector('#connection-status')
+const dogzillaDirectUrl = document.querySelector('#dogzilla-direct-url')
+const dogzillaRos2Url = document.querySelector('#dogzilla-ros2-url')
+const connectionOutput = document.querySelector('#connection-output')
+const connectionActionButtons = document.querySelectorAll('[data-connection-action]')
 const robotTabs = document.querySelectorAll('.robot-tab')
 const form = document.querySelector('#chat-form')
 const input = document.querySelector('#user-input')
@@ -156,6 +171,7 @@ let runtimeConfig = {
   },
   robotRuntime: { ...DEFAULT_ROBOT_RUNTIME },
 }
+let dogzillaConnection = null
 let speechController = null
 let mobileView = MOBILE_DEFAULT_VIEW
 let touchStart = null
@@ -173,6 +189,13 @@ saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
 saveBackendButton.addEventListener('click', handleBackendSave)
 settingsToggle.addEventListener('click', handleSettingsToggle)
+connectionToggle.addEventListener('click', handleConnectionToggle)
+saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
+saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
+
+for (const button of connectionActionButtons) {
+  button.addEventListener('click', handleDogzillaConnectionAction)
+}
 
 for (const tab of robotTabs) {
   tab.addEventListener('click', handleRobotTabClick)
@@ -253,6 +276,7 @@ async function boot() {
   try {
     const payload = await fetchConfig()
     applyPayload(payload)
+    await refreshDogzillaConnection()
     startRobotFeedbackPolling()
     startRobotStatePolling()
 
@@ -507,28 +531,9 @@ async function handleBackendSave() {
   backendStatus.textContent = 'Checking backend...'
 
   try {
-    const requestedBackendUrl = backendUrlInput.value.trim()
-    const nextBaseUrl = setApiBaseUrl(requestedBackendUrl)
-    if (requestedBackendUrl && !nextBaseUrl) {
-      throw new Error('Backend URL must start with http:// or https://.')
-    }
-    applyBackendControls()
-
-    const payload = await fetchConfig()
-    applyPayload(payload)
-    startRobotFeedbackPolling()
-    startRobotStatePolling()
-
-    try {
-      await initializeSpeechController()
-    } catch (error) {
-      setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
-    }
-
-    await refreshRobotFeedback()
-    const label = nextBaseUrl || 'same-origin backend'
+    const label = await saveBackendUrl(backendUrlInput.value)
     backendStatus.textContent = `Connected: ${label}`
-    setStatus(`Backend connected: ${label}.`)
+    connectionBackendStatus.textContent = `Connected: ${label}`
   } catch (error) {
     backendStatus.textContent = formatError(error)
     setStatus(`Backend failed: ${formatError(error)}`, 'error')
@@ -536,6 +541,50 @@ async function handleBackendSave() {
     saveBackendButton.disabled = false
     backendUrlInput.disabled = false
   }
+}
+
+async function handleDogzillaBackendSave() {
+  saveDogzillaBackendButton.disabled = true
+  dogzillaBackendUrlInput.disabled = true
+  connectionBackendStatus.textContent = 'Checking backend...'
+
+  try {
+    const label = await saveBackendUrl(dogzillaBackendUrlInput.value)
+    backendStatus.textContent = `Connected: ${label}`
+    connectionBackendStatus.textContent = `Connected: ${label}`
+  } catch (error) {
+    connectionBackendStatus.textContent = formatError(error)
+    setStatus(`Backend failed: ${formatError(error)}`, 'error')
+  } finally {
+    saveDogzillaBackendButton.disabled = false
+    dogzillaBackendUrlInput.disabled = false
+  }
+}
+
+async function saveBackendUrl(value) {
+  const requestedBackendUrl = String(value || '').trim()
+  const nextBaseUrl = setApiBaseUrl(requestedBackendUrl)
+  if (requestedBackendUrl && !nextBaseUrl) {
+    throw new Error('Backend URL must start with http:// or https://.')
+  }
+  applyBackendControls()
+
+  const payload = await fetchConfig()
+  applyPayload(payload)
+  await refreshDogzillaConnection()
+  startRobotFeedbackPolling()
+  startRobotStatePolling()
+
+  try {
+    await initializeSpeechController()
+  } catch (error) {
+    setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
+  }
+
+  await refreshRobotFeedback()
+  const label = nextBaseUrl || 'same-origin backend'
+  setStatus(`Backend connected: ${label}.`)
+  return label
 }
 
 async function initializeSpeechController() {
@@ -646,6 +695,22 @@ function handleSettingsToggle() {
 
   settingsDrawer.hidden = !shouldOpen
   settingsToggle.setAttribute('aria-expanded', String(shouldOpen))
+  if (shouldOpen) {
+    connectionDrawer.hidden = true
+    connectionToggle.setAttribute('aria-expanded', 'false')
+  }
+}
+
+function handleConnectionToggle() {
+  const shouldOpen = connectionDrawer.hidden
+
+  connectionDrawer.hidden = !shouldOpen
+  connectionToggle.setAttribute('aria-expanded', String(shouldOpen))
+  if (shouldOpen) {
+    settingsDrawer.hidden = true
+    settingsToggle.setAttribute('aria-expanded', 'false')
+    void refreshDogzillaConnection()
+  }
 }
 
 function handleRobotTabClick(event) {
@@ -674,10 +739,183 @@ async function fetchConfig() {
   return payload
 }
 
+async function refreshDogzillaConnection() {
+  try {
+    const response = await apiFetch('/api/dogzilla/connection')
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not load DOGZILLA connection.')
+    }
+
+    renderDogzillaConnection(payload)
+  } catch (error) {
+    connectionChip.textContent = 'Error'
+    connectionStatus.textContent = formatError(error)
+  }
+}
+
+async function handleDogzillaConnectionSave() {
+  saveDogzillaConnectionButton.disabled = true
+  connectionStatus.textContent = 'Saving connection...'
+
+  try {
+    const response = await apiFetch('/api/dogzilla/connection', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ssh: {
+          host: dogzillaHostInput.value,
+          user: dogzillaUserInput.value,
+        },
+        remoteRoot: dogzillaRemoteRootInput.value,
+      }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not save DOGZILLA connection.')
+    }
+
+    renderDogzillaConnection(payload)
+    connectionStatus.textContent = 'Connection saved.'
+    setStatus('DOGZILLA connection saved.')
+  } catch (error) {
+    connectionStatus.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+  } finally {
+    saveDogzillaConnectionButton.disabled = false
+  }
+}
+
+async function handleDogzillaConnectionAction(event) {
+  const action = event.currentTarget.dataset.connectionAction
+
+  setConnectionActionsDisabled(true)
+  connectionStatus.textContent = `Running ${formatConnectionAction(action)}...`
+  connectionOutput.textContent = `Running ${formatConnectionAction(action)}...`
+
+  try {
+    const response = await apiFetch('/api/dogzilla/connection/action', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ action }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok || payload.status === 'error') {
+      throw new Error(payload.error || payload.stderr || `DOGZILLA action failed: ${action}`)
+    }
+
+    connectionStatus.textContent = `${formatConnectionAction(action)}: ${payload.status}.`
+    connectionOutput.textContent = formatDogzillaActionOutput(payload)
+    setStatus(`DOGZILLA ${formatConnectionAction(action)} ${payload.status}.`)
+
+    if (action === 'probe-bridges') {
+      renderBridgeProbe(payload)
+    }
+  } catch (error) {
+    connectionStatus.textContent = formatError(error)
+    connectionOutput.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+  } finally {
+    setConnectionActionsDisabled(false)
+  }
+}
+
+function renderDogzillaConnection(payload) {
+  dogzillaConnection = payload
+  const config = payload.config || {}
+  const ssh = config.ssh || {}
+  const bridges = config.bridges || {}
+
+  dogzillaHostInput.value = ssh.host || ''
+  dogzillaUserInput.value = ssh.user || 'pi'
+  dogzillaRemoteRootInput.value = config.remoteRoot || '/home/pi/robodoge'
+  dogzillaDirectUrl.textContent = bridges.direct?.baseUrl || '-'
+  dogzillaRos2Url.textContent = bridges.ros2?.baseUrl || '-'
+  connectionChip.textContent = ssh.host ? ssh.host : 'No IP'
+  connectionStatus.textContent = ssh.host
+    ? `SSH ${ssh.user}@${ssh.host}:${ssh.port}. Config ${payload.sshConfigExists ? 'ready' : 'not written'}.`
+    : 'Set DOGZILLA IP.'
+}
+
+function renderBridgeProbe(payload) {
+  const direct = payload.results?.direct
+  const ros2 = payload.results?.ros2
+  const directLabel = direct ? `Direct ${direct.status}` : 'Direct unknown'
+  const ros2Label = ros2 ? `ROS2 ${ros2.status}` : 'ROS2 unknown'
+
+  connectionStatus.textContent = `${directLabel}. ${ros2Label}.`
+}
+
+function setConnectionActionsDisabled(disabled) {
+  saveDogzillaConnectionButton.disabled = disabled
+  saveDogzillaBackendButton.disabled = disabled
+  dogzillaBackendUrlInput.disabled = disabled
+  for (const button of connectionActionButtons) {
+    button.disabled = disabled
+  }
+}
+
+function formatConnectionAction(action) {
+  switch (action) {
+    case 'check-ssh':
+      return 'SSH check'
+    case 'probe-bridges':
+      return 'bridge check'
+    case 'sync-bridges':
+      return 'bridge sync'
+    case 'start-direct':
+      return 'direct bridge start'
+    case 'start-ros2':
+      return 'ROS2 bridge start'
+    case 'stop-bridges':
+      return 'bridge stop'
+    default:
+      return action || 'connection action'
+  }
+}
+
+function formatDogzillaActionOutput(payload) {
+  const lines = [
+    `Status: ${payload.status}`,
+    `Action: ${payload.action || 'n/a'}`,
+  ]
+
+  if (payload.pid) {
+    lines.push(`PID: ${payload.pid}`)
+  }
+
+  if (payload.stdout) {
+    lines.push(`\nstdout\n${payload.stdout}`)
+  }
+
+  if (payload.stderr) {
+    lines.push(`\nstderr\n${payload.stderr}`)
+  }
+
+  if (payload.results) {
+    lines.push(`\nbridges\n${JSON.stringify(payload.results, null, 2)}`)
+  }
+
+  if (payload.plan) {
+    lines.push(`\nplan\n${JSON.stringify(payload.plan, null, 2)}`)
+  }
+
+  return lines.join('\n')
+}
+
 function applyBackendControls() {
   const apiBaseUrl = getApiBaseUrl()
   backendUrlInput.value = apiBaseUrl
+  dogzillaBackendUrlInput.value = apiBaseUrl
   backendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
+  connectionBackendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
 }
 
 function applyPayload(payload) {

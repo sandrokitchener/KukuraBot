@@ -1,13 +1,32 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
 import rclpy
+from dogzilla_bridge.adapters import (
+    AdapterError,
+    RecordingDogzillaAdapter,
+    RosPublisherDogzillaAdapter,
+    YahboomPythonDogzillaAdapter,
+)
+from dogzilla_bridge.commands import CommandValidationError, DogzillaCommandLimits, execute_canonical_plan
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Bool, String, UInt16
+
+
+DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
+os.environ.setdefault("ROS_DOMAIN_ID", os.environ.get("DOGZILLA_ROS_DOMAIN_ID", DEFAULT_EXPECTED_ROS_DOMAIN_ID))
+STUDY_HINTS = {
+    "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
+    "pi5DockerEntry": "./run_humble.sh",
+    "bringupLaunch": "ros2 launch bringup Navigation_bringup.launch.py",
+    "keyboardTeleop": "ros2 run teleop_twist_keyboard teleop_twist_keyboard",
+    "cameraTopicFromAppDocs": "/usb_cam/imge_raw/compress",
+}
 
 
 @dataclass
@@ -15,6 +34,7 @@ class BridgeState:
     handled_count: int = 0
     last_status: str = "idle"
     last_command: dict[str, Any] | None = None
+    last_result: dict[str, Any] | None = None
     last_error: str | None = None
 
 
@@ -30,6 +50,9 @@ class DogzillaBridgeNode(Node):
         self.declare_parameter("action_topic", "/dogzilla/action")
         self.declare_parameter("stabilize_topic", "/dogzilla/stabilize")
         self.declare_parameter("state_topic", "/dogzilla/state")
+        self.declare_parameter("adapter_mode", "ros-publisher")
+        self.declare_parameter("dogzilla_python_module", "")
+        self.declare_parameter("dogzilla_python_factory", "")
         self.declare_parameter("publish_state_hz", 1.0)
         self.declare_parameter("deadband", 0.05)
         self.declare_parameter("linear_x_full_scale_step", 25.0)
@@ -42,7 +65,9 @@ class DogzillaBridgeNode(Node):
         self.linear_x_full_scale_step = float(self.get_parameter("linear_x_full_scale_step").value)
         self.linear_y_full_scale_step = float(self.get_parameter("linear_y_full_scale_step").value)
         self.angular_z_full_scale_step = float(self.get_parameter("angular_z_full_scale_step").value)
+        self.adapter_mode = str(self.get_parameter("adapter_mode").value)
         self.state = BridgeState()
+        self.command_limits = DogzillaCommandLimits()
 
         command_plan_topic = str(self.get_parameter("command_plan_topic").value)
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
@@ -55,11 +80,14 @@ class DogzillaBridgeNode(Node):
         self.action_publisher = self.create_publisher(UInt16, action_topic, 10)
         self.stabilize_publisher = self.create_publisher(Bool, stabilize_topic, 10)
         self.state_publisher = self.create_publisher(String, state_topic, 10)
+        self.adapter = self._create_adapter()
         self.create_subscription(String, command_plan_topic, self._handle_plan_message, 10)
         self.create_timer(1.0 / max(publish_state_hz, 0.1), self._publish_state_snapshot)
 
         self.get_logger().info(
-            f"DOGZILLA bridge ready. command_plan_topic={command_plan_topic} dry_run={self.dry_run} enabled={self.enabled}"
+            "DOGZILLA bridge ready. "
+            f"command_plan_topic={command_plan_topic} dry_run={self.dry_run} "
+            f"enabled={self.enabled} adapter={self.adapter.name}"
         )
 
     def _handle_plan_message(self, message: String) -> None:
@@ -84,77 +112,28 @@ class DogzillaBridgeNode(Node):
             return
 
         try:
-            if kind == "noop":
-                self.state.last_status = "noop"
-                return
-
-            if kind == "action.once":
-                self._handle_action_once(params)
-                return
-
-            if kind == "stabilize.set":
-                self._handle_stabilize(params)
-                return
-
-            if kind == "locomotion.relative":
-                self._handle_relative_motion(params)
-                return
-
-            if kind == "locomotion.goto":
-                self.state.last_status = "goto-request"
-                self.get_logger().info(
-                    f"Navigation request queued for waypoint={params.get('waypoint')} frame={params.get('frame')}"
-                )
-                return
-
-            self.state.last_status = "unsupported"
-            self.state.last_error = f"unsupported_kind:{kind}"
-        except Exception as error:
+            result = execute_canonical_plan(canonical_plan, self.adapter, self.command_limits)
+            self.state.last_status = result.status
+            self.state.last_result = result.to_dict()
+            self.state.last_error = None if result.status != "unsupported" else result.details.get("reason")
+        except (AdapterError, CommandValidationError) as error:
             self._mark_error(str(error))
-
-    def _handle_action_once(self, params: dict[str, Any]) -> None:
-        action_id = params.get("actionId")
-        if not isinstance(action_id, int):
-            self._mark_error("action.once missing integer actionId")
-            return
-
-        self.state.last_status = "action.once"
-        if self.dry_run:
-          return
-
-        message = UInt16()
-        message.data = action_id
-        self.action_publisher.publish(message)
-
-    def _handle_stabilize(self, params: dict[str, Any]) -> None:
-        enabled = bool(params.get("enabled"))
-        self.state.last_status = "stabilize.set"
-        if self.dry_run:
-          return
-
-        message = Bool()
-        message.data = enabled
-        self.stabilize_publisher.publish(message)
-
-    def _handle_relative_motion(self, params: dict[str, Any]) -> None:
-        self.state.last_status = "locomotion.relative"
-        if self.dry_run:
-          return
-
-        message = Twist()
-        message.linear.x = scale_axis(params.get("x_step"), self.linear_x_full_scale_step, self.deadband)
-        message.linear.y = scale_axis(params.get("y_step"), self.linear_y_full_scale_step, self.deadband)
-        message.angular.z = scale_axis(params.get("turn_rate"), self.angular_z_full_scale_step, self.deadband)
-        self.cmd_vel_publisher.publish(message)
+        except Exception as error:
+            self._mark_error(f"adapter_exception:{error}")
 
     def _publish_state_snapshot(self) -> None:
         snapshot = {
             "status": self.state.last_status,
             "handledCount": self.state.handled_count,
             "lastCommand": self.state.last_command,
+            "lastResult": self.state.last_result,
             "lastError": self.state.last_error,
             "dryRun": self.dry_run,
             "enabled": self.enabled,
+            "adapterMode": self.adapter.name,
+            "rosDomainId": os.environ.get("ROS_DOMAIN_ID"),
+            "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
+            "studyHints": STUDY_HINTS,
         }
         message = String()
         message.data = json.dumps(snapshot)
@@ -165,14 +144,30 @@ class DogzillaBridgeNode(Node):
         self.state.last_error = error_message
         self.get_logger().warning(error_message)
 
+    def _create_adapter(self):
+        if self.dry_run or self.adapter_mode == "dry-run":
+            return RecordingDogzillaAdapter()
 
-def scale_axis(value: Any, full_scale: float, deadband: float) -> float:
-    numeric = float(value or 0.0)
+        if self.adapter_mode == "ros-publisher":
+            return RosPublisherDogzillaAdapter(
+                cmd_vel_publisher=self.cmd_vel_publisher,
+                action_publisher=self.action_publisher,
+                stabilize_publisher=self.stabilize_publisher,
+                twist_type=Twist,
+                uint16_type=UInt16,
+                bool_type=Bool,
+                deadband=self.deadband,
+                linear_x_full_scale_step=self.linear_x_full_scale_step,
+                linear_y_full_scale_step=self.linear_y_full_scale_step,
+                angular_z_full_scale_step=self.angular_z_full_scale_step,
+            )
 
-    if abs(numeric) <= deadband:
-        return 0.0
+        if self.adapter_mode == "yahboom-python":
+            module_name = str(self.get_parameter("dogzilla_python_module").value)
+            factory_name = str(self.get_parameter("dogzilla_python_factory").value)
+            return YahboomPythonDogzillaAdapter.from_module(module_name, factory_name)
 
-    return numeric / max(full_scale, 1.0)
+        raise AdapterError(f"unsupported adapter_mode:{self.adapter_mode}")
 
 
 def main() -> None:

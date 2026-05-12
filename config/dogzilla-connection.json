@@ -1,0 +1,26 @@
+{
+  "ssh": {
+    "host": "",
+    "user": "pi",
+    "port": 22,
+    "alias": "dogzilla",
+    "keyPath": "C:\\Users\\sandr\\.ssh\\robodoge_pi_ed25519"
+  },
+  "remoteRoot": "/home/pi/robodoge",
+  "bridges": {
+    "direct": {
+      "label": "Direct DOGZILLALib",
+      "baseUrl": "",
+      "port": 8893
+    },
+    "ros2": {
+      "label": "ROS2 Sidecar",
+      "baseUrl": "",
+      "port": 8892
+    }
+  },
+  "notes": [
+    "Set ssh.host from the Connection Center once the DOGZILLA IP is known.",
+    "Use direct bridge for first dry-run hardware tests; use ROS2 bridge after the vendor ROS2 graph is verified."
+  ]
+}

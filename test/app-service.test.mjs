@@ -163,6 +163,13 @@ test('processUserInput dispatches Isaac command when preview opts into chat disp
         status: 'sent',
       }
     },
+    loadRobotRuntimeConfigImpl: async () => ({
+      activeTarget: {
+        id: 'isaacsim',
+        kind: 'isaacsim',
+        label: 'Isaac Sim',
+      },
+    }),
   })
 
   assert.equal(result.parsed.command, 'move')

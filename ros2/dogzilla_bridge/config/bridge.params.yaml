@@ -9,6 +9,13 @@ dogzilla_bridge:
     action_topic: "/dogzilla/action"
     stabilize_topic: "/dogzilla/stabilize"
     state_topic: "/dogzilla/state"
+    adapter_mode: "ros-publisher"
+    dogzilla_python_module: ""
+    dogzilla_python_factory: ""
+    expected_ros_domain_id: "16"
+    vendor_bringup_launch: "ros2 launch bringup Navigation_bringup.launch.py"
+    pi5_docker_entry: "./run_humble.sh"
+    app_camera_topic: "/usb_cam/imge_raw/compress"
     publish_state_hz: 1.0
     deadband: 0.05
     linear_x_full_scale_step: 25.0
@@ -18,4 +25,4 @@ dogzilla_bridge:
     action_file: "config/robot-actions.json"
     motion_file: "config/robot-motion.json"
     bridge_contract_file: "config/robot-ros2.json"
-    notes: "Publishes periodic JSON state to /dogzilla/state and accepts canonical plan JSON on /dogzilla/command_plan."
+    notes: "Dry-run records adapter calls. Live adapter_mode=ros-publisher publishes bridge topics; adapter_mode=yahboom-python calls the documented DOGZILLA Python library after module/factory are verified on the Pi."

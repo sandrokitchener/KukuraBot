@@ -13,13 +13,35 @@ from typing import Any
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-VENDOR_LIB = ROOT_DIR / "vendor" / "DOGZILLALib"
 LOG_FILE = Path(__file__).resolve().with_name("command_log.ndjson")
 DEFAULT_HOST = os.environ.get("DOGZILLA_LIB_BRIDGE_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.environ.get("DOGZILLA_LIB_BRIDGE_PORT", "8893"))
 DEFAULT_SERIAL_PORT = os.environ.get("DOGZILLA_SERIAL_PORT", "/dev/ttyAMA0")
 DEFAULT_DRY_RUN = os.environ.get("DOGZILLA_DIRECT_DRY_RUN", "1") != "0"
+DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
+
+VENDOR_PATHS = [
+    ROOT_DIR / "vendor" / "DOGZILLALib",
+    ROOT_DIR / "vendor" / "DOGZILLA",
+    Path("/home/pi/DOGZILLA"),
+    Path("/home/pi/DOGZILLA/DOGZILLALib"),
+    Path("/home/yahboom/DOGZILLA"),
+    Path("/home/yahboom/DOGZILLA/DOGZILLALib"),
+]
+VENDOR_MODULE_CANDIDATES = [
+    "DOGZILLALib.DOGZILLALib",
+    "DOGZILLALib",
+    "dogzilla",
+]
+VENDOR_FACTORY_CANDIDATES = ["DOGZILLA", "Dogzilla", "dogzilla"]
+STUDY_HINTS = {
+    "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
+    "pi5DockerEntry": "./run_humble.sh",
+    "bringupLaunch": "ros2 launch bringup Navigation_bringup.launch.py",
+    "cameraTopicFromAppDocs": "/usb_cam/imge_raw/compress",
+    "knownConflict": "Yahboom APP/control startup can occupy camera/control resources; stop it before direct bridge live tests.",
+}
 
 ACTION_ALIASES = {
     "lie_down": 1,
@@ -50,17 +72,14 @@ class DogzillaRuntime:
         self.robot_error: str | None = None
         self.robot = None
         self._lock = threading.Lock()
+        self.vendor_paths = load_vendor_paths()
+        self.import_attempts: list[dict[str, str]] = []
 
-        if VENDOR_LIB.exists():
-            sys.path.insert(0, str(VENDOR_LIB))
+        for vendor_path in self.vendor_paths:
+            if vendor_path.exists():
+                sys.path.insert(0, str(vendor_path))
 
-        try:
-            from DOGZILLALib.DOGZILLALib import DOGZILLA
-        except Exception as error:
-            self.DOGZILLA = None
-            self.import_error = str(error)
-        else:
-            self.DOGZILLA = DOGZILLA
+        self.DOGZILLA = self._load_factory()
 
     @property
     def available(self) -> bool:
@@ -71,9 +90,13 @@ class DogzillaRuntime:
             "available": self.available,
             "dryRun": self.dry_run,
             "serialPort": self.serial_port,
-            "vendorLib": str(VENDOR_LIB),
+            "vendorPaths": [str(path) for path in self.vendor_paths],
+            "vendorImportAttempts": self.import_attempts,
             "logFile": str(LOG_FILE),
             "knownActions": ACTION_ALIASES,
+            "studyHints": STUDY_HINTS,
+            "rosDomainId": os.environ.get("ROS_DOMAIN_ID"),
+            "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
             "importError": self.import_error,
             "robotError": self.robot_error,
         }
@@ -128,11 +151,11 @@ class DogzillaRuntime:
                     return {
                         "executed": True,
                         "delivery": "DOGZILLALib",
-                        "battery": robot.read_battery(),
-                        "motors": robot.read_motor(),
-                        "roll": robot.read_roll(),
-                        "pitch": robot.read_pitch(),
-                        "yaw": robot.read_yaw(),
+                        "battery": call_first(robot, ["read_Battery", "read_battery"]),
+                        "motors": call_first(robot, ["read_Motor", "read_motor"]),
+                        "roll": call_first(robot, ["read_roll", "read_Roll"]),
+                        "pitch": call_first(robot, ["read_pitch", "read_Pitch"]),
+                        "yaw": call_first(robot, ["read_yaw", "read_Yaw"]),
                     }
 
                 return {"executed": False, "error": f"unsupported_kind:{kind}"}
@@ -141,15 +164,15 @@ class DogzillaRuntime:
                 return {"executed": False, "error": str(error)}
 
     def _execute_locomotion(self, robot, params: dict[str, Any]) -> dict[str, Any]:
-        x_step = clamp(float(params.get("x_step") or 0), -20, 20)
+        x_step = clamp(float(params.get("x_step") or 0), -25, 25)
         y_step = clamp(float(params.get("y_step") or 0), -18, 18)
-        turn_rate = clamp(float(params.get("turn_rate") or 0), -70, 70)
+        turn_rate = clamp(float(params.get("turn_rate") or 0), -100, 100)
         pace = params.get("pace")
         gait = params.get("gait")
 
         if pace in ("normal", "slow", "high"):
             robot.pace(pace)
-        if gait in ("trot", "walk", "high_walk"):
+        if gait in ("trot", "walk", "high_walk") and hasattr(robot, "gait_type"):
             robot.gait_type(gait)
 
         robot.move("x", x_step)
@@ -181,11 +204,34 @@ class DogzillaRuntime:
         if self.robot is not None:
             return self.robot
         try:
-            self.robot = self.DOGZILLA(self.serial_port)
+            try:
+                self.robot = self.DOGZILLA(self.serial_port)
+            except TypeError:
+                self.robot = self.DOGZILLA()
         except Exception as error:
             self.robot_error = str(error)
             return None
         return self.robot
+
+    def _load_factory(self):
+        for module_name in load_module_candidates():
+            try:
+                module = __import__(module_name, fromlist=["*"])
+            except Exception as error:
+                self.import_attempts.append({"module": module_name, "error": str(error)})
+                continue
+
+            for factory_name in VENDOR_FACTORY_CANDIDATES:
+                factory = getattr(module, factory_name, None)
+                if factory is not None:
+                    self.import_attempts.append({"module": module_name, "factory": factory_name})
+                    self.import_error = None
+                    return factory
+
+            self.import_attempts.append({"module": module_name, "error": "no DOGZILLA factory found"})
+
+        self.import_error = "No DOGZILLA Python control factory found"
+        return None
 
 
 class BridgeServer(ThreadingHTTPServer):
@@ -225,6 +271,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/actions":
             self._send_json(200, {"actions": ACTION_ALIASES})
+            return
+        if self.path == "/preflight":
+            self._send_json(200, {"runtime": self.server.runtime.snapshot(), "checks": build_preflight_checks()})
             return
         self._send_json(404, {"error": "Not found"})
 
@@ -296,6 +345,36 @@ def resolve_action_id(params: dict[str, Any]) -> int | None:
             return action_id
 
     return None
+
+
+def load_vendor_paths() -> list[Path]:
+    raw = os.environ.get("DOGZILLA_VENDOR_PATHS", "")
+    configured = [Path(item) for item in raw.split(os.pathsep) if item.strip()]
+    return configured + VENDOR_PATHS
+
+
+def load_module_candidates() -> list[str]:
+    raw = os.environ.get("DOGZILLA_VENDOR_MODULES", "")
+    configured = [item.strip() for item in raw.split(",") if item.strip()]
+    return configured + VENDOR_MODULE_CANDIDATES
+
+
+def call_first(target: Any, names: list[str]) -> Any:
+    for name in names:
+        method = getattr(target, name, None)
+        if method is not None:
+            return method()
+    raise AttributeError(f"Missing DOGZILLA method. Tried: {', '.join(names)}")
+
+
+def build_preflight_checks() -> list[dict[str, Any]]:
+    return [
+        {"name": "same_lan", "expect": "desktop and DOGZILLA on same LAN"},
+        {"name": "ros_domain", "expect": f"ROS_DOMAIN_ID={DEFAULT_EXPECTED_ROS_DOMAIN_ID} for Yahboom default image"},
+        {"name": "pi5_docker", "command": STUDY_HINTS["pi5DockerEntry"]},
+        {"name": "bringup", "command": STUDY_HINTS["bringupLaunch"]},
+        {"name": "app_conflict", "expect": STUDY_HINTS["knownConflict"]},
+    ]
 
 
 def append_log_record(record: dict[str, Any]) -> None:

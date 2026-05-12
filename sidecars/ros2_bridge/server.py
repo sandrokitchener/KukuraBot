@@ -16,7 +16,17 @@ LOG_FILE = Path(__file__).resolve().with_name("command_log.ndjson")
 DEFAULT_PLAN_TOPIC = os.environ.get("DOGZILLA_PLAN_TOPIC", "/dogzilla/command_plan")
 DEFAULT_STATE_TOPIC = os.environ.get("DOGZILLA_STATE_TOPIC", "/dogzilla/state")
 DEFAULT_NODE_NAME = os.environ.get("DOGZILLA_HTTP_BRIDGE_NODE_NAME", "dogzilla_http_bridge")
+DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_HTTP_BRIDGE_HISTORY", "20"))
+os.environ.setdefault("ROS_DOMAIN_ID", os.environ.get("DOGZILLA_ROS_DOMAIN_ID", DEFAULT_EXPECTED_ROS_DOMAIN_ID))
+
+STUDY_HINTS = {
+    "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
+    "pi5DockerEntry": "./run_humble.sh",
+    "bringupLaunch": "ros2 launch bringup Navigation_bringup.launch.py",
+    "keyboardTeleop": "ros2 run teleop_twist_keyboard teleop_twist_keyboard",
+    "cameraTopicFromAppDocs": "/usb_cam/imge_raw/compress",
+}
 
 
 class Ros2PublisherRuntime:
@@ -103,6 +113,9 @@ class Ros2PublisherRuntime:
               "planTopic": self.plan_topic,
               "stateTopic": self.state_topic,
               "nodeName": self.node_name,
+              "rosDomainId": os.environ.get("ROS_DOMAIN_ID"),
+              "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
+              "studyHints": STUDY_HINTS,
               "importError": self.import_error,
               "lastStateMessage": self.last_state_message,
               "lastStateAt": self.last_state_at,
@@ -161,6 +174,10 @@ class Ros2BridgeHandler(BaseHTTPRequestHandler):
 
         if self.path == "/feedback":
             self._send_json(200, self._feedback_payload())
+            return
+
+        if self.path == "/study-hints":
+            self._send_json(200, {"studyHints": STUDY_HINTS, "rosDomainId": os.environ.get("ROS_DOMAIN_ID")})
             return
 
         self._send_json(404, {"error": "Not found"})

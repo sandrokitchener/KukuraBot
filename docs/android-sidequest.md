@@ -10,6 +10,18 @@ The first viable mobile shape is a private LAN client:
 This keeps model, robot bridge, Parakeet sidecar, and Isaac Sim on the PC. The phone becomes a mobile control surface.
 The script is launched with Bun, but it runs the LAN HTTP/WebSocket backend under Node because Bun 1.3.11's `node:http` upgrade path does not complete the raw WebSocket handshake used by the fake robot state stream.
 
+## Web / Android Parity
+
+The Android app bundles the same `public/` UI as the web app. The router button, Connection Center, DOGZILLA IP settings, bridge checks, bridge sync, bridge start/stop, and backend URL control are shared code.
+
+On Android, set Backend URL from either Settings or the Connection Center:
+
+```text
+http://<pc-lan-ip>:3037
+```
+
+Connection actions then execute on the PC backend over LAN. Android does not run Node, PowerShell, SSH, ROS2, or bridge sidecars locally.
+
 ## Build Commands
 
 ```bash

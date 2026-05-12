@@ -45,11 +45,15 @@ async function collectFiles(relativePaths) {
       const childPath = path.join(absolutePath, entry.name)
 
       if (entry.isDirectory()) {
+        if (entry.name === '__pycache__') {
+          continue
+        }
+
         files.push(...await collectFiles([path.relative(PROJECT_ROOT, childPath)]))
         continue
       }
 
-      if (entry.isFile()) {
+      if (entry.isFile() && !entry.name.endsWith('.pyc')) {
         files.push(childPath)
       }
     }

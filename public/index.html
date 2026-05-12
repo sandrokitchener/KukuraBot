@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Robot Test App</title>
+    <link rel="icon" type="image/png" href="/assets/robo-doge-mascot.png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -17,10 +18,28 @@
         aria-label="Toggle settings"
         title="Settings"
       ></button>
+      <button
+        id="connection-toggle"
+        class="connection-toggle"
+        type="button"
+        aria-controls="connection-drawer"
+        aria-expanded="false"
+        aria-label="Toggle DOGZILLA connection center"
+        title="DOGZILLA connection"
+      >
+        <span class="router-icon" aria-hidden="true">
+          <span class="router-antenna router-antenna-left"></span>
+          <span class="router-antenna router-antenna-right"></span>
+          <span class="router-led router-led-one"></span>
+          <span class="router-led router-led-two"></span>
+        </span>
+      </button>
 
       <section class="console-layout">
         <aside class="control-rail" aria-label="Robot console navigation">
-          <div class="rail-brand" title="Robo-Doge">A</div>
+          <div class="rail-brand" title="Robo-Doge">
+            <img src="/assets/robo-doge-mascot.png" alt="Robo-Doge mascot" />
+          </div>
           <span class="rail-icon is-active" title="Command center">+</span>
           <span class="rail-icon" title="Robot fleet">o</span>
           <span class="rail-icon" title="Navigation">&lt;&gt;</span>
@@ -32,8 +51,16 @@
         </aside>
 
         <section class="command-zone">
-          <p id="app-eyebrow" class="eyebrow">Ollama robot-control test</p>
-          <h1 id="app-title">Robot Console</h1>
+          <div class="intro-head">
+            <div class="intro-copy">
+              <p id="app-eyebrow" class="eyebrow">Ollama robot-control test</p>
+              <h1 id="app-title">Robot Console</h1>
+            </div>
+            <div class="mascot-chip" title="Robo-Doge mascot" aria-hidden="true">
+              <img src="/assets/robo-doge-mascot.png" alt="" />
+              <span></span>
+            </div>
+          </div>
           <p id="app-description" class="lede">
             Test a local robot-control wrapper for robot-chat vs robot-command behavior. Edit the prompt
             and response schema files directly whenever you want.
@@ -135,6 +162,70 @@
           </section>
         </section>
       </section>
+
+      <aside id="connection-drawer" class="connection-drawer" hidden>
+        <div class="connection-drawer-head">
+          <h2>Connection Center</h2>
+          <span id="connection-chip" class="connection-chip">Not set</span>
+        </div>
+
+        <section class="connection-panel">
+          <div class="settings-row connection-backend-row">
+            <label for="dogzilla-backend-url-input">Backend URL</label>
+            <input
+              id="dogzilla-backend-url-input"
+              type="url"
+              inputmode="url"
+              placeholder="http://192.168.1.10:3037"
+              autocomplete="off"
+            />
+            <button id="save-dogzilla-backend-button" type="button">Use backend</button>
+          </div>
+          <p id="connection-backend-status" class="connection-status">Using same-origin backend.</p>
+
+          <div class="connection-grid">
+            <div class="connection-field">
+              <label for="dogzilla-host-input">DOGZILLA IP</label>
+              <input id="dogzilla-host-input" type="text" inputmode="decimal" placeholder="192.168.8.88" autocomplete="off" />
+            </div>
+            <div class="connection-field">
+              <label for="dogzilla-user-input">SSH user</label>
+              <input id="dogzilla-user-input" type="text" autocomplete="username" />
+            </div>
+            <div class="connection-field">
+              <label for="dogzilla-remote-root-input">Remote root</label>
+              <input id="dogzilla-remote-root-input" type="text" autocomplete="off" />
+            </div>
+          </div>
+          <button id="save-dogzilla-connection-button" type="button">Save connection</button>
+          <p id="connection-status" class="connection-status">Loading connection.</p>
+        </section>
+
+        <section class="connection-panel">
+          <div class="bridge-head">
+            <h2>Remote Bridge</h2>
+          </div>
+          <div class="bridge-action-grid">
+            <button type="button" data-connection-action="check-ssh">Check SSH</button>
+            <button type="button" data-connection-action="probe-bridges">Check bridges</button>
+            <button type="button" data-connection-action="sync-bridges">Sync code</button>
+            <button type="button" data-connection-action="start-direct">Start direct dry-run</button>
+            <button type="button" data-connection-action="start-ros2">Start ROS2</button>
+            <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
+          </div>
+          <div class="connection-url-grid">
+            <div>
+              <span class="meta-label">Direct</span>
+              <strong id="dogzilla-direct-url">-</strong>
+            </div>
+            <div>
+              <span class="meta-label">ROS2</span>
+              <strong id="dogzilla-ros2-url">-</strong>
+            </div>
+          </div>
+          <pre id="connection-output" class="connection-output">Waiting for connection action.</pre>
+        </section>
+      </aside>
 
       <aside id="settings-drawer" class="settings-drawer" hidden>
         <div class="settings-drawer-head">
