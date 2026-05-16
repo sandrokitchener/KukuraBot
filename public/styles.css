@@ -510,7 +510,7 @@ body {
   flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: #171513;
+  background: var(--accent);
   box-shadow: 0 12px 24px rgba(35, 28, 22, 0.16);
 }
 
@@ -1148,7 +1148,7 @@ html.android-app h1::after {
   height: 32px;
   margin-left: 12px;
   border-radius: 10px;
-  background: #171513 url("/assets/robo-doge-mascot.png") center / 24px 24px no-repeat;
+  background: var(--accent) url("/assets/robo-doge-mascot.png") center / 24px 24px no-repeat;
   image-rendering: pixelated;
   vertical-align: -3px;
 }

@@ -5,6 +5,7 @@ Tiny local test UI for a rename-friendly robot-control wrapper with switchable l
 ## What it does
 
 - Sends your typed message to whichever configured model profile is active.
+- Presents a warm, mobile-friendly robot console UI with off-white surfaces, charcoal framing, coral action states, compact segmented tabs, and simplified rail marks.
 - Loads the assistant system prompt from `config/system-prompt.txt`.
 - Loads the command JSON format spec from `config/command-response-format.json`.
 - Loads extra command-category guidance from `config/command-types.txt`.
@@ -111,8 +112,19 @@ bun run tauri:android:init
 bun run tauri:android:build
 ```
 
+The package script uses the same build path:
+
+```bash
+npm run tauri:android:build
+```
+
 Install the APK from `src-tauri/gen/android/app/build/outputs/apk/`, then open Settings and set Backend URL to `http://<pc-lan-ip>:3037`.
 The Windows build script produces the current side-load APK at `src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk`.
+To install the latest arm64 debug APK onto the currently attached Android device:
+
+```bash
+adb install -r src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
+```
 
 Mobile architecture and ASR/LLM tradeoffs live in `docs/android-sidequest.md`.
 
