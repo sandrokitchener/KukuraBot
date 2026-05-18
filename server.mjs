@@ -15,6 +15,7 @@ import {
   getIsaacSidecarHealth,
 } from './lib/isaacsim-sidecar-client.mjs'
 import { loadPublicConfig, processUserInput } from './lib/app-service.mjs'
+import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
 import { buildRobotRuntimePreview } from './lib/robot-command-compiler.mjs'
 import {
@@ -306,7 +307,33 @@ server.listen(PORT, HOST, async () => {
   console.log(
     `${appConfig.serverReadyLabel} running at http://${HOST}:${PORT} using ${profileConfig.activeProfile.label} (${profileConfig.activeProfile.model})`,
   )
+  void warmActiveModel(profileConfig.activeProfile)
 })
+
+async function warmActiveModel(profile) {
+  if (process.env.APP_MODEL_WARMUP === '0' || process.env.APP_MODEL_WARMUP === 'false') {
+    return
+  }
+
+  if (profile.provider !== 'ollama') {
+    return
+  }
+
+  const timeoutMs = Number(process.env.APP_MODEL_WARMUP_TIMEOUT_MS || 120000)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    console.log(`Warming ${profile.label} (${profile.model})...`)
+    await warmModel({ profile, signal: controller.signal })
+    console.log(`Warmed ${profile.label} (${profile.model}).`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`Model warm-up skipped: ${message}`)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 async function serveStaticRequest(pathname, response) {
   for (const { prefix, rootDir } of STATIC_ROOTS) {

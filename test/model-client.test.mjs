@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { queryModel } from '../lib/model-client.mjs'
+import { queryModel, warmModel } from '../lib/model-client.mjs'
 
 test('queryModel sends ollama payload with think disabled', async () => {
   const originalFetch = global.fetch
@@ -43,6 +43,55 @@ test('queryModel sends ollama payload with think disabled', async () => {
   } finally {
     global.fetch = originalFetch
   }
+})
+
+test('warmModel sends a tiny ollama keep-alive request', async () => {
+  const originalFetch = global.fetch
+  let requestUrl = ''
+  let requestBody = null
+
+  global.fetch = async (url, options) => {
+    requestUrl = String(url)
+    requestBody = JSON.parse(options.body)
+
+    return new Response(JSON.stringify({ response: 'ok' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  try {
+    const result = await warmModel({
+      profile: {
+        provider: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'test-model',
+        keepAlive: '30m',
+      },
+    })
+
+    assert.deepEqual(result, { warmed: true })
+    assert.equal(requestUrl, 'http://127.0.0.1:11434/api/generate')
+    assert.equal(requestBody.model, 'test-model')
+    assert.equal(requestBody.prompt, 'ok')
+    assert.equal(requestBody.stream, false)
+    assert.equal(requestBody.keep_alive, '30m')
+    assert.equal(requestBody.options.num_predict, 1)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('warmModel skips non-ollama providers', async () => {
+  const result = await warmModel({
+    profile: {
+      provider: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      model: 'llama-gguf',
+    },
+  })
+
+  assert.deepEqual(result, { warmed: false, reason: 'unsupported-provider' })
 })
 
 test('queryModel supports openai-compatible responses', async () => {
