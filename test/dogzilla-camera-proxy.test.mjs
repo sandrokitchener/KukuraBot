@@ -75,6 +75,45 @@ test('probeDogzillaCameraStream distinguishes reachable TCP from stuck HTTP', as
   }
 })
 
+test('probeDogzillaCameraStream fails loudly when configured control wake fails', async () => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, {
+      'content-type': 'multipart/x-mixed-replace; boundary=frame',
+    })
+    response.write('--frame\r\nContent-Type: image/jpeg\r\n\r\n')
+  })
+  const unusedControlPort = await getUnusedPort()
+
+  await listen(server)
+
+  try {
+    const streamUrl = `http://127.0.0.1:${server.address().port}/video_feed`
+    const status = await probeDogzillaCameraStream(
+      {
+        camera: {
+          streamUrl,
+          controlPort: unusedControlPort,
+          wakeCommand: '$010F040115#',
+        },
+      },
+      {
+        tcpTimeoutMs: 500,
+        controlConnectTimeoutMs: 100,
+        httpTimeoutMs: 500,
+      },
+    )
+
+    assert.equal(status.status, 'error')
+    assert.equal(status.ok, false)
+    assert.equal(status.tcp.status, 'ok')
+    assert.equal(status.control.status, 'error')
+    assert.equal(status.http.status, 'skipped')
+    assert.match(status.detail, /Camera control wake failed/)
+  } finally {
+    await close(server)
+  }
+})
+
 test('openDogzillaCameraControlSession sends the Standard-mode wake command', async () => {
   let received = ''
   const server = net.createServer((socket) => {
@@ -113,4 +152,12 @@ async function listen(server) {
 async function close(server) {
   server.close()
   await once(server, 'close')
+}
+
+async function getUnusedPort() {
+  const server = net.createServer()
+  await listen(server)
+  const port = server.address().port
+  await close(server)
+  return port
 }
