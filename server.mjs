@@ -10,20 +10,29 @@ import {
   saveDogzillaConnectionConfig,
 } from './lib/dogzilla-connection-center.mjs'
 import {
+  DOGZILLA_CAMERA_STATUS_PATH,
+  DOGZILLA_CAMERA_STREAM_PROXY_PATH,
+  getDogzillaCameraStatus,
+  proxyDogzillaCameraStream,
+} from './lib/dogzilla-camera-proxy.mjs'
+import { runDogzillaPreflight } from './lib/dogzilla-preflight.mjs'
+import {
   dispatchIsaacSimCommand,
   getIsaacRuntimeFeedback,
   getIsaacSidecarHealth,
 } from './lib/isaacsim-sidecar-client.mjs'
-import { loadPublicConfig, processUserInput } from './lib/app-service.mjs'
+import { loadPublicConfig, processModelResult, processUserInput } from './lib/app-service.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
 import { buildRobotRuntimePreview } from './lib/robot-command-compiler.mjs'
 import {
   dispatchRobotCommand,
+  fetchRobotBridgeState,
   getRobotRuntimeFeedback,
   getRobotSidecarHealth,
 } from './lib/robot-sidecar-client.mjs'
 import {
+  loadRobotRos2Config,
   loadRobotRuntimeConfig,
   setActiveRobotTarget,
 } from './lib/robot-runtime-config.mjs'
@@ -59,6 +68,7 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '127.0.0.1'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const appConfig = await loadAppConfig()
+let robotBridgeStateSeq = 0
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -116,9 +126,29 @@ const server = createServer(async (request, response) => {
       return sendJson(response, statusCode, result)
     }
 
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/preflight') {
+      return sendJson(response, 200, await runDogzillaPreflight())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STATUS_PATH) {
+      return sendJson(response, 200, await getDogzillaCameraStatus())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STREAM_PROXY_PATH) {
+      return proxyDogzillaCameraStream(response)
+    }
+
     if (request.method === 'POST' && requestUrl.pathname === '/api/chat') {
       const body = await readJsonBody(request)
       return sendJson(response, 200, await processUserInput(body?.input))
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/chat/result') {
+      const body = await readJsonBody(request)
+      return sendJson(response, 200, await processModelResult({
+        input: body?.input,
+        rawResponse: body?.rawResponse,
+      }))
     }
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/settings/profile') {
@@ -212,10 +242,22 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && requestUrl.pathname === '/api/robot/state') {
       const robotRuntimeConfig = await loadRobotRuntimeConfig()
+      const robotRos2Config = await loadRobotRos2Config()
+      const streamSnapshot = getRobotStateSnapshot()
+      const bridgeState = await fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config)
+      const bridgeRobot = buildRobotStateFromBridge(bridgeState, robotRuntimeConfig)
+      const robots = bridgeRobot
+        ? [bridgeRobot, ...streamSnapshot.robots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
+        : streamSnapshot.robots
+
       return sendJson(response, 200, {
-        ...getRobotStateSnapshot(),
+        ...streamSnapshot,
+        status: bridgeRobot ? 'ok' : streamSnapshot.status,
+        activeRobot: bridgeRobot || streamSnapshot.activeRobot,
+        robots,
         streamPath: ROBOT_STATE_STREAM_PATH,
         activeTarget: robotRuntimeConfig.activeTarget,
+        bridgeState,
       })
     }
 
@@ -378,6 +420,63 @@ async function readJsonBody(request) {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString('utf-8'))
+}
+
+function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig) {
+  if (bridgeState?.status !== 'ok' || !bridgeState.state || typeof bridgeState.state !== 'object') {
+    return null
+  }
+
+  const state = bridgeState.state
+  const timestamp = normalizeIsoTimestamp(state.readAt) || new Date().toISOString()
+  const yaw = normalizeFiniteNumber(state.yaw)
+  const roll = normalizeFiniteNumber(state.roll)
+  const pitch = normalizeFiniteNumber(state.pitch)
+  const battery = normalizeFiniteNumber(state.battery)
+
+  robotBridgeStateSeq += 1
+
+  return {
+    type: 'robot.state',
+    uuid: robotRuntimeConfig.robotId || 'dogzilla-local',
+    name: robotRuntimeConfig.robotName || 'DOGZILLA',
+    pose: null,
+    task: 'IDLE',
+    timestamp,
+    seq: robotBridgeStateSeq,
+    receivedAt: new Date().toISOString(),
+    sequenceStatus: robotBridgeStateSeq === 1 ? 'first' : 'ok',
+    telemetry: {
+      battery,
+      roll,
+      pitch,
+      yaw,
+      imuRaw: Array.isArray(state.imuRaw) ? state.imuRaw : [],
+      motors: Array.isArray(state.motors) ? state.motors : [],
+      dryRun: state.dryRun === true,
+      source: state.delivery || 'bridge',
+      poseSource: 'unavailable',
+      mapSource: 'pending-docker-ros2',
+    },
+  }
+}
+
+function normalizeFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function normalizeIsoTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return ''
+  }
+
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : ''
 }
 
 function sendJson(response, statusCode, payload) {

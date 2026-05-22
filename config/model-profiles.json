@@ -19,6 +19,20 @@
       "apiKeyEnv": "",
       "temperature": 0.15,
       "maxTokens": 120
+    },
+    "android_llama_cpp": {
+      "label": "Android llama.cpp",
+      "provider": "llama-cpp-http",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "model": "NVIDIA-Nemotron3-Nano-4B-Q4_K_M",
+      "modelPath": "/storage/emulated/0/Android/data/com.robodoge.console/files/models/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf",
+      "modelFileName": "NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf",
+      "modelRepo": "nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF",
+      "modelDownloadUrl": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF/resolve/main/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf",
+      "temperature": 0.1,
+      "maxTokens": 96,
+      "contextTokens": 2048,
+      "threads": 4
     }
   }
 }

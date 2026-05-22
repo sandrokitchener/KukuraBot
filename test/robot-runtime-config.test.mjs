@@ -33,6 +33,7 @@ test('normalizeRobotRuntimeConfig prefers env override target and dry-run flag',
   assert.equal(config.activeTarget.kind, 'ros2-bridge')
   assert.equal(config.selectionLocked, true)
   assert.equal(config.dryRun, false)
+  assert.equal(config.robotName, 'DOGZILLA')
   assert.equal(config.feedback.statePollMs, 125)
 })
 

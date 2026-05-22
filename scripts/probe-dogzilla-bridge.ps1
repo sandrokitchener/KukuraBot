@@ -1,6 +1,6 @@
 param(
-  [string]$BridgeBaseUrl = "http://192.168.8.88:8892",
-  [ValidateSet("health", "feedback", "reset", "sit", "stand", "lie_down", "stretch", "three_axis", "swing", "pee", "crawl", "pray")]
+  [string]$BridgeBaseUrl = "http://10.0.4.32:8892",
+  [ValidateSet("health", "feedback", "state", "reset", "sit", "stand", "lie_down", "stretch", "three_axis", "swing", "pee", "crawl", "pray")]
   [string]$Command = "health",
   [int]$TimeoutSec = 8
 )
@@ -30,12 +30,17 @@ $actionMap = @{
 }
 
 if ($Command -eq "health") {
-  Invoke-RestMethod -Uri (Join-Url $BridgeBaseUrl "/healthz") -Method Get -TimeoutSec $TimeoutSec
+  Invoke-RestMethod -Uri (Join-Url $BridgeBaseUrl "/healthz") -Method Get -TimeoutSec $TimeoutSec | ConvertTo-Json -Depth 20
   exit 0
 }
 
 if ($Command -eq "feedback") {
-  Invoke-RestMethod -Uri (Join-Url $BridgeBaseUrl "/feedback") -Method Get -TimeoutSec $TimeoutSec
+  Invoke-RestMethod -Uri (Join-Url $BridgeBaseUrl "/feedback") -Method Get -TimeoutSec $TimeoutSec | ConvertTo-Json -Depth 20
+  exit 0
+}
+
+if ($Command -eq "state") {
+  Invoke-RestMethod -Uri (Join-Url $BridgeBaseUrl "/state") -Method Get -TimeoutSec $TimeoutSec | ConvertTo-Json -Depth 20
   exit 0
 }
 
@@ -60,4 +65,4 @@ $envelope = @{
   }
 }
 
-Invoke-JsonPost (Join-Url $BridgeBaseUrl "/commands") @{ envelope = $envelope }
+Invoke-JsonPost (Join-Url $BridgeBaseUrl "/commands") @{ envelope = $envelope } | ConvertTo-Json -Depth 20

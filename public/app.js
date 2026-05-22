@@ -1,10 +1,11 @@
 import { createSpeechInputController } from './speech-input.js'
 import { createCommandCuePlayer } from './command-cue.js'
 import { splitRecentChatHistory } from './chat-history.js'
-import { apiFetch, getApiBaseUrl, setApiBaseUrl } from './api-client.js'
+import { apiFetch, getApiBaseUrl, setApiBaseUrl, toApiUrl } from './api-client.js'
 
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
+const appTitleText = document.querySelector('#app-title-text')
 const appDescription = document.querySelector('#app-description')
 const profileName = document.querySelector('#profile-name')
 const profileSource = document.querySelector('#profile-source')
@@ -26,6 +27,8 @@ const robotTargetSelect = document.querySelector('#robot-target-select')
 const saveRobotTargetButton = document.querySelector('#save-robot-target-button')
 const robotTargetLockNote = document.querySelector('#robot-target-lock-note')
 const robotTargetStatus = document.querySelector('#robot-target-status')
+const testRobotSitButton = document.querySelector('#test-robot-sit-button')
+const robotSitTestStatus = document.querySelector('#robot-sit-test-status')
 const backendUrlInput = document.querySelector('#backend-url-input')
 const saveBackendButton = document.querySelector('#save-backend-button')
 const backendStatus = document.querySelector('#backend-status')
@@ -48,8 +51,15 @@ const robotStateChip = document.querySelector('#robot-state-chip')
 const robotStateName = document.querySelector('#robot-state-name')
 const robotStateTask = document.querySelector('#robot-state-task')
 const robotStateSeq = document.querySelector('#robot-state-seq')
+const robotBatteryValue = document.querySelector('#robot-battery-value')
+const robotTelemetryMeta = document.querySelector('#robot-telemetry-meta')
 const robotMapDot = document.querySelector('#robot-map-dot')
 const robotMapMeta = document.querySelector('#robot-map-meta')
+const robotMapPanel = document.querySelector('.robot-map-panel')
+const robotCameraPanel = document.querySelector('#robot-camera-panel')
+const robotCameraFrame = document.querySelector('#robot-camera-frame')
+const robotCameraChip = document.querySelector('#robot-camera-chip')
+const robotCameraMeta = document.querySelector('#robot-camera-meta')
 const settingsToggle = document.querySelector('#settings-toggle')
 const settingsDrawer = document.querySelector('#settings-drawer')
 const connectionToggle = document.querySelector('#connection-toggle')
@@ -67,7 +77,13 @@ const dogzillaDirectUrl = document.querySelector('#dogzilla-direct-url')
 const dogzillaRos2Url = document.querySelector('#dogzilla-ros2-url')
 const connectionOutput = document.querySelector('#connection-output')
 const connectionActionButtons = document.querySelectorAll('[data-connection-action]')
+const runDogzillaPreflightButton = document.querySelector('#run-dogzilla-preflight-button')
+const dogzillaPreflightStatus = document.querySelector('#dogzilla-preflight-status')
+const dogzillaPreflightSummary = document.querySelector('#dogzilla-preflight-summary')
+const dogzillaPreflightChecks = document.querySelector('#dogzilla-preflight-checks')
+const dogzillaPreflightOutput = document.querySelector('#dogzilla-preflight-output')
 const robotTabs = document.querySelectorAll('.robot-tab')
+const primaryRobotTab = document.querySelector('.robot-tab[data-robot-view="overview"]')
 const form = document.querySelector('#chat-form')
 const input = document.querySelector('#user-input')
 const sendButton = document.querySelector('#send-button')
@@ -90,6 +106,7 @@ const THINKING_CUE_URLS = [
   '/sounds/robot-think-whimper-2.wav',
   '/sounds/robot-think-pant-1.wav',
 ]
+const ANDROID_LOCAL_MODEL_PROVIDER = 'llama-cpp-http'
 const MOBILE_VIEWS = ['robot', 'chat', 'audio']
 const MOBILE_DEFAULT_VIEW = 'chat'
 const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
@@ -100,6 +117,9 @@ const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   speechThreshold: 0.015,
 }
 const DEFAULT_ROBOT_RUNTIME = {
+  robotId: 'dogzilla-local',
+  robotName: 'DOGZILLA',
+  robotModel: 'dogzilla-s2',
   activeTarget: {
     id: 'isaacsim',
     label: 'Isaac Sim',
@@ -138,8 +158,8 @@ const thinkingCuePlayer = createCommandCuePlayer(THINKING_CUE_URLS, {
 })
 let appConfig = {
   assistantName: 'Assistant',
-  pageTitle: 'Robot Test App',
-  consoleTitle: 'Robot Console',
+  pageTitle: 'Questing Beast',
+  consoleTitle: 'Questing Beast',
   sendButtonLabel: 'Ask Assistant',
   thinkingStatus: 'Assistant is thinking',
   introEyebrow: 'Ollama robot-control test',
@@ -156,10 +176,14 @@ let runtimeConfig = {
     provider: 'Unknown',
     model: 'Unknown',
     baseUrl: '',
+    modelPath: '',
+    temperature: 0.15,
+    maxTokens: 120,
     source: 'default',
     selectionLocked: false,
   },
   availableProfiles: [],
+  systemPromptPreview: '',
   speech: {
     activeProfile: null,
     availableProfiles: [],
@@ -170,6 +194,9 @@ let runtimeConfig = {
     activationPhrases: DEFAULT_ACTIVATION_PHRASES,
   },
   robotRuntime: { ...DEFAULT_ROBOT_RUNTIME },
+  dogzilla: {
+    camera: null,
+  },
 }
 let dogzillaConnection = null
 let speechController = null
@@ -187,11 +214,13 @@ form.addEventListener('submit', handleChatSubmit)
 saveProfileButton.addEventListener('click', handleProfileSave)
 saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
+testRobotSitButton.addEventListener('click', handleRobotSitTest)
 saveBackendButton.addEventListener('click', handleBackendSave)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 connectionToggle.addEventListener('click', handleConnectionToggle)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
+runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
 
 for (const button of connectionActionButtons) {
   button.addEventListener('click', handleDogzillaConnectionAction)
@@ -200,6 +229,9 @@ for (const button of connectionActionButtons) {
 for (const tab of robotTabs) {
   tab.addEventListener('click', handleRobotTabClick)
 }
+
+robotCameraFrame.addEventListener('error', handleDogzillaCameraFrameError)
+robotCameraFrame.addEventListener('load', handleDogzillaCameraFrameLoad)
 
 function initAndroidAppShell() {
   if (!isAndroidAppShell()) {
@@ -343,18 +375,7 @@ async function handleChatSubmit(event) {
   thinkingState = startThinkingFeedback(pendingMessage)
 
   try {
-    const response = await apiFetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ input: message }),
-    })
-
-    const payload = await response.json()
-    if (!response.ok) {
-      throw new Error(payload.error || 'Request failed.')
-    }
+    const payload = await submitChatMessage(message)
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
     const completionState =
@@ -384,6 +405,90 @@ async function handleChatSubmit(event) {
     input.focus()
     thinkingState = null
   }
+}
+
+async function submitChatMessage(message) {
+  if (shouldUseAndroidLocalModel()) {
+    return submitAndroidLocalModelMessage(message)
+  }
+
+  const response = await apiFetch('/api/chat', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ input: message }),
+  })
+
+  const payload = await response.json()
+  if (!response.ok) {
+    throw new Error(payload.error || 'Request failed.')
+  }
+
+  return payload
+}
+
+function shouldUseAndroidLocalModel() {
+  return isAndroidAppShell() && runtimeConfig.activeProfile.provider === ANDROID_LOCAL_MODEL_PROVIDER
+}
+
+async function submitAndroidLocalModelMessage(message) {
+  const rawResponse = await queryAndroidLocalModel({
+    input: message,
+    profile: runtimeConfig.activeProfile,
+    systemPrompt: runtimeConfig.systemPromptPreview,
+  })
+  const response = await apiFetch('/api/chat/result', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      input: message,
+      rawResponse,
+    }),
+  })
+  const payload = await response.json()
+
+  if (!response.ok) {
+    throw new Error(payload.error || 'Local model result failed.')
+  }
+
+  return payload
+}
+
+async function queryAndroidLocalModel({ input, profile, systemPrompt }) {
+  const baseUrl = profile.baseUrl || 'http://127.0.0.1:8080/v1'
+  const endpoint = `${trimTrailingSlash(baseUrl)}/chat/completions`
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: profile.model || 'robo-doge-local-gguf',
+      temperature: profile.temperature ?? 0.1,
+      max_tokens: profile.maxTokens ?? 96,
+      messages: [
+        { role: 'system', content: systemPrompt || '' },
+        { role: 'user', content: input },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await safeReadText(response)
+    throw new Error(`Android llama.cpp request failed (${response.status}): ${detail || response.statusText}`)
+  }
+
+  const payload = await response.json()
+  const content = normalizeOpenAiCompatibleContent(payload?.choices?.[0]?.message?.content)
+
+  if (content) {
+    return content
+  }
+
+  throw new Error('Android llama.cpp returned an empty response.')
 }
 
 async function handleProfileSave() {
@@ -522,6 +627,59 @@ async function handleRobotTargetSave() {
     setStatus(formatError(error), 'error')
   } finally {
     applyRobotTargetSelectionState()
+  }
+}
+
+async function handleRobotSitTest() {
+  testRobotSitButton.disabled = true
+  robotSitTestStatus.textContent = 'Sending sit test...'
+
+  try {
+    const healthResponse = await apiFetch('/api/robot/health')
+    const healthPayload = await healthResponse.json()
+
+    if (!healthResponse.ok) {
+      throw new Error(healthPayload.error || 'Robot health check failed.')
+    }
+    if (!['ok', 'degraded'].includes(healthPayload.status)) {
+      throw new Error(`Robot bridge ${healthPayload.status || 'unavailable'}.`)
+    }
+
+    const dispatchResponse = await apiFetch('/api/robot/dispatch', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: 'settings:sit-test',
+        parsed: {
+          command: 'trick',
+          waypoint: 'current_position',
+          trick: 'sit',
+        },
+      }),
+    })
+    const dispatchPayload = await dispatchResponse.json()
+
+    if (!dispatchResponse.ok) {
+      throw new Error(dispatchPayload.error || 'Robot sit test failed.')
+    }
+
+    const summary = formatRobotSitTestSummary(healthPayload, dispatchPayload.preview, dispatchPayload.dispatch)
+    robotSitTestStatus.textContent = summary
+    runtimeFeedbackOutput.textContent = JSON.stringify({
+      health: healthPayload,
+      sitTest: dispatchPayload,
+    }, null, 2)
+    setRuntimeFeedbackStatus(summary, dispatchPayload.dispatch?.status === 'error' || healthPayload.status === 'error')
+    setStatus(summary, dispatchPayload.dispatch?.status === 'error' ? 'error' : 'idle')
+    await refreshRobotState()
+  } catch (error) {
+    const message = formatError(error)
+    robotSitTestStatus.textContent = message
+    setStatus(message, 'error')
+  } finally {
+    testRobotSitButton.disabled = false
   }
 }
 
@@ -685,6 +843,8 @@ async function refreshRobotState() {
     robotStateName.textContent = 'State stream'
     robotStateTask.textContent = 'Unavailable'
     robotStateSeq.textContent = '-'
+    robotBatteryValue.textContent = '-'
+    robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
     robotMapMeta.textContent = formatError(error)
   }
@@ -722,9 +882,14 @@ function handleRobotTabClick(event) {
   }
 
   const selectedRobot = event.currentTarget.textContent.trim()
+  const selectedView = event.currentTarget.dataset.robotView || 'overview'
 
-  if (selectedRobot !== 'Robo Doge') {
-    setStatus(`${selectedRobot} selected. Telemetry stream still follows Robo Doge.`)
+  applyRobotView(selectedView)
+
+  const primaryRobotName = runtimeConfig.robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
+
+  if (selectedRobot !== primaryRobotName) {
+    setStatus(`${selectedRobot} selected. Telemetry stream still follows ${primaryRobotName}.`)
   }
 }
 
@@ -827,6 +992,38 @@ async function handleDogzillaConnectionAction(event) {
   }
 }
 
+async function handleDogzillaPreflight() {
+  setConnectionActionsDisabled(true)
+  dogzillaPreflightStatus.textContent = 'Running read-only preflight...'
+  dogzillaPreflightOutput.textContent = 'Checking SSH, bridge, battery, camera TCP, Docker, lidar, and Pi processes...'
+  dogzillaPreflightChecks.replaceChildren()
+
+  try {
+    const response = await apiFetch('/api/dogzilla/preflight', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'DOGZILLA preflight failed.')
+    }
+
+    renderDogzillaPreflight(payload)
+    setStatus(`DOGZILLA preflight ${payload.status}.`)
+  } catch (error) {
+    const message = formatError(error)
+    dogzillaPreflightStatus.textContent = message
+    dogzillaPreflightOutput.textContent = message
+    setStatus(message, 'error')
+  } finally {
+    setConnectionActionsDisabled(false)
+  }
+}
+
 function renderDogzillaConnection(payload) {
   dogzillaConnection = payload
   const config = payload.config || {}
@@ -853,10 +1050,70 @@ function renderBridgeProbe(payload) {
   connectionStatus.textContent = `${directLabel}. ${ros2Label}.`
 }
 
+function renderDogzillaPreflight(payload) {
+  const summary = payload.summary || {}
+  const checks = Array.isArray(payload.checks) ? payload.checks : []
+  const statusLabel = payload.status === 'ready'
+    ? 'Ready'
+    : payload.status === 'blocked'
+      ? 'Blocked'
+      : 'Attention'
+
+  dogzillaPreflightStatus.textContent =
+    `${statusLabel}: ${summary.ok || 0} ok, ${summary.warn || 0} warn, ${summary.fail || 0} fail. ` +
+    `Ran ${formatEventTimestamp(payload.ranAt)} in ${Math.round(payload.durationMs || 0)}ms.`
+  dogzillaPreflightSummary.replaceChildren(
+    buildPreflightSummaryCard('OK', summary.ok || 0, 'ok'),
+    buildPreflightSummaryCard('Warn', summary.warn || 0, 'warn'),
+    buildPreflightSummaryCard('Fail', summary.fail || 0, 'fail'),
+  )
+  dogzillaPreflightChecks.replaceChildren(...checks.map(buildPreflightCheckRow))
+  dogzillaPreflightOutput.textContent = JSON.stringify({
+    status: payload.status,
+    config: payload.config,
+    checks,
+    notes: payload.notes,
+    diagnostics: payload.diagnostics,
+  }, null, 2)
+}
+
+function buildPreflightSummaryCard(label, value, statusName) {
+  const card = document.createElement('div')
+  card.dataset.state = statusName
+  const labelNode = document.createElement('span')
+  labelNode.className = 'meta-label'
+  labelNode.textContent = label
+  const valueNode = document.createElement('strong')
+  valueNode.textContent = String(value)
+  card.append(labelNode, valueNode)
+  return card
+}
+
+function buildPreflightCheckRow(check) {
+  const row = document.createElement('div')
+  row.className = 'preflight-check'
+  row.dataset.state = check.status || 'info'
+
+  const chip = document.createElement('span')
+  chip.className = 'preflight-check-chip'
+  chip.textContent = check.status || 'info'
+
+  const body = document.createElement('div')
+  const title = document.createElement('strong')
+  title.textContent = check.label || check.id || 'Check'
+  const detail = document.createElement('p')
+  detail.textContent = check.detail || ''
+  body.append(title, detail)
+
+  row.append(chip, body)
+  return row
+}
+
 function setConnectionActionsDisabled(disabled) {
   saveDogzillaConnectionButton.disabled = disabled
   saveDogzillaBackendButton.disabled = disabled
   dogzillaBackendUrlInput.disabled = disabled
+  runDogzillaPreflightButton.disabled = disabled
   for (const button of connectionActionButtons) {
     button.disabled = disabled
   }
@@ -923,6 +1180,7 @@ function applyPayload(payload) {
   runtimeConfig = {
     activeProfile: payload.activeProfile || runtimeConfig.activeProfile,
     availableProfiles: payload.availableProfiles || [],
+    systemPromptPreview: payload.systemPromptPreview || runtimeConfig.systemPromptPreview,
     speech: {
       ...runtimeConfig.speech,
       ...(payload.speech || {}),
@@ -939,12 +1197,17 @@ function applyPayload(payload) {
         : runtimeConfig.robotRuntime.activeTarget,
       availableTargets: payload.robotRuntime?.availableTargets || runtimeConfig.robotRuntime.availableTargets,
     },
+    dogzilla: {
+      ...(runtimeConfig.dogzilla || {}),
+      ...(payload.dogzilla || {}),
+    },
   }
 
   applyAppConfig()
   applyModelConfig(payload)
   applySpeechConfig()
   applyRobotRuntimeConfig()
+  applyDogzillaCameraConfig()
 }
 
 function applyModelConfig(payload) {
@@ -1017,6 +1280,9 @@ function applyRobotRuntimeConfig() {
   runtimeTargetName.textContent = activeTarget.label
   runtimeTargetSource.textContent = `Source: ${formatSource(activeTarget.source || robotRuntime.source)}`
   runtimeTargetChip.textContent = activeTarget.label
+  if (primaryRobotTab) {
+    primaryRobotTab.textContent = robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
+  }
   robotRuntimeFile.textContent = robotRuntime.runtimeFile
   robotRos2File.textContent = robotRuntime.ros2ConfigFile
   runtimeFiles.textContent =
@@ -1113,8 +1379,8 @@ function renderRobotFeedback(healthPayload, feedbackPayload) {
 
   setRuntimeFeedbackStatus(
     healthStatus === 'error'
-      ? `ROS2 bridge error: ${healthPayload.error || `HTTP ${healthPayload.responseStatus || 'unknown'}`}.`
-      : `ROS2 health ${healthStatus}. Feedback ${feedbackStatus}.`,
+      ? `${activeTarget.label} error: ${healthPayload.error || `HTTP ${healthPayload.responseStatus || 'unknown'}`}.`
+      : `${activeTarget.label} health ${healthStatus}. Feedback ${feedbackStatus}.`,
     healthStatus === 'error' || feedbackStatus === 'error',
   )
   lines.push(`Destination: ${healthPayload.destination || feedbackPayload.destination || 'n/a'}`)
@@ -1147,6 +1413,8 @@ function renderRobotStateSnapshot(snapshot) {
     robotStateName.textContent = 'No robot'
     robotStateTask.textContent = 'Waiting'
     robotStateSeq.textContent = '-'
+    robotBatteryValue.textContent = '-'
+    robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
     robotMapMeta.textContent = `Stream: ${runtimeConfig.robotRuntime.stateStreamPath || DEFAULT_ROBOT_RUNTIME.stateStreamPath}`
     return
@@ -1161,6 +1429,7 @@ function renderRobotStateSnapshot(snapshot) {
   robotStateName.textContent = robot.name
   robotStateTask.textContent = robot.task
   robotStateSeq.textContent = String(robot.seq)
+  renderRobotTelemetry(robot)
 
   renderRobotMapDot(robot)
 }
@@ -1172,6 +1441,8 @@ function renderRobotStateInactive() {
   robotStateName.textContent = 'No robot'
   robotStateTask.textContent = 'Waiting'
   robotStateSeq.textContent = '-'
+  robotBatteryValue.textContent = '-'
+  robotTelemetryMeta.textContent = ''
   robotMapDot.style.opacity = '0'
   robotMapMeta.textContent = 'Real robot target required for live map.'
 }
@@ -1179,7 +1450,9 @@ function renderRobotStateInactive() {
 function renderRobotMapDot(robot) {
   if (!robot.pose) {
     robotMapDot.style.opacity = '0'
-    robotMapMeta.textContent = `Pose unavailable. Last update ${formatEventTimestamp(robot.receivedAt)}.`
+    const yaw = toFiniteNumber(robot.telemetry?.yaw)
+    const orientation = Number.isFinite(yaw) ? ` Heading ${yaw.toFixed(2)} deg.` : ''
+    robotMapMeta.textContent = `Map pose unavailable from Pi bridge.${orientation} Last update ${formatEventTimestamp(robot.receivedAt)}.`
     return
   }
 
@@ -1196,6 +1469,143 @@ function renderRobotMapDot(robot) {
   robotMapMeta.textContent =
     `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
     `Updated ${formatEventTimestamp(robot.receivedAt)}.`
+}
+
+function renderRobotTelemetry(robot) {
+  const telemetry = robot.telemetry || {}
+  const battery = toFiniteNumber(telemetry.battery)
+  robotBatteryValue.textContent = Number.isFinite(battery) ? formatBatteryValue(battery) : '-'
+
+  const parts = []
+  const roll = toFiniteNumber(telemetry.roll)
+  const pitch = toFiniteNumber(telemetry.pitch)
+  const yaw = toFiniteNumber(telemetry.yaw)
+
+  if (Number.isFinite(roll) || Number.isFinite(pitch) || Number.isFinite(yaw)) {
+    parts.push(`r ${formatTelemetryNumber(roll)} / p ${formatTelemetryNumber(pitch)} / y ${formatTelemetryNumber(yaw)}`)
+  }
+  if (telemetry.source) {
+    parts.push(String(telemetry.source))
+  }
+  if (telemetry.dryRun === true) {
+    parts.push('dry-run')
+  }
+
+  robotTelemetryMeta.textContent = parts.join(' | ')
+}
+
+function formatBatteryValue(value) {
+  if (!Number.isFinite(value)) {
+    return '-'
+  }
+
+  if (value >= 0 && value <= 100) {
+    return `${Math.round(value)}%`
+  }
+
+  return `${value.toFixed(2)}V`
+}
+
+function formatTelemetryNumber(value) {
+  return Number.isFinite(value) ? value.toFixed(1) : '-'
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return Number.NaN
+  }
+
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : Number.NaN
+}
+
+function applyDogzillaCameraConfig() {
+  const camera = runtimeConfig.dogzilla?.camera
+  const streamUrl = camera?.proxyStreamPath ? toApiUrl(camera.proxyStreamPath) : camera?.streamUrl || ''
+  const upstreamStreamUrl = camera?.streamUrl || ''
+  const indexUrl = camera?.indexUrl || camera?.baseUrl || ''
+
+  if (!streamUrl) {
+    robotCameraFrame.removeAttribute('src')
+    robotCameraFrame.dataset.streamUrl = ''
+    robotCameraFrame.dataset.statusPath = ''
+    robotCameraChip.textContent = 'No stream'
+    robotCameraMeta.textContent = 'Camera stream not configured.'
+    return
+  }
+
+  robotCameraFrame.dataset.streamUrl = streamUrl
+  robotCameraFrame.dataset.statusPath = camera?.proxyStatusPath || ''
+  robotCameraChip.textContent = 'Camera proxy'
+  robotCameraMeta.textContent = upstreamStreamUrl
+    ? `${streamUrl} | source ${upstreamStreamUrl}${indexUrl ? ` | app ${indexUrl}` : ''}`
+    : streamUrl
+}
+
+function applyRobotView(view) {
+  const showCamera = view === 'camera'
+
+  robotCameraPanel.hidden = !showCamera
+  robotMapPanel.hidden = showCamera
+
+  if (showCamera) {
+    applyDogzillaCameraConfig()
+    void refreshDogzillaCameraStatus()
+    const streamUrl = robotCameraFrame.dataset.streamUrl || ''
+    if (streamUrl && robotCameraFrame.src !== streamUrl) {
+      robotCameraFrame.src = streamUrl
+    }
+  } else {
+    robotCameraFrame.removeAttribute('src')
+  }
+}
+
+async function refreshDogzillaCameraStatus() {
+  const statusPath = robotCameraFrame.dataset.statusPath || '/api/dogzilla/camera/status'
+
+  if (!robotCameraFrame.dataset.streamUrl) {
+    return
+  }
+
+  try {
+    const response = await apiFetch(statusPath)
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Camera status unavailable.')
+    }
+
+    if (payload.status === 'ok') {
+      robotCameraChip.textContent = 'Live ready'
+      robotCameraMeta.textContent = `${payload.detail || 'Camera stream is responding.'} ${payload.streamUrl || ''}`.trim()
+      return
+    }
+
+    robotCameraChip.textContent = payload.status === 'warn' ? 'Port ready' : 'Offline'
+    robotCameraMeta.textContent = payload.detail || payload.error || 'Camera stream unavailable.'
+  } catch (error) {
+    robotCameraChip.textContent = 'Status error'
+    robotCameraMeta.textContent = formatError(error)
+  }
+}
+
+function handleDogzillaCameraFrameError() {
+  if (robotCameraPanel.hidden || !robotCameraFrame.dataset.streamUrl) {
+    return
+  }
+
+  robotCameraChip.textContent = 'Stream error'
+  if (!robotCameraMeta.textContent || /responding/i.test(robotCameraMeta.textContent)) {
+    robotCameraMeta.textContent = 'Camera stream failed to load through the backend proxy.'
+  }
+}
+
+function handleDogzillaCameraFrameLoad() {
+  if (robotCameraPanel.hidden || !robotCameraFrame.dataset.streamUrl) {
+    return
+  }
+
+  robotCameraChip.textContent = 'Live'
 }
 
 function renderProfileOptions() {
@@ -1264,6 +1674,7 @@ function applyRobotTargetSelectionState() {
     ? 'Runtime target locked by ROBOT_RUNTIME_TARGET.'
     : 'Selection saves to config/robot-runtime.json.'
   robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
+  robotSitTestStatus.textContent = runtimeConfig.robotRuntime.dryRun ? 'Ready. Dry-run on.' : 'Ready. Live enabled.'
 }
 
 function formatSource(source) {
@@ -1283,6 +1694,45 @@ function formatError(error) {
   }
 
   return String(error)
+}
+
+function normalizeOpenAiCompatibleContent(content) {
+  if (typeof content === 'string' && content.trim()) {
+    return content.trim()
+  }
+
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part
+        }
+
+        if (part && typeof part === 'object' && typeof part.text === 'string') {
+          return part.text
+        }
+
+        return ''
+      })
+      .join('')
+      .trim()
+
+    return text || null
+  }
+
+  return null
+}
+
+async function safeReadText(response) {
+  try {
+    return (await response.text()).trim()
+  } catch {
+    return ''
+  }
+}
+
+function trimTrailingSlash(value) {
+  return value.endsWith('/') ? value.slice(0, -1) : value
 }
 
 function buildAssistantMeta(payload, startedAt) {
@@ -1338,11 +1788,11 @@ function formatParsedOutput(payload) {
   }
 
   if (payload.robotRuntime) {
-    sections.push(`ROS2 preview:\n${JSON.stringify(payload.robotRuntime, null, 2)}`)
+    sections.push(`Robot preview:\n${JSON.stringify(payload.robotRuntime, null, 2)}`)
   }
 
   if (payload.robotDispatch) {
-    sections.push(`ROS2 dispatch:\n${JSON.stringify(payload.robotDispatch, null, 2)}`)
+    sections.push(`Robot dispatch:\n${JSON.stringify(payload.robotDispatch, null, 2)}`)
   }
 
   return sections.join('\n\n')
@@ -1382,42 +1832,74 @@ function formatIsaacSummary(isaacSim, isaacDispatch) {
 
 function formatRobotSummary(robotRuntime, robotDispatch) {
   if (robotDispatch?.status === 'sent') {
-    return 'ROS2 command sent.'
+    return 'Robot command sent.'
   }
 
   if (robotDispatch?.status === 'dry-run') {
-    return 'ROS2 dispatch dry-run.'
+    return 'Robot dispatch dry-run.'
   }
 
   if (robotDispatch?.status === 'preview-not-ready') {
-    return 'ROS2 not sent because preview not ready.'
+    return 'Robot not sent because preview not ready.'
   }
 
   if (robotDispatch?.status === 'inactive-target') {
-    return 'ROS2 target inactive.'
+    return 'Robot target inactive.'
   }
 
   if (robotDispatch?.status === 'disabled') {
-    return 'ROS2 transport disabled.'
+    return 'Robot transport disabled.'
   }
 
   if (robotDispatch?.status === 'error') {
-    return `ROS2 dispatch failed: ${robotDispatch.error || `HTTP ${robotDispatch.responseStatus || 'unknown'}`}.`
+    return `Robot dispatch failed: ${robotDispatch.error || `HTTP ${robotDispatch.responseStatus || 'unknown'}`}.`
   }
 
   if (robotRuntime?.status === 'ready') {
-    return 'ROS2 preview ready.'
+    return 'Robot preview ready.'
   }
 
   if (robotRuntime?.status === 'no-op') {
-    return 'ROS2 plan no-op.'
+    return 'Robot plan no-op.'
   }
 
   if (robotRuntime?.status && !['no-command', 'no-action'].includes(robotRuntime.status)) {
-    return `ROS2 preview ${robotRuntime.status}.`
+    return `Robot preview ${robotRuntime.status}.`
   }
 
   return ''
+}
+
+function formatRobotSitTestSummary(health, preview, dispatch) {
+  const targetLabel = preview?.targetLabel || runtimeConfig.robotRuntime.activeTarget?.label || 'robot'
+  const healthStatus = health?.status || 'unknown'
+  const healthPrefix = healthStatus === 'ok' ? 'Bridge ok.' : `Bridge ${healthStatus}.`
+
+  if (dispatch?.status === 'sent') {
+    return `${healthPrefix} Sit sent to ${targetLabel}.`
+  }
+
+  if (dispatch?.status === 'dry-run') {
+    return `${healthPrefix} Sit compiled; dry-run blocked live send.`
+  }
+
+  if (dispatch?.status === 'preview-not-ready') {
+    return `${healthPrefix} Sit not sent; preview ${dispatch.previewStatus || preview?.status || 'not ready'}.`
+  }
+
+  if (dispatch?.status === 'inactive-target') {
+    return `${healthPrefix} Sit not sent; target inactive.`
+  }
+
+  if (dispatch?.status === 'disabled') {
+    return `${healthPrefix} Sit not sent; transport disabled.`
+  }
+
+  if (dispatch?.status === 'error') {
+    return `${healthPrefix} Sit failed: ${dispatch.error || `HTTP ${dispatch.responseStatus || 'unknown'}`}.`
+  }
+
+  return `${healthPrefix} Sit test ${dispatch?.status || preview?.status || 'complete'}.`
 }
 
 function setSpeechStatus(message, isError = false) {
@@ -1454,7 +1936,7 @@ function playCommandCueIfNeeded(parsed) {
 }
 
 function isRealRobotTargetActive() {
-  return runtimeConfig.robotRuntime.activeTarget?.kind === 'ros2-bridge'
+  return ['ros2-bridge', 'dogzilla-direct'].includes(runtimeConfig.robotRuntime.activeTarget?.kind)
 }
 
 function handleVoiceCommand(message, context) {
@@ -1648,7 +2130,12 @@ function scrollChatToTop() {
 function applyAppConfig() {
   document.title = appConfig.pageTitle
   appEyebrow.textContent = appConfig.introEyebrow
-  appTitle.textContent = appConfig.consoleTitle
+  if (appTitleText) {
+    appTitleText.textContent = appConfig.consoleTitle
+    appTitle.setAttribute('aria-label', appConfig.consoleTitle)
+  } else {
+    appTitle.textContent = appConfig.consoleTitle
+  }
   appDescription.textContent = appConfig.introDescription
   sendButton.textContent = appConfig.sendButtonLabel
   emptyMessageRole.textContent = appConfig.assistantName

@@ -19,6 +19,8 @@ DEFAULT_PORT = int(os.environ.get("DOGZILLA_LIB_BRIDGE_PORT", "8893"))
 DEFAULT_SERIAL_PORT = os.environ.get("DOGZILLA_SERIAL_PORT", "/dev/ttyAMA0")
 DEFAULT_DRY_RUN = os.environ.get("DOGZILLA_DIRECT_DRY_RUN", "1") != "0"
 DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
+DEFAULT_INCLUDE_ATTITUDE_STATE = os.environ.get("DOGZILLA_INCLUDE_ATTITUDE_STATE", "0") == "1"
+DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") == "1"
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
 
 VENDOR_PATHS = [
@@ -105,6 +107,9 @@ class DogzillaRuntime:
         kind = canonical_plan.get("kind")
         params = canonical_plan.get("params") or {}
 
+        if kind == "state.read":
+            return self.read_state()
+
         if self.dry_run:
             return {"executed": False, "delivery": "dry-run", "kind": kind, "params": params}
 
@@ -147,21 +152,64 @@ class DogzillaRuntime:
                 if kind == "pose.body":
                     return self._execute_body_pose(robot, params)
 
-                if kind == "state.read":
-                    return {
-                        "executed": True,
-                        "delivery": "DOGZILLALib",
-                        "battery": call_first(robot, ["read_Battery", "read_battery"]),
-                        "motors": call_first(robot, ["read_Motor", "read_motor"]),
-                        "roll": call_first(robot, ["read_roll", "read_Roll"]),
-                        "pitch": call_first(robot, ["read_pitch", "read_Pitch"]),
-                        "yaw": call_first(robot, ["read_yaw", "read_Yaw"]),
-                    }
-
                 return {"executed": False, "error": f"unsupported_kind:{kind}"}
             except Exception as error:
                 self.robot_error = str(error)
                 return {"executed": False, "error": str(error)}
+
+    def read_state(self) -> dict[str, Any]:
+        if not self.available:
+            return {"executed": False, "error": self.import_error or "DOGZILLALib unavailable"}
+
+        with self._lock:
+            robot = self._robot()
+            if robot is None:
+                return {"executed": False, "error": self.robot_error or "robot unavailable"}
+
+            result = {
+                "executed": True,
+                "delivery": "DOGZILLALib",
+                "dryRun": self.dry_run,
+                "battery": None,
+                "motors": None,
+                "roll": None,
+                "pitch": None,
+                "yaw": None,
+                "imuRaw": None,
+                "readErrors": {},
+                "readAt": utc_now(),
+            }
+
+            # Keep the default state path light. Some vendor serial reads can block
+            # when the controller or robot battery is unhealthy.
+            state_fields = [
+                ("battery", ["read_Battery", "read_battery"]),
+            ]
+            if DEFAULT_INCLUDE_ATTITUDE_STATE:
+                state_fields.extend(
+                    [
+                        ("roll", ["read_roll", "read_Roll"]),
+                        ("pitch", ["read_pitch", "read_Pitch"]),
+                        ("yaw", ["read_yaw", "read_Yaw"]),
+                    ]
+                )
+            if DEFAULT_INCLUDE_SLOW_STATE:
+                state_fields.extend(
+                    [
+                        ("motors", ["read_Motor", "read_motor"]),
+                        ("imuRaw", ["read_imu_raw", "read_imu"]),
+                    ]
+                )
+
+            for field, names in state_fields:
+                try:
+                    result[field] = call_first(robot, names)
+                except Exception as error:
+                    result["readErrors"][field] = str(error)
+
+            if not result["readErrors"]:
+                del result["readErrors"]
+            return result
 
     def _execute_locomotion(self, robot, params: dict[str, Any]) -> dict[str, Any]:
         x_step = clamp(float(params.get("x_step") or 0), -25, 25)
@@ -268,6 +316,10 @@ class Handler(BaseHTTPRequestHandler):
                     "logFile": str(LOG_FILE),
                 },
             )
+            return
+        if self.path == "/state":
+            result = self.server.runtime.read_state()
+            self._send_json(200 if result.get("executed") else 503, result)
             return
         if self.path == "/actions":
             self._send_json(200, {"actions": ACTION_ALIASES})

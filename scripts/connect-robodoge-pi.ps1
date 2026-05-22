@@ -41,7 +41,13 @@ New-Item -ItemType Directory -Force -Path $sshStateDir | Out-Null
 
 if (-not $NoHostKeyScan) {
   if (Get-Command ssh-keyscan -ErrorAction SilentlyContinue) {
-    $scan = & ssh-keyscan -p $Port -H $PiIp 2>$null
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      $scan = & ssh-keyscan -p $Port -H $PiIp 2>$null
+    } finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+    }
     if ($LASTEXITCODE -eq 0 -and $scan) {
       $scan | Set-Content -LiteralPath $knownHostsPath -Encoding ascii
     } elseif (-not (Test-Path -LiteralPath $knownHostsPath)) {

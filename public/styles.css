@@ -34,23 +34,80 @@ body {
   font-family: "Noto Sans Mono", "Segoe UI", monospace;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .shell {
   position: relative;
-  width: min(1240px, calc(100% - 40px));
-  min-height: calc(100vh - 16px);
+  width: min(1600px, calc(100% - 32px));
+  height: calc(100vh - 16px);
+  min-height: 760px;
   margin: 8px auto;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 26px;
+  border-radius: 8px;
   background: var(--shell);
-  box-shadow: 0 28px 80px var(--shadow);
+  box-shadow: 0 18px 48px rgba(33, 28, 24, 0.2);
   overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.app-header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-header-brand,
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-header-brand {
+  color: var(--ink-faint);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.app-header-brand img {
+  width: 34px;
+  height: 24px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.app-header-actions {
+  justify-content: end;
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .console-layout {
+  height: 100%;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 58px minmax(430px, 1.35fr) minmax(360px, 0.92fr);
-  gap: 14px;
+  grid-template-columns: 58px minmax(420px, 1.12fr) minmax(390px, 0.88fr);
+  gap: clamp(14px, 1.2vw, 22px);
   align-items: stretch;
 }
 
@@ -59,7 +116,7 @@ body {
   padding: 8px 6px;
   border-right: 1px solid var(--line);
   background: #34312e;
-  border-radius: 18px;
+  border-radius: 6px;
   display: grid;
   grid-template-rows: auto repeat(5, 42px) 1fr auto auto;
   gap: 10px;
@@ -73,19 +130,20 @@ body {
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: 6px;
 }
 
 .rail-brand {
   background: var(--panel);
   color: var(--accent-3);
   font-weight: 800;
-  box-shadow: inset 0 0 0 1px rgba(54, 48, 42, 0.1), 0 10px 22px rgba(0, 0, 0, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(54, 48, 42, 0.12);
 }
 
 .rail-brand img {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 22px;
+  object-fit: contain;
   image-rendering: pixelated;
 }
 
@@ -126,41 +184,56 @@ body {
 .command-zone,
 .robot-state-panel,
 .robot-map-panel,
-.output-panel,
+.robot-camera-panel,
+.output-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .connection-drawer,
+.settings-drawer {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
 .connection-panel,
-.settings-drawer,
 .settings-panel,
 .runtime-panel {
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--panel);
-  box-shadow: 0 14px 32px rgba(60, 50, 42, 0.08);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .command-zone {
   min-height: 0;
-  padding: 18px 20px;
+  padding: 18px 22px 18px 6px;
+  border-right: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
-  gap: 12px;
+  grid-template-rows: auto auto minmax(210px, 1fr) auto minmax(150px, 0.68fr);
+  gap: clamp(10px, 1vh, 16px);
 }
 
 .robot-column {
   display: grid;
-  grid-template-rows: auto minmax(108px, auto) minmax(238px, 1fr) minmax(116px, 0.24fr);
-  gap: 12px;
+  grid-template-rows: auto minmax(116px, auto) minmax(250px, 1fr) minmax(180px, 0.72fr);
+  gap: clamp(10px, 1vh, 16px);
   min-height: 0;
 }
 
 .robot-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   min-height: 42px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel-2);
-  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
 
 .robot-tab {
@@ -174,6 +247,7 @@ body {
   padding: 10px 8px;
   font-size: 0.86rem;
   letter-spacing: 0;
+  box-shadow: none;
 }
 
 .robot-tab:last-child {
@@ -181,17 +255,29 @@ body {
 }
 
 .robot-tab.is-active {
-  color: #fffaf4;
-  background: var(--accent);
+  color: var(--ink);
+  background: transparent;
   font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--accent);
 }
 
 .robot-state-panel {
-  padding: 14px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
 }
 
 .robot-map-panel {
-  padding: 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 238px;
+}
+
+.robot-camera-panel {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
@@ -200,52 +286,73 @@ body {
 
 .output-panel {
   min-height: 116px;
-  padding: 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
   overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .output-scroll {
-  max-height: 174px;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   padding-right: 4px;
   scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
 }
 
 .settings-toggle {
-  position: fixed;
-  z-index: 20;
-  top: 44px;
-  right: max(34px, calc((100vw - 1240px) / 2 + 34px));
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgba(54, 48, 42, 0.1);
-  border-radius: 50%;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  width: auto;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 123, 86, 0.24);
+  border-radius: 6px;
   background: var(--accent);
-  box-shadow: 0 12px 26px rgba(255, 123, 86, 0.3);
+  color: #fffaf4;
+  box-shadow: none;
   cursor: pointer;
 }
 
 .connection-toggle {
-  position: fixed;
-  z-index: 21;
-  top: 44px;
-  right: max(80px, calc((100vw - 1240px) / 2 + 80px));
-  width: 38px;
-  height: 38px;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  width: auto;
+  height: 34px;
+  padding: 0 11px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 10px;
+  border-radius: 6px;
   background: #050505;
-  box-shadow: 0 12px 26px rgba(10, 9, 8, 0.28);
+  color: #f7f1e8;
+  box-shadow: none;
   cursor: pointer;
 }
 
+.app-action-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .router-icon {
-  position: absolute;
-  left: 50%;
-  top: 50%;
+  position: relative;
+  left: auto;
+  top: auto;
+  flex: 0 0 auto;
   width: 24px;
   height: 18px;
-  transform: translate(-50%, -43%);
+  transform: none;
 }
 
 .router-icon::before {
@@ -314,38 +421,52 @@ body {
   outline: 3px solid rgba(255, 123, 86, 0.22);
 }
 
-.settings-toggle::before,
-.settings-toggle::after {
+.settings-icon {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 14px;
+}
+
+.settings-icon::before {
   content: "";
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 15px;
-  height: 2px;
-  border-radius: 99px;
+  inset: 1px 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    #fff7ee 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.settings-icon::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
   background: #fff7ee;
-  transform: translate(-50%, -50%);
+  box-shadow: 9px 5px 0 #fff7ee, 3px 10px 0 #fff7ee;
 }
 
-.settings-toggle::after {
-  transform: translate(-50%, -50%) rotate(90deg);
-}
-
-.settings-toggle[aria-expanded='true']::after {
-  display: none;
+.settings-toggle[aria-expanded='true'] {
+  outline: 3px solid rgba(255, 123, 86, 0.22);
 }
 
 .settings-drawer,
 .connection-drawer {
   position: fixed;
   z-index: 15;
-  top: 92px;
-  right: max(34px, calc((100vw - 1240px) / 2 + 34px));
+  top: 78px;
+  right: max(30px, calc((100vw - 1600px) / 2 + 30px));
   width: min(620px, calc(100vw - 68px));
   max-height: calc(100vh - 120px);
   overflow: auto;
   padding: 14px;
-  box-shadow: 0 24px 70px rgba(35, 28, 22, 0.22);
+  box-shadow: 0 18px 42px rgba(35, 28, 22, 0.18);
 }
 
 .connection-drawer {
@@ -353,7 +474,9 @@ body {
 }
 
 .settings-drawer[hidden],
-.connection-drawer[hidden] {
+.connection-drawer[hidden],
+.robot-map-panel[hidden],
+.robot-camera-panel[hidden] {
   display: none;
 }
 
@@ -364,6 +487,7 @@ body {
 .runtime-head h2,
 .robot-state-head h2,
 .robot-map-head h2,
+.robot-camera-panel h2,
 .response-head h2 {
   margin: 0;
   color: var(--ink);
@@ -406,7 +530,7 @@ body {
 }
 
 .connection-panel {
-  padding: 12px;
+  padding: 14px 0 0;
 }
 
 .connection-grid {
@@ -454,15 +578,114 @@ body {
 
 .connection-url-grid > div {
   min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel-2);
+  padding: 2px 10px 8px;
+  border: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 
 .connection-url-grid strong {
   display: block;
   overflow-wrap: anywhere;
+}
+
+.preflight-panel {
+  gap: 10px;
+}
+
+.preflight-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.preflight-summary > div {
+  min-width: 0;
+  padding: 2px 10px 8px;
+  border: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.preflight-summary strong {
+  display: block;
+  font-size: 1.18rem;
+  line-height: 1;
+}
+
+.preflight-summary [data-state='ok'] strong {
+  color: #31745f;
+}
+
+.preflight-summary [data-state='warn'] strong {
+  color: var(--warning);
+}
+
+.preflight-summary [data-state='fail'] strong {
+  color: var(--danger);
+}
+
+.preflight-checks {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.preflight-check {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 9px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.preflight-check strong,
+.preflight-check p {
+  margin: 0;
+}
+
+.preflight-check p {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.preflight-check-chip {
+  display: inline-grid;
+  place-items: center;
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.preflight-check[data-state='ok'] .preflight-check-chip {
+  border-color: rgba(49, 116, 95, 0.35);
+  background: rgba(49, 116, 95, 0.1);
+  color: #31745f;
+}
+
+.preflight-check[data-state='warn'] .preflight-check-chip {
+  border-color: rgba(197, 139, 40, 0.4);
+  background: rgba(197, 139, 40, 0.1);
+  color: var(--warning);
+}
+
+.preflight-check[data-state='fail'] .preflight-check-chip {
+  border-color: rgba(217, 79, 69, 0.42);
+  background: rgba(217, 79, 69, 0.1);
+  color: var(--danger);
 }
 
 .connection-status {
@@ -477,7 +700,7 @@ body {
   margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 6px;
   background: #171513;
   color: #f7f1e8;
   overflow: auto;
@@ -509,14 +732,15 @@ body {
   height: 42px;
   flex: 0 0 auto;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 6px;
   background: var(--accent);
-  box-shadow: 0 12px 24px rgba(35, 28, 22, 0.16);
+  box-shadow: none;
 }
 
 .mascot-chip img {
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 26px;
+  object-fit: contain;
   image-rendering: pixelated;
 }
 
@@ -546,6 +770,21 @@ h1 {
   font-weight: 800;
 }
 
+.brand-title {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+}
+
+.brand-title-logo {
+  display: block;
+  width: min(100%, 460px);
+  height: auto;
+  max-height: 76px;
+  object-fit: contain;
+  object-position: left center;
+}
+
 .lede {
   margin: 0;
   color: var(--ink-soft);
@@ -554,7 +793,9 @@ h1 {
 
 .chat-form {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
+  min-height: 0;
 }
 
 label {
@@ -573,11 +814,12 @@ button {
 
 textarea {
   width: 100%;
+  height: 100%;
   resize: vertical;
   min-height: 116px;
   padding: 13px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 6px;
   background: #f3eee6;
   color: var(--ink);
   outline: none;
@@ -595,11 +837,11 @@ button {
   min-height: 36px;
   padding: 8px 14px;
   border: 1px solid rgba(255, 123, 86, 0.18);
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--accent);
   color: #fffaf4;
   font-weight: 700;
-  box-shadow: 0 10px 18px rgba(255, 123, 86, 0.18);
+  box-shadow: none;
 }
 
 button:disabled {
@@ -615,19 +857,30 @@ select {
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
-  border-radius: 12px;
+  border-radius: 6px;
   background: #f3eee6;
   color: var(--ink);
+}
+
+.settings-static-field {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #f3eee6;
+  color: var(--ink);
+  font-weight: 800;
 }
 
 .status {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel-2);
+  padding: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   color: var(--ink-soft);
   font-size: 0.92rem;
 }
@@ -666,13 +919,16 @@ select {
   border-top: 1px solid var(--line);
   padding-top: 12px;
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
+  min-height: 0;
 }
 
 .speech-head,
 .runtime-head,
 .robot-state-head,
 .robot-map-head,
+.robot-camera-panel .robot-map-head,
 .response-head {
   display: flex;
   align-items: center;
@@ -718,7 +974,7 @@ select {
   margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 6px;
   background: #f3eee6;
   color: var(--ink);
   overflow: auto;
@@ -729,6 +985,7 @@ select {
 .speech-preview {
   min-height: 70px;
   color: var(--ink-soft);
+  height: 100%;
 }
 
 .runtime-preview {
@@ -756,10 +1013,11 @@ select {
 
 .robot-identity-grid > div {
   min-width: 0;
-  padding: 10px;
-  border-radius: 14px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
+  padding: 2px 10px 8px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--line);
 }
 
 .robot-identity-grid > div:last-child {
@@ -786,14 +1044,37 @@ select {
 
 .robot-map {
   position: relative;
-  width: min(100%, 520px);
-  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
   align-self: center;
   justify-self: center;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 6px;
   background: #ebe3d8;
   overflow: hidden;
+}
+
+.robot-camera-frame-wrap {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  align-self: center;
+  justify-self: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #201c18;
+  overflow: hidden;
+}
+
+.robot-camera-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #201c18;
 }
 
 .robot-map::before {
@@ -947,15 +1228,16 @@ select {
 
 .meta-card {
   min-width: 0;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 10px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  padding: 2px 10px 8px;
 }
 
 .settings-panel,
 .runtime-panel {
-  padding: 12px;
+  padding: 14px 0 0;
 }
 
 .settings-row {
@@ -969,11 +1251,14 @@ select {
 @media (max-width: 980px) {
   .shell {
     width: min(100% - 20px, 760px);
+    height: auto;
+    min-height: calc(100vh - 20px);
     margin-block: 10px;
   }
 
   .console-layout {
-    grid-template-columns: 52px 1fr;
+    height: auto;
+    grid-template-columns: 52px minmax(0, 1fr);
   }
 
   .robot-column {
@@ -986,11 +1271,26 @@ select {
   .control-rail {
     min-height: 0;
   }
+
+  .command-zone {
+    grid-template-rows: auto auto auto auto auto;
+  }
+
+  textarea {
+    height: auto;
+  }
+
+  .robot-map,
+  .robot-camera-frame-wrap {
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
 }
 
 @media (max-width: 680px) {
   .shell {
     width: 100%;
+    height: auto;
     min-height: 100vh;
     margin: 0;
     border-radius: 0;
@@ -998,7 +1298,8 @@ select {
   }
 
   .console-layout {
-    grid-template-columns: 1fr;
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .control-rail {
@@ -1022,21 +1323,74 @@ select {
 
   .robot-column {
     grid-column: auto;
+    grid-template-rows: auto auto minmax(320px, auto) auto;
+  }
+
+  .command-zone,
+  .intro-head,
+  .intro-copy,
+  .brand-title,
+  .lede,
+  .chat-form,
+  .speech-panel,
+  .output-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .command-zone {
+    overflow-x: hidden;
+  }
+
+  .intro-head {
+    align-items: center;
+  }
+
+  .mascot-chip {
+    display: none;
+  }
+
+  .brand-title-logo {
+    width: min(100%, 360px);
+    max-height: 50px;
+  }
+
+  .lede {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .app-header {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .app-header-actions {
+    margin-left: 0;
+  }
+
+  .app-header-brand span,
+  .app-action-label {
+    display: none;
+  }
+
+  .settings-toggle,
+  .connection-toggle {
+    width: 38px;
+    padding-inline: 0;
   }
 
   .settings-toggle {
-    top: 16px;
-    right: 14px;
+    flex: 0 0 38px;
   }
 
   .connection-toggle {
-    top: 16px;
-    right: 60px;
+    flex: 0 0 38px;
   }
 
   .settings-drawer,
   .connection-drawer {
-    top: 64px;
+    top: 66px;
     right: 10px;
     width: calc(100vw - 20px);
   }
@@ -1046,12 +1400,17 @@ select {
   .settings-row,
   .connection-grid,
   .connection-url-grid,
-  .bridge-action-grid {
+  .bridge-action-grid,
+  .preflight-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .preflight-check {
     grid-template-columns: 1fr;
   }
 
   .robot-tabs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .robot-tab {
@@ -1064,13 +1423,31 @@ select {
   }
 }
 
+@media (min-width: 1500px) {
+  .shell {
+    width: calc(100% - 32px);
+  }
+
+  .console-layout {
+    grid-template-columns: 58px minmax(560px, 1.05fr) minmax(560px, 0.95fr);
+  }
+
+  .brand-title-logo {
+    width: min(100%, 560px);
+    max-height: 84px;
+  }
+}
+
 html.android-app body {
   background: var(--page);
   overscroll-behavior-x: none;
+  overflow-x: hidden;
 }
 
 html.android-app .shell {
-  width: 100%;
+  width: 100vw;
+  max-width: 100vw;
+  height: auto;
   min-height: 100vh;
   margin: 0;
   padding: 14px;
@@ -1078,12 +1455,57 @@ html.android-app .shell {
   border-radius: 0;
   background: var(--shell);
   box-shadow: none;
+  overflow-x: hidden;
+}
+
+html.android-app .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  background: var(--shell);
+  justify-content: flex-start;
+}
+
+html.android-app .app-header-actions {
+  margin-left: 0;
+}
+
+html.android-app .app-header-brand span,
+html.android-app .app-action-label {
+  display: none;
+}
+
+html.android-app .settings-toggle,
+html.android-app .connection-toggle {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 38px;
+  height: 34px;
+  padding-inline: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+html.android-app .connection-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #050505;
+  color: #f7f1e8;
+}
+
+html.android-app .settings-toggle {
+  border: 1px solid rgba(255, 123, 86, 0.24);
+  background: var(--accent);
+  color: #fffaf4;
 }
 
 html.android-app .console-layout {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
   min-height: calc(100vh - 28px);
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
 }
@@ -1095,6 +1517,7 @@ html.android-app .control-rail {
 html.android-app .command-zone,
 html.android-app .robot-state-panel,
 html.android-app .robot-map-panel,
+html.android-app .robot-camera-panel,
 html.android-app .output-panel,
 html.android-app .settings-drawer,
 html.android-app .connection-drawer,
@@ -1108,21 +1531,31 @@ html.android-app .runtime-preview,
 html.android-app .message-bubble,
 html.android-app .output-box,
 html.android-app .status {
-  border-color: transparent;
-  border-radius: 18px;
-  background: var(--panel);
+  border-color: var(--line);
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 
 html.android-app .command-zone {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   padding: 4px 2px 0;
   background: transparent;
+  border-right: 0;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, auto) auto;
   gap: 10px;
 }
 
+html.android-app textarea {
+  height: auto;
+}
+
 html.android-app .robot-column {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
@@ -1142,31 +1575,31 @@ html.android-app .mascot-chip {
 }
 
 html.android-app h1::after {
-  content: "";
-  display: inline-block;
-  width: 32px;
-  height: 32px;
-  margin-left: 12px;
-  border-radius: 10px;
-  background: var(--accent) url("/assets/robo-doge-mascot.png") center / 24px 24px no-repeat;
-  image-rendering: pixelated;
-  vertical-align: -3px;
+  content: none;
+  display: none;
 }
 
 html.android-app .lede {
   color: var(--ink-soft);
   font-size: 0.88rem;
+  overflow-wrap: anywhere;
 }
 
 html.android-app h1 {
   font-size: 1.45rem;
 }
 
+html.android-app .brand-title-logo {
+  width: min(70vw, 390px);
+  min-width: 0;
+  max-height: 48px;
+}
+
 html.android-app textarea,
 html.android-app input,
 html.android-app select {
   border-color: var(--line);
-  border-radius: 16px;
+  border-radius: 6px;
   background: #f3eee6;
 }
 
@@ -1177,34 +1610,24 @@ html.android-app select:focus {
   box-shadow: 0 0 0 3px rgba(255, 123, 86, 0.14);
 }
 
-html.android-app button,
-html.android-app .robot-tab.is-active {
+html.android-app button {
   border-color: transparent;
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--accent);
   color: #fffaf4;
   box-shadow: none;
 }
 
+html.android-app .robot-tab.is-active {
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+
 html.android-app button:disabled {
   background: var(--panel-2);
   color: var(--ink-faint);
-}
-
-html.android-app .settings-toggle {
-  top: 14px;
-  right: 14px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: none;
-}
-
-html.android-app .connection-toggle {
-  top: 14px;
-  right: 60px;
-  border: 0;
-  box-shadow: none;
 }
 
 html.android-app .connection-backend-row {
@@ -1229,8 +1652,9 @@ html.android-app .robot-state-chip {
 
 html.android-app .robot-tabs {
   border: 0;
-  border-radius: 999px;
-  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
 }
 
 html.android-app .robot-tab {
@@ -1240,9 +1664,15 @@ html.android-app .robot-tab {
 
 html.android-app .robot-map {
   width: 100%;
-  border-color: transparent;
-  border-radius: 18px;
+  border-color: var(--line);
+  border-radius: 6px;
   background: #ebe3d8;
+}
+
+html.android-app .robot-camera-frame-wrap {
+  width: 100%;
+  border-color: var(--line);
+  border-radius: 6px;
 }
 
 html.android-app .robot-map::after {
@@ -1256,10 +1686,12 @@ html.android-app[data-mobile-view='chat'] .speech-panel,
 html.android-app[data-mobile-view='chat'] .robot-tabs,
 html.android-app[data-mobile-view='chat'] .robot-state-panel,
 html.android-app[data-mobile-view='chat'] .robot-map-panel,
+html.android-app[data-mobile-view='chat'] .robot-camera-panel,
 html.android-app[data-mobile-view='audio'] .chat-form,
 html.android-app[data-mobile-view='audio'] .robot-tabs,
 html.android-app[data-mobile-view='audio'] .robot-state-panel,
 html.android-app[data-mobile-view='audio'] .robot-map-panel,
+html.android-app[data-mobile-view='audio'] .robot-camera-panel,
 html.android-app[data-mobile-view='robot'] .chat-form,
 html.android-app[data-mobile-view='robot'] .speech-panel,
 html.android-app[data-mobile-view='robot'] .output-panel {

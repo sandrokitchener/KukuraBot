@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   composeSystemPrompt,
   loadPublicConfig,
+  processModelResult,
   processUserInput,
   renderCommandTypes,
   renderTemplate,
@@ -80,9 +81,26 @@ test('normalizeAppConfig derives brand strings from assistantName', () => {
   const config = normalizeAppConfig({ assistantName: 'Rover' })
 
   assert.equal(config.assistantName, 'Rover')
+  assert.equal(config.appName, 'Rover')
   assert.equal(config.consoleTitle, 'Rover Console')
   assert.equal(config.sendButtonLabel, 'Ask Rover')
   assert.equal(config.thinkingStatus, 'Rover is thinking...')
+})
+
+test('normalizeAppConfig accepts app-level brand overrides', () => {
+  const config = normalizeAppConfig({
+    assistantName: 'Dog',
+    appName: 'Questing Beast',
+    pageTitle: 'Questing Beast',
+    consoleTitle: 'Questing Beast',
+  })
+
+  assert.equal(config.assistantName, 'Dog')
+  assert.equal(config.appName, 'Questing Beast')
+  assert.equal(config.pageTitle, 'Questing Beast')
+  assert.equal(config.consoleTitle, 'Questing Beast')
+  assert.equal(config.sendButtonLabel, 'Ask Dog')
+  assert.match(config.introDescription, /Questing Beast command system/)
 })
 
 test('renderTemplate replaces assistant placeholders', () => {
@@ -138,6 +156,8 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.speech.activationPhrasesFile, 'config/activation_phrases.txt')
   assert.ok(Array.isArray(payload.speech.activationPhrases))
   assert.ok(payload.speech.activationPhrases.length > 0)
+  assert.equal(payload.robotRuntime.robotName, 'DOGZILLA')
+  assert.equal(payload.app.appName, 'Questing Beast')
 })
 
 test('shouldAutoDispatchIsaacSim only enables dispatch when chat dispatch is configured', () => {
@@ -211,6 +231,59 @@ test('processUserInput dispatches ROS2 command when ROS2 target is active', asyn
     }),
   })
 
+  assert.equal(result.robotDispatch.status, 'sent')
+  assert.deepEqual(dispatchedPreview, result.robotRuntime)
+  assert.equal(result.isaacDispatch, null)
+})
+
+test('processModelResult parses local model output and dispatches active ROS2 target', async () => {
+  let dispatchedPreview = null
+  const result = await processModelResult({
+    input: 'go to the kitchen',
+    rawResponse: '{"command":"move","waypoint":"kitchen"}',
+    activeProfileConfig: {
+      activeProfileId: 'android_llama_cpp',
+      source: 'runtime',
+      activeProfile: {
+        label: 'Android llama.cpp',
+        provider: 'llama-cpp-http',
+        model: 'robo-doge-local-gguf',
+      },
+    },
+    robotRuntimeConfig: {
+      activeTarget: {
+        id: 'ros2_real',
+        kind: 'ros2-bridge',
+        label: 'ROS2 Real Robot',
+      },
+    },
+    options: {
+      buildIsaacSimPreviewImpl: async () => ({
+        status: 'ready',
+        dispatchPlan: {
+          dispatchOnChat: true,
+        },
+      }),
+      buildRobotRuntimePreviewImpl: async () => ({
+        status: 'ready',
+        canonicalPlan: {
+          kind: 'locomotion.goto',
+        },
+        dispatchPlan: {
+          dispatchOnChat: true,
+        },
+      }),
+      dispatchRobotCommandImpl: async (preview) => {
+        dispatchedPreview = preview
+        return {
+          status: 'sent',
+        }
+      },
+    },
+  })
+
+  assert.equal(result.provider, 'llama-cpp-http')
+  assert.equal(result.parsed.waypoint, 'kitchen')
   assert.equal(result.robotDispatch.status, 'sent')
   assert.deepEqual(dispatchedPreview, result.robotRuntime)
   assert.equal(result.isaacDispatch, null)

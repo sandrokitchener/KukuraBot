@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "robot-console-app",
+      "name": "questing-beast",
       "dependencies": {
         "@huggingface/transformers": "^4.1.0",
         "@moonshine-ai/moonshine-js": "^0.1.29",

@@ -75,16 +75,16 @@ function Ensure-DogzillaSshConfig {
     Ensure-DogzillaSshKey -KeyPath $KeyPath | Out-Null
 
     $connectScript = Join-Path $PSScriptRoot "connect-robodoge-pi.ps1"
-    $connectArgs = @(
-      "-Host", $PiIp,
-      "-User", $User,
-      "-Port", $Port,
-      "-Alias", $Alias,
-      "-KeyPath", $KeyPath,
-      "-WriteConfigOnly"
-    )
+    $connectArgs = @{
+      PiIp = $PiIp
+      User = $User
+      Port = $Port
+      Alias = $Alias
+      KeyPath = $KeyPath
+      WriteConfigOnly = $true
+    }
     if ($NoHostKeyScan) {
-      $connectArgs += "-NoHostKeyScan"
+      $connectArgs.NoHostKeyScan = $true
     }
 
     & $connectScript @connectArgs

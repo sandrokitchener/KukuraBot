@@ -13,14 +13,14 @@
     "enabled": true,
     "dryRun": true,
     "dispatchOnChat": true,
-    "baseUrl": "http://127.0.0.1:8892",
+    "baseUrl": "http://10.0.4.32:8893",
     "healthPath": "/healthz",
     "commandsPath": "/commands",
     "feedbackPath": "/feedback",
     "timeoutMs": 4000
   },
   "launch": {
-    "managedByApp": true,
+    "managedByApp": false,
     "pythonPath": "C:\\pixi_ws\\.pixi\\envs\\default\\python.exe",
     "commandPath": "scripts/launch-ros2-http-bridge.bat",
     "scriptPath": "sidecars/ros2_bridge/server.py",
@@ -33,7 +33,8 @@
     "launchBridgeScriptPath": "scripts/launch-ros2-dogzilla-bridge.bat",
     "notes": [
       "Managed launch starts the repo-local HTTP bridge sidecar that can publish into ROS2 when rclpy is available.",
-      "For a Pi-hosted robot stack, set transport.baseUrl to the remote bridge instead of launching locally."
+      "For the current Pi-hosted DOGZILLA direct bridge, transport.baseUrl points at http://10.0.4.32:8893.",
+      "For future Pi Docker ROS2 work, set transport.baseUrl back to the ROS2 sidecar port and switch target to ros2_real."
     ]
   },
   "topics": {

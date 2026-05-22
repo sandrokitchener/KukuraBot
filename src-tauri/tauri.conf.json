@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Robo-Doge",
+  "productName": "Questing Beast",
   "version": "0.1.0",
   "identifier": "com.robodoge.console",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Robo-Doge",
+        "title": "Questing Beast",
         "width": 800,
         "height": 600,
         "resizable": true,

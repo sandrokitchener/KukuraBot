@@ -1,5 +1,5 @@
 param(
-  [string]$BridgeBaseUrl = "http://192.168.8.88:8892",
+  [string]$BridgeBaseUrl = "http://10.0.4.32:8892",
   [switch]$DryRun
 )
 

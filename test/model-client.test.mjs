@@ -133,3 +133,49 @@ test('queryModel supports openai-compatible responses', async () => {
     global.fetch = originalFetch
   }
 })
+
+test('queryModel supports llama-cpp-http responses', async () => {
+  const originalFetch = global.fetch
+  let requestUrl = ''
+
+  global.fetch = async (url, options) => {
+    requestUrl = String(url)
+    const requestBody = JSON.parse(options.body)
+    assert.equal(requestBody.model, 'robo-doge-local-gguf')
+
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: 'woof from phone',
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    )
+  }
+
+  try {
+    const result = await queryModel({
+      input: 'hello',
+      profile: {
+        provider: 'llama-cpp-http',
+        baseUrl: 'http://127.0.0.1:8080/v1',
+        model: 'robo-doge-local-gguf',
+        temperature: 0.1,
+        maxTokens: 96,
+      },
+      systemPrompt: 'system',
+    })
+
+    assert.equal(requestUrl, 'http://127.0.0.1:8080/v1/chat/completions')
+    assert.equal(result, 'woof from phone')
+  } finally {
+    global.fetch = originalFetch
+  }
+})

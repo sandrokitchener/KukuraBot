@@ -1,6 +1,6 @@
 {
   "ssh": {
-    "host": "",
+    "host": "10.0.4.32",
     "user": "pi",
     "port": 22,
     "alias": "dogzilla",
@@ -10,17 +10,23 @@
   "bridges": {
     "direct": {
       "label": "Direct DOGZILLALib",
-      "baseUrl": "",
+      "baseUrl": "http://10.0.4.32:8893",
       "port": 8893
     },
     "ros2": {
       "label": "ROS2 Sidecar",
-      "baseUrl": "",
+      "baseUrl": "http://10.0.4.32:8892",
       "port": 8892
     }
   },
+  "camera": {
+    "label": "Yahboom DOGZILLA app camera",
+    "baseUrl": "http://10.0.4.32:6500",
+    "streamPath": "/video_feed",
+    "indexPath": "/"
+  },
   "notes": [
-    "Set ssh.host from the Connection Center once the DOGZILLA IP is known.",
+    "DOGZILLA is reserved on eeroWiFi at 10.0.4.32. Hotspot fallback IP was 192.168.8.88.",
     "Use direct bridge for first dry-run hardware tests; use ROS2 bridge after the vendor ROS2 graph is verified."
   ]
 }

@@ -3,42 +3,54 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Robot Test App</title>
-    <link rel="icon" type="image/png" href="/assets/robo-doge-mascot.png" />
+    <title>Questing Beast</title>
+    <link rel="icon" type="image/png" href="/assets/questing-beast-app-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
-      <button
-        id="settings-toggle"
-        class="settings-toggle"
-        type="button"
-        aria-controls="settings-drawer"
-        aria-expanded="false"
-        aria-label="Toggle settings"
-        title="Settings"
-      ></button>
-      <button
-        id="connection-toggle"
-        class="connection-toggle"
-        type="button"
-        aria-controls="connection-drawer"
-        aria-expanded="false"
-        aria-label="Toggle DOGZILLA connection center"
-        title="DOGZILLA connection"
-      >
-        <span class="router-icon" aria-hidden="true">
-          <span class="router-antenna router-antenna-left"></span>
-          <span class="router-antenna router-antenna-right"></span>
-          <span class="router-led router-led-one"></span>
-          <span class="router-led router-led-two"></span>
-        </span>
-      </button>
+      <header class="app-header" aria-label="Questing Beast actions">
+        <div class="app-header-brand">
+          <img src="/assets/questing-beast-qb-mark.png" alt="" />
+          <span>Questing Beast</span>
+        </div>
+        <div class="app-header-actions">
+          <button
+            id="connection-toggle"
+            class="connection-toggle"
+            type="button"
+            aria-controls="connection-drawer"
+            aria-expanded="false"
+            aria-label="Toggle DOGZILLA connection center"
+            title="DOGZILLA connection"
+          >
+            <span class="router-icon" aria-hidden="true">
+              <span class="router-antenna router-antenna-left"></span>
+              <span class="router-antenna router-antenna-right"></span>
+              <span class="router-led router-led-one"></span>
+              <span class="router-led router-led-two"></span>
+            </span>
+            <span class="app-action-label">Connection</span>
+          </button>
+          <button
+            id="settings-toggle"
+            class="settings-toggle"
+            type="button"
+            aria-controls="settings-drawer"
+            aria-expanded="false"
+            aria-label="Toggle settings"
+            title="Settings"
+          >
+            <span class="settings-icon" aria-hidden="true"></span>
+            <span class="app-action-label">Settings</span>
+          </button>
+        </div>
+      </header>
 
       <section class="console-layout">
-        <aside class="control-rail" aria-label="Robot console navigation">
-          <div class="rail-brand" title="Robo-Doge">
-            <img src="/assets/robo-doge-mascot.png" alt="Robo-Doge mascot" />
+        <aside class="control-rail" aria-label="Questing Beast navigation">
+          <div class="rail-brand" title="Questing Beast">
+            <img src="/assets/questing-beast-qb-mark.png" alt="Questing Beast icon" />
           </div>
           <span class="rail-icon is-active" title="Command center">+</span>
           <span class="rail-icon" title="Robot fleet">o</span>
@@ -54,10 +66,13 @@
           <div class="intro-head">
             <div class="intro-copy">
               <p id="app-eyebrow" class="eyebrow">Ollama robot-control test</p>
-              <h1 id="app-title">Robot Console</h1>
+              <h1 id="app-title" class="brand-title" aria-label="Questing Beast">
+                <img class="brand-title-logo" src="/assets/questing-beast-logo.png" alt="Questing Beast" />
+                <span id="app-title-text" class="sr-only">Questing Beast</span>
+              </h1>
             </div>
-            <div class="mascot-chip" title="Robo-Doge mascot" aria-hidden="true">
-              <img src="/assets/robo-doge-mascot.png" alt="" />
+            <div class="mascot-chip" title="Questing Beast icon" aria-hidden="true">
+              <img src="/assets/questing-beast-qb-mark.png" alt="" />
               <span></span>
             </div>
           </div>
@@ -94,8 +109,9 @@
 
         <section class="robot-column">
           <nav class="robot-tabs" aria-label="Robot tabs">
-            <button class="robot-tab is-active" type="button" aria-selected="true">Robo Doge</button>
+            <button class="robot-tab is-active" type="button" aria-selected="true" data-robot-view="overview">DOGZILLA</button>
             <button class="robot-tab" type="button" aria-selected="false">Scout</button>
+            <button class="robot-tab" type="button" aria-selected="false" data-robot-view="camera">Camera</button>
             <button class="robot-tab" type="button" aria-selected="false">Dock</button>
           </nav>
 
@@ -119,6 +135,11 @@
                 <strong id="robot-state-seq">-</strong>
               </div>
               <div>
+                <span class="robot-state-label">Battery</span>
+                <strong id="robot-battery-value">-</strong>
+                <div id="robot-telemetry-meta" class="meta-note"></div>
+              </div>
+              <div>
                 <span class="robot-state-label">Target</span>
                 <strong id="runtime-target-name">Loading...</strong>
                 <div id="runtime-target-source" class="meta-note"></div>
@@ -137,6 +158,17 @@
               <span id="robot-map-dot" class="robot-map-dot" aria-hidden="true"></span>
             </div>
             <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>
+          </section>
+
+          <section id="robot-camera-panel" class="robot-camera-panel" hidden>
+            <div class="robot-map-head">
+              <h2>Camera</h2>
+              <span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
+            </div>
+            <div class="robot-camera-frame-wrap">
+              <img id="robot-camera-frame" class="robot-camera-frame" alt="DOGZILLA camera stream" />
+            </div>
+            <div id="robot-camera-meta" class="robot-map-meta">Camera stream not configured.</div>
           </section>
 
           <section class="output-panel">
@@ -225,6 +257,30 @@
           </div>
           <pre id="connection-output" class="connection-output">Waiting for connection action.</pre>
         </section>
+
+        <section class="connection-panel preflight-panel">
+          <div class="bridge-head">
+            <h2>Preflight Diagnostics</h2>
+            <button id="run-dogzilla-preflight-button" type="button">Run preflight</button>
+          </div>
+          <p id="dogzilla-preflight-status" class="connection-status" aria-live="polite">Not run.</p>
+          <div id="dogzilla-preflight-summary" class="preflight-summary" aria-label="DOGZILLA preflight summary">
+            <div>
+              <span class="meta-label">OK</span>
+              <strong>0</strong>
+            </div>
+            <div>
+              <span class="meta-label">Warn</span>
+              <strong>0</strong>
+            </div>
+            <div>
+              <span class="meta-label">Fail</span>
+              <strong>0</strong>
+            </div>
+          </div>
+          <div id="dogzilla-preflight-checks" class="preflight-checks"></div>
+          <pre id="dogzilla-preflight-output" class="connection-output">Run preflight to inspect Pi readiness.</pre>
+        </section>
       </aside>
 
       <aside id="settings-drawer" class="settings-drawer" hidden>
@@ -301,6 +357,13 @@
           </div>
           <p id="robot-target-lock-note" class="settings-note">Selection saves to config/robot-runtime.json.</p>
           <div id="robot-target-status" class="settings-status">Loading robot targets...</div>
+
+          <div class="settings-row">
+            <label for="test-robot-sit-button">Robot test</label>
+            <div class="settings-static-field">sit</div>
+            <button id="test-robot-sit-button" type="button">Send sit</button>
+          </div>
+          <div id="robot-sit-test-status" class="settings-status">Ready.</div>
 
           <div class="settings-row">
             <label for="speech-profile-select">Speech profile</label>

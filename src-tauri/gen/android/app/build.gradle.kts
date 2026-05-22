@@ -17,7 +17,7 @@ android {
     compileSdk = 36
     namespace = "com.robodoge.console"
     defaultConfig {
-        // Side-loaded Robo-Doge talks to the owner PC over LAN HTTP.
+        // Side-loaded Questing Beast talks to the owner PC over LAN HTTP.
         manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.robodoge.console"
         minSdk = 24

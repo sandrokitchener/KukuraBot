@@ -20,18 +20,18 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "dogzilla-ssh-common.ps1")
 
 if (-not $NoSync) {
-  $syncArgs = @(
-    "-User", $User,
-    "-Port", $SshPort,
-    "-Alias", $Alias,
-    "-KeyPath", $KeyPath,
-    "-RemoteRoot", $RemoteRoot
-  )
+  $syncArgs = @{
+    User = $User
+    Port = $SshPort
+    Alias = $Alias
+    KeyPath = $KeyPath
+    RemoteRoot = $RemoteRoot
+  }
   if ($PiIp) {
-    $syncArgs += @("-Host", $PiIp)
+    $syncArgs.PiIp = $PiIp
   }
   if ($NoHostKeyScan) {
-    $syncArgs += "-NoHostKeyScan"
+    $syncArgs.NoHostKeyScan = $true
   }
 
   & (Join-Path $PSScriptRoot "sync-dogzilla-bridges.ps1") @syncArgs
@@ -64,7 +64,7 @@ if ($Bridge -eq "direct") {
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
-  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && nohup bash -lc $serverCommandQuoted > logs/$logName.log 2>&1 & echo `$! > logs/$logName.pid && sleep 1 && cat logs/$logName.pid"
+  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && (nohup bash -lc $serverCommandQuoted > logs/$logName.log 2>&1 < /dev/null & echo `$! > logs/$logName.pid) && sleep 1 && cat logs/$logName.pid"
   Write-Host "Starting $Bridge bridge on $Alias port $port in remote background."
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
   exit $LASTEXITCODE

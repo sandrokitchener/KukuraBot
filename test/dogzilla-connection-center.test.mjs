@@ -19,6 +19,11 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.ssh.alias, 'dogzilla')
   assert.equal(config.bridges.direct.baseUrl, 'http://192.168.8.88:8893')
   assert.equal(config.bridges.ros2.baseUrl, 'http://192.168.8.88:8892')
+  assert.equal(config.camera.streamUrl, 'http://192.168.8.88:6500/video_feed')
+  assert.equal(config.camera.proxyStreamPath, '/api/dogzilla/camera/stream')
+  assert.equal(config.camera.proxyStatusPath, '/api/dogzilla/camera/status')
+  assert.equal(config.camera.controlPort, 6000)
+  assert.equal(config.camera.wakeCommand, '$010F040115#')
 })
 
 test('buildDogzillaActionPlan allowlists start-direct background bridge script', () => {

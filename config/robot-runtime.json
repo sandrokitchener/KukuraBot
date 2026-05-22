@@ -3,10 +3,12 @@
   "dryRun": true,
   "requiresOperatorConfirmation": true,
   "robotId": "dogzilla-local",
+  "robotName": "DOGZILLA",
   "robotModel": "dogzilla-s2",
-  "defaultTarget": "isaacsim",
+  "defaultTarget": "dogzilla_direct",
   "previewTargets": [
     "isaacsim",
+    "dogzilla_direct",
     "ros2_real"
   ],
   "selectedMotionProfile": "default",
@@ -30,11 +32,20 @@
         "App launches or connects to the ROS2 HTTP bridge when this target is active.",
         "Use transport.baseUrl in config/robot-ros2.json to point at the machine that can reach the live DOGZILLA ROS graph."
       ]
+    },
+    "dogzilla_direct": {
+      "label": "DOGZILLA Direct Bridge",
+      "kind": "dogzilla-direct",
+      "managedByApp": false,
+      "notes": [
+        "Connects to the Pi-hosted DOGZILLALib HTTP bridge at 10.0.4.32:8893.",
+        "Use this while the Pi ROS2 stack remains Docker-only and not launched."
+      ]
     }
   },
   "feedback": {
     "pollMs": 2500,
-    "statePollMs": 125,
+    "statePollMs": 1000,
     "historyLimit": 20
   },
   "notes": [
