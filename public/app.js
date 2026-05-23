@@ -1550,9 +1550,10 @@ function applyRobotView(view) {
 
   if (showCamera) {
     applyDogzillaCameraConfig()
-    void refreshDogzillaCameraStatus()
     const streamUrl = robotCameraFrame.dataset.streamUrl || ''
     if (streamUrl && robotCameraFrame.src !== streamUrl) {
+      robotCameraChip.textContent = 'Opening stream'
+      robotCameraMeta.textContent = 'Opening DOGZILLA camera stream through the backend proxy.'
       robotCameraFrame.src = streamUrl
     }
   } else {
@@ -1606,6 +1607,7 @@ function handleDogzillaCameraFrameLoad() {
   }
 
   robotCameraChip.textContent = 'Live'
+  robotCameraMeta.textContent = 'Receiving DOGZILLA camera stream through the backend proxy.'
 }
 
 function renderProfileOptions() {
