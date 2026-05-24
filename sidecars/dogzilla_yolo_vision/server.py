@@ -53,11 +53,13 @@ class Detection:
 class VisionState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     worker: "VisionWorker | None" = None
+    latest_raw_frame: Any = None
     latest_jpeg: bytes | None = None
     latest_detections: list[Detection] = field(default_factory=list)
     latest_frame_at: float = 0.0
     latest_error: str = ""
     frames: int = 0
+    inferences: int = 0
     inference_ms: float = 0.0
     model_loaded: bool = False
     labels: list[str] = field(default_factory=list)
@@ -104,6 +106,43 @@ class VisionWorker(threading.Thread):
         self.stop_event.set()
 
     def run(self) -> None:
+        capture_thread = threading.Thread(target=self.capture_loop, daemon=True)
+        capture_thread.start()
+        self.inference_loop()
+
+    def capture_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                if is_http_camera(self.args.camera_url):
+                    wake_camera(self.args)
+
+                for frame in read_camera_frames(self.args.camera_url, self.args.camera_timeout):
+                    if self.stop_event.is_set():
+                        return
+
+                    with self.state.lock:
+                        detections = list(self.state.latest_detections)
+                        inference_ms = self.state.inference_ms
+
+                    annotated = draw_detections(frame, detections, inference_ms)
+                    encode_ok, jpeg = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), self.args.jpeg_quality])
+                    if not encode_ok:
+                        raise RuntimeError("Could not encode annotated JPEG frame.")
+
+                    with self.state.lock:
+                        self.state.latest_raw_frame = frame.copy()
+                        self.state.latest_jpeg = jpeg.tobytes()
+                        self.state.latest_frame_at = time.time()
+                        self.state.latest_error = ""
+                        self.state.frames += 1
+
+                    time.sleep(max(0.0, 1.0 / max(1.0, self.args.max_fps)))
+            except Exception as error:
+                with self.state.lock:
+                    self.state.latest_error = str(error)
+                time.sleep(self.args.restart_delay)
+
+    def inference_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
                 if self.detector is None:
@@ -118,34 +157,20 @@ class VisionWorker(threading.Thread):
                         self.state.model_loaded = True
                         self.state.labels = self.detector.labels
 
-                if is_http_camera(self.args.camera_url):
-                    wake_camera(self.args)
-                last_infer_at = 0.0
-                last_detections: list[Detection] = []
-                last_inference_ms = 0.0
+                with self.state.lock:
+                    frame = None if self.state.latest_raw_frame is None else self.state.latest_raw_frame.copy()
 
-                for frame in read_camera_frames(self.args.camera_url, self.args.camera_timeout):
-                    if self.stop_event.is_set():
-                        return
-                    now = time.time()
-                    if now - last_infer_at >= self.args.infer_interval:
-                        last_detections, last_inference_ms = self.detector.detect(frame)
-                        last_infer_at = now
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
 
-                    annotated = draw_detections(frame, last_detections, last_inference_ms)
-                    encode_ok, jpeg = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), self.args.jpeg_quality])
-                    if not encode_ok:
-                        raise RuntimeError("Could not encode annotated JPEG frame.")
+                detections, inference_ms = self.detector.detect(frame)
+                with self.state.lock:
+                    self.state.latest_detections = detections
+                    self.state.inference_ms = inference_ms
+                    self.state.inferences += 1
 
-                    with self.state.lock:
-                        self.state.latest_jpeg = jpeg.tobytes()
-                        self.state.latest_detections = last_detections
-                        self.state.latest_frame_at = now
-                        self.state.latest_error = ""
-                        self.state.frames += 1
-                        self.state.inference_ms = last_inference_ms
-
-                    time.sleep(max(0.0, 1.0 / max(1.0, self.args.max_fps)))
+                time.sleep(self.args.infer_interval)
             except Exception as error:
                 with self.state.lock:
                     self.state.latest_error = str(error)
@@ -245,6 +270,7 @@ def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, An
             "cameraUrl": args.camera_url,
             "labels": state.labels,
             "frames": state.frames,
+            "inferences": state.inferences,
             "detections": len(state.latest_detections),
             "latestFrameAgeSec": age,
             "inferenceMs": state.inference_ms,
@@ -552,10 +578,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--imgsz", type=int, default=int(os.getenv("DOGZILLA_YOLO_IMGSZ", "640")))
     parser.add_argument("--confidence", type=float, default=float(os.getenv("DOGZILLA_YOLO_CONF", "0.35")))
     parser.add_argument("--iou", type=float, default=float(os.getenv("DOGZILLA_YOLO_IOU", "0.45")))
-    parser.add_argument("--max-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_MAX_FPS", "8")))
-    parser.add_argument("--stream-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STREAM_FPS", "8")))
+    parser.add_argument("--max-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_MAX_FPS", "12")))
+    parser.add_argument("--stream-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STREAM_FPS", "12")))
     parser.add_argument("--infer-interval", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_INFER_INTERVAL", "0.25")))
-    parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "75")))
+    parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "65")))
     parser.add_argument("--restart-delay", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_RESTART_DELAY", "2")))
     parser.add_argument("--first-frame-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_FIRST_FRAME_TIMEOUT", "15")))
     return parser
