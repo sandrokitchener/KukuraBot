@@ -10,6 +10,10 @@ import {
   saveDogzillaConnectionConfig,
 } from './lib/dogzilla-connection-center.mjs'
 import {
+  getDogzillaAudioCueHealth,
+  sendDogzillaAudioCue,
+} from './lib/dogzilla-audio-cue-client.mjs'
+import {
   DOGZILLA_CAMERA_STATUS_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
   getDogzillaCameraStatus,
@@ -77,9 +81,11 @@ const MIME_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.mjs': 'application/javascript; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
+  '.mp3': 'audio/mpeg',
   '.onnx': 'application/octet-stream',
   '.png': 'image/png',
   '.txt': 'text/plain; charset=utf-8',
+  '.wav': 'audio/wav',
   '.wasm': 'application/wasm',
 }
 
@@ -128,6 +134,17 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/preflight') {
       return sendJson(response, 200, await runDogzillaPreflight())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/audio/health') {
+      return sendJson(response, 200, await getDogzillaAudioCueHealth())
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/audio/cue') {
+      const body = await readJsonBody(request)
+      const result = await sendDogzillaAudioCue(body?.cue)
+      const statusCode = result.ok ? 200 : result.status === 'invalid' ? 400 : 502
+      return sendJson(response, statusCode, result)
     }
 
     if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STATUS_PATH) {

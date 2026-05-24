@@ -26,6 +26,8 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.camera.wakeCommand, '$010F040115#')
   assert.equal(config.vision.enabled, false)
   assert.equal(config.vision.streamUrl, 'http://192.168.8.88:8894/stream.mjpg')
+  assert.equal(config.audio.enabled, false)
+  assert.equal(config.audio.cueUrl, 'http://192.168.8.88:8895/cue')
 })
 
 test('normalizeDogzillaConnectionConfig can route camera through YOLO vision sidecar', () => {

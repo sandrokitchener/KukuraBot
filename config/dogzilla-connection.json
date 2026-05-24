@@ -35,6 +35,14 @@
     "detectionsPath": "/detections",
     "modelRemotePath": "/home/pi/robodoge/models/dogzilla_yolo/best.onnx"
   },
+  "audio": {
+    "enabled": true,
+    "label": "DOGZILLA Pi speaker cues",
+    "baseUrl": "http://10.0.4.32:8895",
+    "port": 8895,
+    "cuePath": "/cue",
+    "healthPath": "/healthz"
+  },
   "notes": [
     "DOGZILLA is reserved on eeroWiFi at 10.0.4.32. Hotspot fallback IP was 192.168.8.88.",
     "Use direct bridge for first dry-run hardware tests; use ROS2 bridge after the vendor ROS2 graph is verified."

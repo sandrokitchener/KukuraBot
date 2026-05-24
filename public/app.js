@@ -98,8 +98,7 @@ const emptyMessageMeta = document.querySelector('#empty-message-meta')
 const EMPTY_CHAT_SELECTOR = '.message-empty'
 const MESSAGE_SELECTOR = '.message:not(.message-empty)'
 const COMMAND_CUE_URLS = [
-  '/sounds/robot-bark.mp3',
-  '/sounds/robot-bark-alt-1.wav',
+  '/sounds/robot-bark-synthetic.wav',
 ]
 const THINKING_CUE_URLS = [
   '/sounds/robot-think-whimper-1.wav',
@@ -147,7 +146,14 @@ let robotFeedbackTimerId = null
 let robotStateTimerId = null
 let activeThinkingCue = null
 let thinkingCueToken = 0
-const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS)
+const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS, {
+  gain: 0.28,
+  playbackRate: 1,
+  detune: -20,
+  distortion: 5,
+  bits: 14,
+  reduction: 1,
+})
 const thinkingCuePlayer = createCommandCuePlayer(THINKING_CUE_URLS, {
   gain: 0.12,
   playbackRate: 0.98,
@@ -1932,8 +1938,11 @@ function playCommandCueIfNeeded(parsed) {
     return
   }
 
-  commandCuePlayer.play().catch((error) => {
-    console.warn('Command cue failed:', error)
+  playDogzillaPiCue('confirm').catch((error) => {
+    console.warn('Pi confirm cue failed:', error)
+    return commandCuePlayer.play()
+  }).catch((error) => {
+    console.warn('Command cue fallback failed:', error)
   })
 }
 
@@ -2013,12 +2022,15 @@ function startThinkingFeedback(messageNode) {
   let frame = 0
   stopThinkingCue()
   const cueToken = ++thinkingCueToken
-  thinkingCuePlayer.play().then((cue) => {
-    if (cueToken !== thinkingCueToken) {
-      cue?.stop?.()
-      return
-    }
-    activeThinkingCue = cue
+  playDogzillaPiCue('thinking-start').catch((error) => {
+    console.warn('Pi thinking cue failed:', error)
+    return thinkingCuePlayer.play().then((cue) => {
+      if (cueToken !== thinkingCueToken) {
+        cue?.stop?.()
+        return
+      }
+      activeThinkingCue = cue
+    })
   }).catch((error) => {
     console.warn('Thinking cue failed:', error)
   })
@@ -2062,6 +2074,7 @@ function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
 
 function stopThinkingCue() {
   thinkingCueToken += 1
+  playDogzillaPiCue('thinking-stop').catch(() => {})
 
   if (activeThinkingCue) {
     activeThinkingCue.stop()
@@ -2070,6 +2083,26 @@ function stopThinkingCue() {
   }
 
   thinkingCuePlayer.stopAll()
+}
+
+async function playDogzillaPiCue(cue) {
+  const audioConfig = runtimeConfig.dogzilla?.audio
+  if (!audioConfig?.enabled) {
+    throw new Error('DOGZILLA Pi audio cues are not enabled.')
+  }
+
+  const response = await apiFetch('/api/dogzilla/audio/cue', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ cue }),
+  })
+  const payload = await response.json()
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.error || 'DOGZILLA Pi audio cue failed.')
+  }
+  return payload
 }
 
 function setStatus(message, state = 'idle', elapsedMs = null) {
