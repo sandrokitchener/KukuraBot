@@ -54,6 +54,7 @@ const robotStateSeq = document.querySelector('#robot-state-seq')
 const robotBatteryValue = document.querySelector('#robot-battery-value')
 const robotTelemetryMeta = document.querySelector('#robot-telemetry-meta')
 const robotMapDot = document.querySelector('#robot-map-dot')
+const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
 const robotMapPanel = document.querySelector('.robot-map-panel')
 const robotCameraPanel = document.querySelector('#robot-camera-panel')
@@ -144,8 +145,11 @@ const DEFAULT_ROBOT_RUNTIME = {
 let thinkingState = null
 let robotFeedbackTimerId = null
 let robotStateTimerId = null
+let robotLidarTimerId = null
 let activeThinkingCue = null
 let thinkingCueToken = 0
+let robotMapBaseMeta = ''
+let robotLidarSummary = ''
 const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS, {
   gain: 0.28,
   playbackRate: 1,
@@ -202,6 +206,7 @@ let runtimeConfig = {
   robotRuntime: { ...DEFAULT_ROBOT_RUNTIME },
   dogzilla: {
     camera: null,
+    lidar: null,
   },
 }
 let dogzillaConnection = null
@@ -317,6 +322,7 @@ async function boot() {
     await refreshDogzillaConnection()
     startRobotFeedbackPolling()
     startRobotStatePolling()
+    startRobotLidarPolling()
 
     try {
       await initializeSpeechController()
@@ -625,6 +631,7 @@ async function handleRobotTargetSave() {
     applyPayload(payload)
     startRobotFeedbackPolling()
     startRobotStatePolling()
+    startRobotLidarPolling()
     await refreshRobotFeedback()
     robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
     setStatus(`Runtime target changed to ${runtimeConfig.robotRuntime.activeTarget.label}.`)
@@ -738,6 +745,7 @@ async function saveBackendUrl(value) {
   await refreshDogzillaConnection()
   startRobotFeedbackPolling()
   startRobotStatePolling()
+  startRobotLidarPolling()
 
   try {
     await initializeSpeechController()
@@ -827,6 +835,33 @@ function startRobotStatePolling() {
   }, pollMs)
 }
 
+function startRobotLidarPolling() {
+  if (robotLidarTimerId) {
+    window.clearInterval(robotLidarTimerId)
+    robotLidarTimerId = null
+  }
+
+  clearLidarScan()
+
+  if (!isRealRobotTargetActive()) {
+    robotLidarSummary = ''
+    setRobotMapMeta(robotMapBaseMeta || 'Real robot target required for live map.')
+    return
+  }
+
+  const lidar = runtimeConfig.dogzilla?.lidar
+  if (!lidar?.enabled) {
+    robotLidarSummary = 'Lidar: bridge disabled.'
+    setRobotMapMeta(robotMapBaseMeta)
+    return
+  }
+
+  void refreshDogzillaLidarScan()
+  robotLidarTimerId = window.setInterval(() => {
+    void refreshDogzillaLidarScan()
+  }, 750)
+}
+
 async function refreshRobotState() {
   if (!isRealRobotTargetActive()) {
     renderRobotStateInactive()
@@ -852,7 +887,29 @@ async function refreshRobotState() {
     robotBatteryValue.textContent = '-'
     robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
-    robotMapMeta.textContent = formatError(error)
+    setRobotMapMeta(formatError(error))
+  }
+}
+
+async function refreshDogzillaLidarScan() {
+  const lidar = runtimeConfig.dogzilla?.lidar
+  const scanPath = lidar?.proxyScanPath || '/api/dogzilla/lidar/scan'
+
+  try {
+    const response = await apiFetch(scanPath)
+    const payload = await response.json()
+
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(payload.error || 'Lidar scan unavailable.')
+    }
+
+    renderLidarScan(payload)
+    robotLidarSummary = formatLidarSummary(payload)
+    setRobotMapMeta(robotMapBaseMeta)
+  } catch (error) {
+    clearLidarScan()
+    robotLidarSummary = `Lidar: ${formatError(error)}`
+    setRobotMapMeta(robotMapBaseMeta)
   }
 }
 
@@ -1422,7 +1479,7 @@ function renderRobotStateSnapshot(snapshot) {
     robotBatteryValue.textContent = '-'
     robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
-    robotMapMeta.textContent = `Stream: ${runtimeConfig.robotRuntime.stateStreamPath || DEFAULT_ROBOT_RUNTIME.stateStreamPath}`
+    setRobotMapMeta(`Stream: ${runtimeConfig.robotRuntime.stateStreamPath || DEFAULT_ROBOT_RUNTIME.stateStreamPath}`)
     return
   }
 
@@ -1450,7 +1507,7 @@ function renderRobotStateInactive() {
   robotBatteryValue.textContent = '-'
   robotTelemetryMeta.textContent = ''
   robotMapDot.style.opacity = '0'
-  robotMapMeta.textContent = 'Real robot target required for live map.'
+  setRobotMapMeta('Real robot target required for live map.')
 }
 
 function renderRobotMapDot(robot) {
@@ -1458,7 +1515,7 @@ function renderRobotMapDot(robot) {
     robotMapDot.style.opacity = '0'
     const yaw = toFiniteNumber(robot.telemetry?.yaw)
     const orientation = Number.isFinite(yaw) ? ` Heading ${yaw.toFixed(2)} deg.` : ''
-    robotMapMeta.textContent = `Map pose unavailable from Pi bridge.${orientation} Last update ${formatEventTimestamp(robot.receivedAt)}.`
+    setRobotMapMeta(`Map pose unavailable from Pi bridge.${orientation} Last update ${formatEventTimestamp(robot.receivedAt)}.`)
     return
   }
 
@@ -1472,9 +1529,100 @@ function renderRobotMapDot(robot) {
   robotMapDot.style.top = `${yPercent}%`
   robotMapDot.style.opacity = '1'
   robotMapDot.style.setProperty('--robot-heading', `${robot.pose.theta}rad`)
-  robotMapMeta.textContent =
+  setRobotMapMeta(
     `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
-    `Updated ${formatEventTimestamp(robot.receivedAt)}.`
+    `Updated ${formatEventTimestamp(robot.receivedAt)}.`,
+  )
+}
+
+function renderLidarScan(scan) {
+  if (!robotLidarScan) {
+    return
+  }
+
+  const rect = robotLidarScan.getBoundingClientRect()
+  const width = Math.max(1, Math.round(rect.width || robotLidarScan.width))
+  const height = Math.max(1, Math.round(rect.height || robotLidarScan.height))
+  if (robotLidarScan.width !== width || robotLidarScan.height !== height) {
+    robotLidarScan.width = width
+    robotLidarScan.height = height
+  }
+
+  const context = robotLidarScan.getContext('2d')
+  if (!context) {
+    return
+  }
+
+  context.clearRect(0, 0, width, height)
+  const points = Array.isArray(scan.points) ? scan.points : []
+  if (!points.length) {
+    return
+  }
+
+  const radius = Math.min(width, height) * 0.42
+  const centerX = width / 2
+  const centerY = height / 2
+  const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
+  const displayRange = clamp(Math.max(1.5, maxSeen), 1.5, 6)
+  const scale = radius / displayRange
+
+  context.save()
+  context.lineWidth = 1
+  context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
+  for (const ring of [0.25, 0.5, 0.75, 1]) {
+    context.beginPath()
+    context.arc(centerX, centerY, radius * ring, 0, Math.PI * 2)
+    context.stroke()
+  }
+
+  context.fillStyle = 'rgba(0, 123, 132, 0.78)'
+  for (const point of points) {
+    const x = toFiniteNumber(point.x)
+    const y = toFiniteNumber(point.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue
+    }
+    const px = centerX + x * scale
+    const py = centerY - y * scale
+    if (px < 0 || px > width || py < 0 || py > height) {
+      continue
+    }
+    context.beginPath()
+    context.arc(px, py, 2.2, 0, Math.PI * 2)
+    context.fill()
+  }
+
+  context.fillStyle = 'rgba(255, 114, 79, 0.95)'
+  context.beginPath()
+  context.arc(centerX, centerY, 4, 0, Math.PI * 2)
+  context.fill()
+  context.restore()
+}
+
+function clearLidarScan() {
+  if (!robotLidarScan) {
+    return
+  }
+
+  const context = robotLidarScan.getContext('2d')
+  context?.clearRect(0, 0, robotLidarScan.width, robotLidarScan.height)
+}
+
+function formatLidarSummary(scan) {
+  const stats = scan.stats || {}
+  const minRange = toFiniteNumber(stats.minRange)
+  const points = Array.isArray(scan.points) ? scan.points.length : 0
+  const rangeCount = Number.isFinite(Number(scan.rangeCount)) ? Number(scan.rangeCount) : 0
+  const nearFront = Number.isFinite(Number(stats.nearFront)) ? Number(stats.nearFront) : 0
+  const nearLeft = Number.isFinite(Number(stats.nearLeft)) ? Number(stats.nearLeft) : 0
+  const nearRight = Number.isFinite(Number(stats.nearRight)) ? Number(stats.nearRight) : 0
+  const minText = Number.isFinite(minRange) ? `min ${minRange.toFixed(2)}m` : 'min n/a'
+  return `Lidar: ${points}/${rangeCount} pts, ${minText}, near F/L/R ${nearFront}/${nearLeft}/${nearRight}.`
+}
+
+function setRobotMapMeta(baseMessage) {
+  robotMapBaseMeta = baseMessage || ''
+  robotMapMeta.textContent = [robotMapBaseMeta, robotLidarSummary].filter(Boolean).join(' ')
 }
 
 function renderRobotTelemetry(robot) {
@@ -2189,5 +2337,9 @@ window.addEventListener('beforeunload', () => {
 
   if (robotStateTimerId) {
     window.clearInterval(robotStateTimerId)
+  }
+
+  if (robotLidarTimerId) {
+    window.clearInterval(robotLidarTimerId)
   }
 })

@@ -14,6 +14,10 @@ import {
   sendDogzillaAudioCue,
 } from './lib/dogzilla-audio-cue-client.mjs'
 import {
+  getDogzillaLidarHealth,
+  getDogzillaLidarScan,
+} from './lib/dogzilla-lidar-client.mjs'
+import {
   DOGZILLA_CAMERA_STATUS_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
   getDogzillaCameraStatus,
@@ -144,6 +148,16 @@ const server = createServer(async (request, response) => {
       const body = await readJsonBody(request)
       const result = await sendDogzillaAudioCue(body?.cue)
       const statusCode = result.ok ? 200 : result.status === 'invalid' ? 400 : 502
+      return sendJson(response, statusCode, result)
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/health') {
+      return sendJson(response, 200, await getDogzillaLidarHealth())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/scan') {
+      const result = await getDogzillaLidarScan()
+      const statusCode = result.ok ? 200 : result.status === 'disabled' ? 404 : 502
       return sendJson(response, statusCode, result)
     }
 

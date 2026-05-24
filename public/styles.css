@@ -1081,6 +1081,7 @@ select {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 0;
   background: url("/assets/floorplan.png") center / cover no-repeat;
   filter: sepia(0.25) saturate(0.65) contrast(0.95);
   opacity: 0.38;
@@ -1090,6 +1091,7 @@ select {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   background:
     radial-gradient(circle, rgba(54, 48, 42, 0.16) 1px, transparent 1.5px) 0 0 / 12px 12px,
     linear-gradient(90deg, transparent calc(50% - 0.5px), rgba(255, 123, 86, 0.28) 50%, transparent calc(50% + 0.5px)),
@@ -1097,9 +1099,18 @@ select {
   opacity: 0.72;
 }
 
+.robot-lidar-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .robot-map-axis {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   background: rgba(255, 123, 86, 0.34);
   pointer-events: none;
 }
@@ -1121,7 +1132,7 @@ select {
 .robot-map-dot {
   --robot-heading: 0rad;
   position: absolute;
-  z-index: 3;
+  z-index: 4;
   left: 50%;
   top: 50%;
   width: 17px;

@@ -43,6 +43,14 @@
     "cuePath": "/cue",
     "healthPath": "/healthz"
   },
+  "lidar": {
+    "enabled": true,
+    "label": "DOGZILLA lidar bridge",
+    "baseUrl": "http://10.0.4.32:8896",
+    "port": 8896,
+    "healthPath": "/healthz",
+    "scanPath": "/scan"
+  },
   "notes": [
     "DOGZILLA is reserved on eeroWiFi at 10.0.4.32. Hotspot fallback IP was 192.168.8.88.",
     "Use direct bridge for first dry-run hardware tests; use ROS2 bridge after the vendor ROS2 graph is verified."

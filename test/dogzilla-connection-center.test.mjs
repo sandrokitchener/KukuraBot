@@ -28,6 +28,9 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.vision.streamUrl, 'http://192.168.8.88:8894/stream.mjpg')
   assert.equal(config.audio.enabled, false)
   assert.equal(config.audio.cueUrl, 'http://192.168.8.88:8895/cue')
+  assert.equal(config.lidar.enabled, false)
+  assert.equal(config.lidar.scanUrl, 'http://192.168.8.88:8896/scan')
+  assert.equal(config.lidar.proxyScanPath, '/api/dogzilla/lidar/scan')
 })
 
 test('normalizeDogzillaConnectionConfig can route camera through YOLO vision sidecar', () => {
