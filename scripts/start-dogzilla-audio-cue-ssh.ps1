@@ -9,6 +9,7 @@ param(
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8895,
   [string]$Player = "aplay",
+  [string]$AplayDevice = "plughw:2,0",
   [switch]$Background,
   [switch]$NoHostKeyScan
 )
@@ -51,11 +52,31 @@ if ($LASTEXITCODE -ne 0) {
   throw "Audio player '$Player' not found on Pi."
 }
 
-$serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_audio_cue/server.py --host 0.0.0.0 --port $Port --sounds-dir public/sounds --player $Player"
+$serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_audio_cue/server.py --host 0.0.0.0 --port $Port --sounds-dir public/sounds --player $Player --aplay-device $AplayDevice"
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
-  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && if [ -f logs/audio-cue.pid ]; then kill `$(cat logs/audio-cue.pid) 2>/dev/null || true; fi && pkill -f '[s]idecars/dogzilla_audio_cue/server.py' 2>/dev/null || true; sleep 1; (nohup bash -lc $serverCommandQuoted > logs/audio-cue.log 2>&1 < /dev/null & echo `$! > logs/audio-cue.pid) && sleep 1 && cat logs/audio-cue.pid && tail -n 20 logs/audio-cue.log"
+  $stopCommand = @'
+python3 - <<'PY'
+import os, signal, subprocess
+try:
+    rows = subprocess.check_output(['pgrep', '-af', 'sidecars/dogzilla_audio_cue/server.py'], text=True).splitlines()
+except subprocess.CalledProcessError:
+    rows = []
+for row in rows:
+    pid = int(row.split()[0])
+    try:
+        comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
+    except OSError:
+        continue
+    if comm.startswith('python'):
+        os.kill(pid, signal.SIGTERM)
+        print(f'stopped audio cue {pid}')
+PY
+'@
+  $stopCommand = $stopCommand.Trim()
+  $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand
+  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && if [ -f logs/audio-cue.pid ]; then kill `$(cat logs/audio-cue.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/audio-cue.log 2>&1 < /dev/null & echo `$! > logs/audio-cue.pid) && sleep 1 && cat logs/audio-cue.pid && tail -n 20 logs/audio-cue.log"
   Write-Host "Starting DOGZILLA audio cue bridge on $Alias port $Port in remote background."
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
   exit $LASTEXITCODE

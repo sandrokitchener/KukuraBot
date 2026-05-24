@@ -29,9 +29,10 @@ DEFAULT_CUES = {
 
 
 class AudioState:
-    def __init__(self, sounds_dir: Path, player: str):
+    def __init__(self, sounds_dir: Path, player: str, aplay_device: str):
         self.sounds_dir = sounds_dir
         self.player = player
+        self.aplay_device = aplay_device
         self.last_cue = ""
         self.last_error = ""
         self.play_count = 0
@@ -88,6 +89,7 @@ def health_payload(state: AudioState) -> dict[str, Any]:
     return {
         "ok": bool(resolve_player(state.player)),
         "player": resolve_player(state.player) or "",
+        "aplayDevice": state.aplay_device,
         "soundsDir": str(state.sounds_dir),
         "availableCues": sorted(DEFAULT_CUES.keys()) + ["thinking-stop"],
         "lastCue": state.last_cue,
@@ -120,13 +122,22 @@ def play_cue(state: AudioState, cue: str) -> dict[str, Any]:
         stop_active(state)
 
     try:
+        command = build_play_command(player, sound_file, state.aplay_device)
         process = subprocess.Popen(
-            [player, "-q", str(sound_file)] if Path(player).name == "aplay" else [player, str(sound_file)],
+            command,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
         )
+        time.sleep(0.05)
+        if process.poll() not in (None, 0):
+            stderr = ""
+            if process.stderr:
+                stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+            state.last_error = stderr or f"Audio player exited with code {process.returncode}"
+            return {"ok": False, "cue": cue, "error": state.last_error}
+
         state.active_processes.append(process)
         state.last_cue = cue
         state.last_error = ""
@@ -135,6 +146,17 @@ def play_cue(state: AudioState, cue: str) -> dict[str, Any]:
     except Exception as error:
         state.last_error = str(error)
         return {"ok": False, "cue": cue, "error": str(error)}
+
+
+def build_play_command(player: str, sound_file: Path, aplay_device: str) -> list[str]:
+    if Path(player).name != "aplay":
+        return [player, str(sound_file)]
+
+    command = [player, "-q"]
+    if aplay_device:
+        command.extend(["-D", aplay_device])
+    command.append(str(sound_file))
+    return command
 
 
 def stop_active(state: AudioState) -> None:
@@ -160,17 +182,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=int(os.getenv("DOGZILLA_AUDIO_PORT", "8895")))
     parser.add_argument("--sounds-dir", default=os.getenv("DOGZILLA_AUDIO_SOUNDS_DIR", "public/sounds"))
     parser.add_argument("--player", default=os.getenv("DOGZILLA_AUDIO_PLAYER", "aplay"))
+    parser.add_argument("--aplay-device", default=os.getenv("DOGZILLA_AUDIO_APLAY_DEVICE", ""))
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    state = AudioState(Path(args.sounds_dir), args.player)
+    state = AudioState(Path(args.sounds_dir), args.player, args.aplay_device)
     server = ThreadingHTTPServer((args.host, args.port), AudioHandler)
     server.state = state  # type: ignore[attr-defined]
     print(f"DOGZILLA audio cue bridge listening on http://{args.host}:{args.port}", flush=True)
     print(f"Sounds: {state.sounds_dir}", flush=True)
     print(f"Player: {resolve_player(state.player) or state.player}", flush=True)
+    if state.aplay_device:
+        print(f"aplay device: {state.aplay_device}", flush=True)
     server.serve_forever()
     return 0
 
