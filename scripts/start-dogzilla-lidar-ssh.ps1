@@ -8,7 +8,7 @@ param(
   [string]$KeyPath = "$HOME\.ssh\robodoge_pi_ed25519",
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8896,
-  [string]$SerialPort = "/dev/ttyUSB0",
+  [string]$SerialPort = "/dev/ttyAMA1",
   [int]$Baudrate = 230400,
   [string]$Topic = "/scan",
   [int]$RosDomainId = 16,

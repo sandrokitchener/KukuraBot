@@ -219,7 +219,7 @@ def health_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any
             "baudrate": args.baudrate,
             "topic": args.topic,
             "frameId": scan.frame_id if scan else "",
-            "error": "" if ok else state.latest_error or "No LaserScan frame received yet.",
+            "error": "" if ok else state.latest_error or no_scan_error(args),
             "driverLog": list(state.driver_log)[-20:],
             "scanUrl": "/scan",
         }
@@ -234,7 +234,7 @@ def scan_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
         return {
             "ok": False,
             "status": "no-scan",
-            "error": error or "No LaserScan frame received yet.",
+            "error": error or no_scan_error(args),
             "points": [],
         }
 
@@ -315,6 +315,14 @@ def append_driver_log(state: LidarState, line: str) -> None:
         state.driver_log.append(line)
 
 
+def no_scan_error(args: argparse.Namespace) -> str:
+    return (
+        f"No LaserScan frame received on {args.topic}; "
+        f"driver is opening {args.serial_port} at {args.baudrate}, "
+        "but no valid scan packets have arrived."
+    )
+
+
 def positive_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed) or parsed <= 0:
@@ -326,7 +334,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="DOGZILLA ROS2 LaserScan HTTP bridge")
     parser.add_argument("--host", default=os.getenv("DOGZILLA_LIDAR_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.getenv("DOGZILLA_LIDAR_PORT", "8896")))
-    parser.add_argument("--serial-port", default=os.getenv("DOGZILLA_LIDAR_SERIAL_PORT", "/dev/ttyUSB0"))
+    parser.add_argument("--serial-port", default=os.getenv("DOGZILLA_LIDAR_SERIAL_PORT", "/dev/ttyAMA1"))
     parser.add_argument("--baudrate", type=int, default=int(os.getenv("DOGZILLA_LIDAR_BAUDRATE", "230400")))
     parser.add_argument("--topic", default=os.getenv("DOGZILLA_LIDAR_TOPIC", "/scan"))
     parser.add_argument("--frame-id", default=os.getenv("DOGZILLA_LIDAR_FRAME_ID", "laser_frame"))

@@ -14,3 +14,5 @@ Endpoints:
 - `GET /scan`
 
 The bridge runs inside the Yahboom ROS Humble Docker image because the lidar driver and `sensor_msgs` runtime live there. It starts the ORADAR MS200 driver by default and reports `no-scan` loudly if no `LaserScan` frames arrive.
+
+The default serial device is `/dev/ttyAMA1`, matching Yahboom's MS200 launch file and `run_humble.sh` device mapping on the DOGZILLA Pi image.
