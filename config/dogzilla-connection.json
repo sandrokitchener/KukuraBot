@@ -25,6 +25,16 @@
     "streamPath": "/video_feed",
     "indexPath": "/"
   },
+  "vision": {
+    "enabled": true,
+    "label": "DOGZILLA YOLO annotated camera",
+    "baseUrl": "http://10.0.4.32:8894",
+    "port": 8894,
+    "streamPath": "/stream.mjpg",
+    "statusPath": "/healthz",
+    "detectionsPath": "/detections",
+    "modelRemotePath": "/home/pi/robodoge/models/dogzilla_yolo/best.onnx"
+  },
   "notes": [
     "DOGZILLA is reserved on eeroWiFi at 10.0.4.32. Hotspot fallback IP was 192.168.8.88.",
     "Use direct bridge for first dry-run hardware tests; use ROS2 bridge after the vendor ROS2 graph is verified."

@@ -24,6 +24,27 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.camera.proxyStatusPath, '/api/dogzilla/camera/status')
   assert.equal(config.camera.controlPort, 6000)
   assert.equal(config.camera.wakeCommand, '$010F040115#')
+  assert.equal(config.vision.enabled, false)
+  assert.equal(config.vision.streamUrl, 'http://192.168.8.88:8894/stream.mjpg')
+})
+
+test('normalizeDogzillaConnectionConfig can route camera through YOLO vision sidecar', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+    },
+    vision: {
+      enabled: true,
+    },
+  })
+
+  assert.equal(config.vision.enabled, true)
+  assert.equal(config.vision.statusUrl, 'http://192.168.8.88:8894/healthz')
+  assert.equal(config.camera.processed, true)
+  assert.equal(config.camera.streamUrl, 'http://192.168.8.88:8894/stream.mjpg')
+  assert.equal(config.camera.sourceStreamUrl, 'http://192.168.8.88:6500/video_feed')
+  assert.equal(config.camera.controlPort, undefined)
+  assert.equal(config.camera.wakeCommand, undefined)
 })
 
 test('buildDogzillaActionPlan allowlists start-direct background bridge script', () => {

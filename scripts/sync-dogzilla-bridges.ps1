@@ -32,6 +32,7 @@ Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $mkdirCo
 $directories = @(
   @{ Source = "sidecars\ros2_bridge"; Destination = "$RemoteRoot/sidecars/" },
   @{ Source = "sidecars\dogzilla_lib_bridge"; Destination = "$RemoteRoot/sidecars/" },
+  @{ Source = "sidecars\dogzilla_yolo_vision"; Destination = "$RemoteRoot/sidecars/" },
   @{ Source = "ros2\dogzilla_bridge"; Destination = "$RemoteRoot/ros2/" }
 )
 
