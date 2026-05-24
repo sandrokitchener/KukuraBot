@@ -23,7 +23,10 @@ DEFAULT_CUES = {
         "robot-think-pant-1.wav",
     ],
     "confirm": [
-        "robot-bark-synthetic.wav",
+        "robot-bark-normal-092.wav",
+        "robot-bark-normal-097.wav",
+        "robot-bark-normal-103.wav",
+        "robot-bark-normal-108.wav",
     ],
 }
 

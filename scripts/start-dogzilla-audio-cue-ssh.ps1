@@ -9,7 +9,7 @@ param(
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8895,
   [string]$Player = "aplay",
-  [string]$AplayDevice = "plughw:2,0",
+  [string]$AplayDevice = "default",
   [switch]$Background,
   [switch]$NoHostKeyScan
 )
@@ -53,6 +53,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_audio_cue/server.py --host 0.0.0.0 --port $Port --sounds-dir public/sounds --player $Player --aplay-device $AplayDevice"
+$audioSetupCommand = "amixer -c 2 set Speaker 100% unmute 2>/dev/null || true; pactl set-sink-mute @DEFAULT_SINK@ 0 2>/dev/null || true; pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true"
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
@@ -76,12 +77,12 @@ PY
 '@
   $stopCommand = $stopCommand.Trim()
   $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand
-  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && if [ -f logs/audio-cue.pid ]; then kill `$(cat logs/audio-cue.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/audio-cue.log 2>&1 < /dev/null & echo `$! > logs/audio-cue.pid) && sleep 1 && cat logs/audio-cue.pid && tail -n 20 logs/audio-cue.log"
+  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && $audioSetupCommand && if [ -f logs/audio-cue.pid ]; then kill `$(cat logs/audio-cue.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/audio-cue.log 2>&1 < /dev/null & echo `$! > logs/audio-cue.pid) && sleep 1 && cat logs/audio-cue.pid && tail -n 20 logs/audio-cue.log"
   Write-Host "Starting DOGZILLA audio cue bridge on $Alias port $Port in remote background."
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
   exit $LASTEXITCODE
 }
 
-$remoteCommand = "cd $remoteRootQuoted && $serverCommand"
+$remoteCommand = "cd $remoteRootQuoted && $audioSetupCommand && $serverCommand"
 Write-Host "Starting DOGZILLA audio cue bridge on $Alias port $Port. This SSH session stays attached."
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
