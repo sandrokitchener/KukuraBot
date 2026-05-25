@@ -62,6 +62,121 @@
             "Avoid making the target the room center if turning space is tighter near the bed."
           ]
         },
+        "front_door": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.35,
+          "physicalSpot": "Staging bubble near the front door threshold",
+          "anchorHint": "Measure from the door jamb or a permanent entry-floor seam",
+          "verified": false,
+          "notes": [
+            "Placeholder. Keep the target just inside or outside the threshold, not on the swing path.",
+            "Verify threshold clearance before live navigation."
+          ]
+        },
+        "master_bedroom": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.25,
+          "physicalSpot": "Open standby bubble near the master bedroom entry",
+          "anchorHint": "Measure from the doorway frame or a fixed bed corner",
+          "verified": false,
+          "notes": [
+            "Placeholder. Bias away from rugs, doors, and bedside clutter."
+          ]
+        },
+        "game_room": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.3,
+          "physicalSpot": "Open game-room parking bubble",
+          "anchorHint": "Measure from a wall corner or built-in cabinet, not movable furniture",
+          "verified": false,
+          "notes": [
+            "Placeholder. Pick a spot with enough turn-in-place clearance."
+          ]
+        },
+        "guest_room": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.25,
+          "physicalSpot": "Guest-room standby bubble near the doorway",
+          "anchorHint": "Measure from the doorway frame or closet wall corner",
+          "verified": false,
+          "notes": [
+            "Placeholder. Confirm door swing and bed clearance before live use."
+          ]
+        },
+        "upstairs": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.4,
+          "physicalSpot": "Safe staging bubble near the upstairs landing",
+          "anchorHint": "Measure from a fixed landing wall or stair rail post",
+          "verified": false,
+          "notes": [
+            "Placeholder. Do not use near stairs until localization and no-go zones are verified.",
+            "Use as a semantic staging target, not stair traversal."
+          ]
+        },
+        "downstairs": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.4,
+          "physicalSpot": "Safe staging bubble near the downstairs landing",
+          "anchorHint": "Measure from a fixed landing wall or stair rail post",
+          "verified": false,
+          "notes": [
+            "Placeholder. Do not use near stairs until localization and no-go zones are verified.",
+            "Use as a semantic staging target, not stair traversal."
+          ]
+        },
+        "office": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.25,
+          "physicalSpot": "Office standby bubble clear of chair wheels and cables",
+          "anchorHint": "Measure from a desk leg only if fixed; prefer a wall corner",
+          "verified": false,
+          "notes": [
+            "Placeholder. Keep away from loose cables and rolling chairs."
+          ]
+        },
+        "baby_room": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 0.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "arrivalToleranceMeters": 0.25,
+          "physicalSpot": "Quiet standby bubble near the baby room entry",
+          "anchorHint": "Measure from the doorway frame or a fixed wall corner",
+          "verified": false,
+          "notes": [
+            "Placeholder. Keep behavior conservative and avoid tight furniture paths."
+          ]
+        },
         "current_position": {
           "kind": "special",
           "mode": "stay_put",
@@ -77,6 +192,14 @@
           "notes": [
             "Placeholder for speaker or operator-relative behavior.",
             "Keep this semantic target separate from map poses so follow mode can evolve independently of fixed waypoints."
+          ]
+        },
+        "user": {
+          "kind": "special",
+          "mode": "operator_source",
+          "verified": false,
+          "notes": [
+            "Alias for source when the user asks the dog to return to or follow them."
           ]
         }
       }

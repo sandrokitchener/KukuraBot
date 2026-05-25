@@ -56,6 +56,33 @@ Observed stack:
 - Opening the vendor `/video_feed` stream can monopolize or hang the vendor Flask app. The Robo-Doge UI now lazy-loads the stream only while the Camera tab is active.
 - Running the Docker ROS2 mapping/navigation stack would require device mounts and launch testing. Ask before changing/running anything beyond read-only inspection.
 
+## Current Lidar Observability
+
+The Robo-Doge lidar bridge now exposes explicit no-motion diagnostics:
+
+```text
+GET http://<dogzilla-ip>:8896/healthz
+GET http://<dogzilla-ip>:8896/scan
+GET http://<dogzilla-ip>:8896/diagnostics
+```
+
+`/diagnostics` reports:
+
+- active driver choice (`oradar` or `ydlidar`)
+- serial path, permissions, `/dev/serial/by-id`, `/dev/serial/by-path`, and USB metadata when available
+- ROS publisher/subscriber graph for `/scan`
+- received frame count and latest frame age
+- driver log tail
+- next read-only checks
+
+Read-only Windows probe:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\probe-dogzilla-lidar.ps1 -Host <DOGZILLA_IP>
+```
+
+The probe hits bridge HTTP endpoints, then uses SSH only for read-only device/process/log checks.
+
 ## Integration Plan
 
 1. Keep current `/state` battery/IMU feed live in the app.

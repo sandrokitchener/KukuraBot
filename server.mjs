@@ -14,6 +14,7 @@ import {
   sendDogzillaAudioCue,
 } from './lib/dogzilla-audio-cue-client.mjs'
 import {
+  getDogzillaLidarDiagnostics,
   getDogzillaLidarHealth,
   getDogzillaLidarScan,
 } from './lib/dogzilla-lidar-client.mjs'
@@ -34,6 +35,7 @@ import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
 import { buildRobotRuntimePreview } from './lib/robot-command-compiler.mjs'
 import {
+  dispatchRobotEmergencyStop,
   dispatchRobotCommand,
   fetchRobotBridgeState,
   getRobotRuntimeFeedback,
@@ -159,6 +161,10 @@ const server = createServer(async (request, response) => {
       const result = await getDogzillaLidarScan()
       const statusCode = result.ok ? 200 : result.status === 'disabled' ? 404 : 502
       return sendJson(response, statusCode, result)
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/diagnostics') {
+      return sendJson(response, 200, await getDogzillaLidarDiagnostics())
     }
 
     if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STATUS_PATH) {
@@ -350,6 +356,13 @@ const server = createServer(async (request, response) => {
       const dispatch = await dispatchRobotCommand(preview)
       const statusCode = dispatch.status === 'error' ? 502 : 200
       return sendJson(response, statusCode, { preview, dispatch })
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/robot/stop') {
+      await readJsonBody(request)
+      const dispatch = await dispatchRobotEmergencyStop()
+      const statusCode = dispatch.status === 'error' ? 502 : 200
+      return sendJson(response, statusCode, { action: 'stop', dispatch })
     }
 
     if (request.method === 'GET') {

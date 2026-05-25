@@ -570,6 +570,21 @@ body {
   padding-inline: 10px;
 }
 
+.danger-button {
+  border-color: #9f1f1f;
+  background: #8f1f1f;
+  color: #fff8f2;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #721717;
+}
+
+.emergency-stop-row {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
 .connection-url-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1519,6 +1534,7 @@ html.android-app .console-layout {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
+  touch-action: pan-y;
 }
 
 html.android-app .control-rail {
@@ -1530,8 +1546,6 @@ html.android-app .robot-state-panel,
 html.android-app .robot-map-panel,
 html.android-app .robot-camera-panel,
 html.android-app .output-panel,
-html.android-app .settings-drawer,
-html.android-app .connection-drawer,
 html.android-app .settings-panel,
 html.android-app .connection-panel,
 html.android-app .runtime-panel,
@@ -1737,6 +1751,11 @@ html.android-app .settings-drawer {
   right: 14px;
   width: calc(100vw - 28px);
   max-height: calc(100vh - 80px);
+  z-index: 30;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 18px 42px rgba(35, 28, 22, 0.22);
 }
 
 html.android-app .connection-drawer {
@@ -1744,4 +1763,9 @@ html.android-app .connection-drawer {
   right: 14px;
   width: calc(100vw - 28px);
   max-height: calc(100vh - 80px);
+  z-index: 30;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 18px 42px rgba(35, 28, 22, 0.22);
 }

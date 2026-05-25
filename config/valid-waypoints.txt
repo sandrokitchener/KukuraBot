@@ -2,8 +2,12 @@
 - garage
 - current_position
 - source
-- front door
-- master bedroom
-- game room
-- guest room
+- front_door
+- master_bedroom
+- game_room
+- guest_room
 - user
+- upstairs
+- downstairs
+- office
+- baby_room

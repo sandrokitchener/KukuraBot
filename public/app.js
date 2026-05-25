@@ -29,6 +29,8 @@ const robotTargetLockNote = document.querySelector('#robot-target-lock-note')
 const robotTargetStatus = document.querySelector('#robot-target-status')
 const testRobotSitButton = document.querySelector('#test-robot-sit-button')
 const robotSitTestStatus = document.querySelector('#robot-sit-test-status')
+const emergencyStopButton = document.querySelector('#emergency-stop-button')
+const emergencyStopStatus = document.querySelector('#emergency-stop-status')
 const backendUrlInput = document.querySelector('#backend-url-input')
 const saveBackendButton = document.querySelector('#save-backend-button')
 const backendStatus = document.querySelector('#backend-status')
@@ -109,6 +111,11 @@ const THINKING_CUE_URLS = [
 const ANDROID_LOCAL_MODEL_PROVIDER = 'llama-cpp-http'
 const MOBILE_VIEWS = ['robot', 'chat', 'audio']
 const MOBILE_DEFAULT_VIEW = 'chat'
+const MOBILE_SWIPE_INTENT_PX = 14
+const MOBILE_SWIPE_MIN_PX = 34
+const MOBILE_SWIPE_MAX_MS = 1200
+const MOBILE_SWIPE_HORIZONTAL_RATIO = 1.05
+const MOBILE_SWIPE_VERTICAL_CANCEL_RATIO = 1.2
 const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
 const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   silenceDurationMs: 500,
@@ -212,7 +219,7 @@ let runtimeConfig = {
 let dogzillaConnection = null
 let speechController = null
 let mobileView = MOBILE_DEFAULT_VIEW
-let touchStart = null
+let mobileTouch = null
 const isaacCompletionState = {
   initialized: false,
   lastEventId: null,
@@ -226,6 +233,7 @@ saveProfileButton.addEventListener('click', handleProfileSave)
 saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
 testRobotSitButton.addEventListener('click', handleRobotSitTest)
+emergencyStopButton.addEventListener('click', handleEmergencyStop)
 saveBackendButton.addEventListener('click', handleBackendSave)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 connectionToggle.addEventListener('click', handleConnectionToggle)
@@ -252,7 +260,9 @@ function initAndroidAppShell() {
   document.documentElement.classList.add('android-app')
   setMobileView(MOBILE_DEFAULT_VIEW)
   document.addEventListener('touchstart', handleMobileTouchStart, { passive: true })
+  document.addEventListener('touchmove', handleMobileTouchMove, { passive: false })
   document.addEventListener('touchend', handleMobileTouchEnd, { passive: true })
+  document.addEventListener('touchcancel', handleMobileTouchCancel, { passive: true })
 }
 
 function isAndroidAppShell() {
@@ -261,31 +271,68 @@ function isAndroidAppShell() {
 }
 
 function handleMobileTouchStart(event) {
-  if (!document.documentElement.classList.contains('android-app') || isInteractiveTarget(event.target)) {
-    touchStart = null
+  if (
+    !document.documentElement.classList.contains('android-app') ||
+    isSwipeBlockedTarget(event.target) ||
+    event.touches?.length > 1
+  ) {
+    mobileTouch = null
     return
   }
 
-  const touch = event.changedTouches?.[0]
-  touchStart = touch
+  const touch = event.changedTouches?.[0] || event.touches?.[0]
+  mobileTouch = touch
     ? {
+      id: touch.identifier,
       x: touch.clientX,
       y: touch.clientY,
       at: Date.now(),
+      horizontal: false,
+      canceled: false,
     }
     : null
 }
 
-function handleMobileTouchEnd(event) {
-  if (!touchStart) {
+function handleMobileTouchMove(event) {
+  if (!mobileTouch || mobileTouch.canceled) {
     return
   }
 
-  const touch = event.changedTouches?.[0]
-  const start = touchStart
-  touchStart = null
-
+  const touch = findTouchById(event.changedTouches, mobileTouch.id) ||
+    findTouchById(event.touches, mobileTouch.id)
   if (!touch) {
+    return
+  }
+
+  const deltaX = touch.clientX - mobileTouch.x
+  const deltaY = touch.clientY - mobileTouch.y
+  const absX = Math.abs(deltaX)
+  const absY = Math.abs(deltaY)
+
+  if (!mobileTouch.horizontal) {
+    if (absY >= MOBILE_SWIPE_INTENT_PX && absY > absX * MOBILE_SWIPE_VERTICAL_CANCEL_RATIO) {
+      mobileTouch.canceled = true
+      return
+    }
+
+    mobileTouch.horizontal = absX >= MOBILE_SWIPE_INTENT_PX && absX > absY * MOBILE_SWIPE_HORIZONTAL_RATIO
+  }
+
+  if (mobileTouch.horizontal) {
+    event.preventDefault()
+  }
+}
+
+function handleMobileTouchEnd(event) {
+  if (!mobileTouch) {
+    return
+  }
+
+  const touch = findTouchById(event.changedTouches, mobileTouch.id)
+  const start = mobileTouch
+  mobileTouch = null
+
+  if (!touch || start.canceled) {
     return
   }
 
@@ -293,7 +340,11 @@ function handleMobileTouchEnd(event) {
   const deltaY = touch.clientY - start.y
   const elapsedMs = Date.now() - start.at
 
-  if (elapsedMs > 700 || Math.abs(deltaX) < 58 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) {
+  if (
+    elapsedMs > MOBILE_SWIPE_MAX_MS ||
+    Math.abs(deltaX) < MOBILE_SWIPE_MIN_PX ||
+    Math.abs(deltaX) < Math.abs(deltaY) * MOBILE_SWIPE_HORIZONTAL_RATIO
+  ) {
     return
   }
 
@@ -304,13 +355,28 @@ function handleMobileTouchEnd(event) {
   setMobileView(MOBILE_VIEWS[nextIndex])
 }
 
+function handleMobileTouchCancel() {
+  mobileTouch = null
+}
+
 function setMobileView(view) {
   mobileView = MOBILE_VIEWS.includes(view) ? view : MOBILE_DEFAULT_VIEW
   document.documentElement.dataset.mobileView = mobileView
 }
 
-function isInteractiveTarget(target) {
-  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .output-scroll, .settings-drawer')
+function isSwipeBlockedTarget(target) {
+  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .settings-drawer, .connection-drawer')
+}
+
+function findTouchById(touchList, id) {
+  for (let index = 0; index < (touchList?.length || 0); index += 1) {
+    const touch = touchList[index]
+    if (touch.identifier === id) {
+      return touch
+    }
+  }
+
+  return null
 }
 
 async function boot() {
@@ -696,6 +762,43 @@ async function handleRobotSitTest() {
   }
 }
 
+async function handleEmergencyStop() {
+  emergencyStopButton.disabled = true
+  emergencyStopStatus.textContent = 'Sending stop...'
+  setStatus('Sending emergency stop.', 'busy')
+
+  try {
+    const response = await apiFetch('/api/robot/stop', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'stop' }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok || payload.dispatch?.status === 'error') {
+      throw new Error(payload.dispatch?.error || payload.error || 'Emergency stop failed.')
+    }
+
+    const summary = formatEmergencyStopSummary(payload.dispatch)
+    emergencyStopStatus.textContent = summary
+    runtimeFeedbackOutput.textContent = JSON.stringify({
+      emergencyStop: payload,
+    }, null, 2)
+    setRuntimeFeedbackStatus(summary, false)
+    setStatus(summary)
+    await refreshRobotFeedback()
+    await refreshRobotState()
+  } catch (error) {
+    const message = formatError(error)
+    emergencyStopStatus.textContent = message
+    setStatus(message, 'error')
+  } finally {
+    emergencyStopButton.disabled = false
+  }
+}
+
 async function handleBackendSave() {
   saveBackendButton.disabled = true
   backendUrlInput.disabled = true
@@ -900,7 +1003,10 @@ async function refreshDogzillaLidarScan() {
     const payload = await response.json()
 
     if (!response.ok || payload.ok !== true) {
-      throw new Error(payload.error || 'Lidar scan unavailable.')
+      clearLidarScan()
+      robotLidarSummary = formatLidarFailureSummary(payload)
+      setRobotMapMeta(robotMapBaseMeta)
+      return
     }
 
     renderLidarScan(payload)
@@ -1043,8 +1149,8 @@ async function handleDogzillaConnectionAction(event) {
     connectionOutput.textContent = formatDogzillaActionOutput(payload)
     setStatus(`DOGZILLA ${formatConnectionAction(action)} ${payload.status}.`)
 
-    if (action === 'probe-bridges') {
-      renderBridgeProbe(payload)
+    if (action === 'probe-bridges' || action === 'probe-support') {
+      renderServiceProbe(payload)
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
@@ -1104,13 +1210,11 @@ function renderDogzillaConnection(payload) {
     : 'Set DOGZILLA IP.'
 }
 
-function renderBridgeProbe(payload) {
-  const direct = payload.results?.direct
-  const ros2 = payload.results?.ros2
-  const directLabel = direct ? `Direct ${direct.status}` : 'Direct unknown'
-  const ros2Label = ros2 ? `ROS2 ${ros2.status}` : 'ROS2 unknown'
+function renderServiceProbe(payload) {
+  const labels = Object.entries(payload.results || {})
+    .map(([id, result]) => `${formatServiceName(id)} ${result?.status || 'unknown'}`)
 
-  connectionStatus.textContent = `${directLabel}. ${ros2Label}.`
+  connectionStatus.textContent = labels.length ? `${labels.join('. ')}.` : 'No service results.'
 }
 
 function renderDogzillaPreflight(payload) {
@@ -1188,12 +1292,18 @@ function formatConnectionAction(action) {
       return 'SSH check'
     case 'probe-bridges':
       return 'bridge check'
+    case 'probe-support':
+      return 'support check'
     case 'sync-bridges':
       return 'bridge sync'
     case 'start-direct':
       return 'direct bridge start'
     case 'start-ros2':
       return 'ROS2 bridge start'
+    case 'start-audio':
+      return 'audio bridge start'
+    case 'start-lidar':
+      return 'lidar bridge start'
     case 'stop-bridges':
       return 'bridge stop'
     default:
@@ -1220,7 +1330,7 @@ function formatDogzillaActionOutput(payload) {
   }
 
   if (payload.results) {
-    lines.push(`\nbridges\n${JSON.stringify(payload.results, null, 2)}`)
+    lines.push(`\nservices\n${JSON.stringify(payload.results, null, 2)}`)
   }
 
   if (payload.plan) {
@@ -1228,6 +1338,25 @@ function formatDogzillaActionOutput(payload) {
   }
 
   return lines.join('\n')
+}
+
+function formatServiceName(id) {
+  switch (id) {
+    case 'direct':
+      return 'Direct'
+    case 'ros2':
+      return 'ROS2'
+    case 'audio':
+      return 'Audio'
+    case 'lidar':
+      return 'Lidar'
+    case 'camera':
+      return 'Camera'
+    case 'vision':
+      return 'Vision'
+    default:
+      return id
+  }
 }
 
 function applyBackendControls() {
@@ -1620,6 +1749,51 @@ function formatLidarSummary(scan) {
   return `Lidar: ${points}/${rangeCount} pts, ${minText}, near F/L/R ${nearFront}/${nearLeft}/${nearRight}.`
 }
 
+function formatLidarFailureSummary(payload) {
+  const statusText = payload?.status ? String(payload.status) : 'unavailable'
+  const errorText = payload?.error ? String(payload.error) : 'scan unavailable'
+  const driverText = payload?.driver ? ` Driver ${payload.driver}.` : ''
+  const serialText = formatLidarSerialDetail(payload)
+  const rosGraph = payload?.rosGraph && typeof payload.rosGraph === 'object' ? payload.rosGraph : {}
+  const publisherCount = Number.isFinite(Number(rosGraph.publisherCount)) ? Number(rosGraph.publisherCount) : 0
+  const frameCount = Number.isFinite(Number(payload?.frames)) ? Number(payload.frames) : 0
+  const graphText = publisherCount > 0
+    ? ` ROS publishers ${publisherCount}, frames ${frameCount}.`
+    : ''
+  const driverTail = Array.isArray(payload?.driverLog) && payload.driverLog.length
+    ? ` Driver: ${payload.driverLog[payload.driverLog.length - 1]}.`
+    : ''
+
+  return `Lidar ${statusText}: ${errorText}${driverText}${serialText}${graphText}${driverTail}`
+}
+
+function formatLidarSerialDetail(payload) {
+  const serialPath = payload?.serialPort || payload?.serialDiagnostics?.path
+  if (!serialPath) {
+    return ''
+  }
+
+  const diagnostics = payload?.serialDiagnostics && typeof payload.serialDiagnostics === 'object'
+    ? payload.serialDiagnostics
+    : {}
+  const baudText = payload?.baudrate ? ` @ ${payload.baudrate}` : ''
+  const existsText = diagnostics.exists === false ? 'missing' : diagnostics.exists === true ? 'present' : ''
+  const byIdPaths = Array.isArray(diagnostics.byIdPaths) ? diagnostics.byIdPaths : []
+  const byIdName = byIdPaths.length ? byIdPaths[0].split('/').pop() : ''
+  const accessText = diagnostics.readable === true && diagnostics.writable === true
+    ? 'rw'
+    : diagnostics.readable === true
+      ? 'read-only'
+      : diagnostics.exists === true
+        ? 'no-access'
+        : ''
+  const usb = diagnostics.usb && typeof diagnostics.usb === 'object' ? diagnostics.usb : {}
+  const usbId = usb.idVendor && usb.idProduct ? `${usb.idVendor}:${usb.idProduct}` : ''
+  const detail = [existsText, byIdName, usbId, accessText].filter(Boolean).join(', ')
+
+  return ` Serial ${serialPath}${baudText}${detail ? ` (${detail})` : ''}.`
+}
+
 function setRobotMapMeta(baseMessage) {
   robotMapBaseMeta = baseMessage || ''
   robotMapMeta.textContent = [robotMapBaseMeta, robotLidarSummary].filter(Boolean).join(' ')
@@ -1831,6 +2005,9 @@ function applyRobotTargetSelectionState() {
     : 'Selection saves to config/robot-runtime.json.'
   robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
   robotSitTestStatus.textContent = runtimeConfig.robotRuntime.dryRun ? 'Ready. Dry-run on.' : 'Ready. Live enabled.'
+  emergencyStopStatus.textContent = isRealRobotTargetActive()
+    ? 'Ready.'
+    : 'Switch to a real robot target before stop can reach DOGZILLA.'
 }
 
 function formatSource(source) {
@@ -2058,6 +2235,32 @@ function formatRobotSitTestSummary(health, preview, dispatch) {
   return `${healthPrefix} Sit test ${dispatch?.status || preview?.status || 'complete'}.`
 }
 
+function formatEmergencyStopSummary(dispatch) {
+  const targetLabel = dispatch?.envelope?.targetLabel || runtimeConfig.robotRuntime.activeTarget?.label || 'robot'
+
+  if (dispatch?.status === 'sent') {
+    return `Stop sent to ${targetLabel}.`
+  }
+
+  if (dispatch?.status === 'inactive-target') {
+    return 'Stop not sent; target inactive.'
+  }
+
+  if (dispatch?.status === 'disabled') {
+    return 'Stop not sent; transport disabled.'
+  }
+
+  if (dispatch?.status === 'unsupported-transport') {
+    return 'Stop not sent; unsupported transport.'
+  }
+
+  if (dispatch?.status === 'error') {
+    return `Stop failed: ${dispatch.error || `HTTP ${dispatch.responseStatus || 'unknown'}`}.`
+  }
+
+  return `Stop ${dispatch?.status || 'complete'}.`
+}
+
 function setSpeechStatus(message, isError = false) {
   speechPanel.dataset.state = isError ? 'error' : 'ready'
   speechStatus.textContent = message
@@ -2086,11 +2289,8 @@ function playCommandCueIfNeeded(parsed) {
     return
   }
 
-  playDogzillaPiCue('confirm').catch((error) => {
-    console.warn('Pi confirm cue failed:', error)
-    return commandCuePlayer.play()
-  }).catch((error) => {
-    console.warn('Command cue fallback failed:', error)
+  playRobotConfirmCue().catch((error) => {
+    console.warn('Command cue failed:', error)
   })
 }
 
@@ -2170,15 +2370,13 @@ function startThinkingFeedback(messageNode) {
   let frame = 0
   stopThinkingCue()
   const cueToken = ++thinkingCueToken
-  playDogzillaPiCue('thinking-start').catch((error) => {
-    console.warn('Pi thinking cue failed:', error)
-    return thinkingCuePlayer.play().then((cue) => {
-      if (cueToken !== thinkingCueToken) {
-        cue?.stop?.()
-        return
-      }
-      activeThinkingCue = cue
-    })
+  playRobotThinkingCue().then((cue) => {
+    if (cueToken !== thinkingCueToken) {
+      cue?.stop?.()
+      return
+    }
+
+    activeThinkingCue = cue || null
   }).catch((error) => {
     console.warn('Thinking cue failed:', error)
   })
@@ -2206,6 +2404,24 @@ function startThinkingFeedback(messageNode) {
   }
 }
 
+async function playRobotConfirmCue() {
+  if (shouldUseDogzillaPiAudio()) {
+    await playDogzillaPiCue('confirm')
+    return null
+  }
+
+  return commandCuePlayer.play()
+}
+
+async function playRobotThinkingCue() {
+  if (shouldUseDogzillaPiAudio()) {
+    await playDogzillaPiCue('thinking-start')
+    return null
+  }
+
+  return thinkingCuePlayer.play()
+}
+
 function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
   stopThinkingCue()
 
@@ -2222,7 +2438,9 @@ function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
 
 function stopThinkingCue() {
   thinkingCueToken += 1
-  playDogzillaPiCue('thinking-stop').catch(() => {})
+  if (shouldUseDogzillaPiAudio()) {
+    playDogzillaPiCue('thinking-stop').catch(() => {})
+  }
 
   if (activeThinkingCue) {
     activeThinkingCue.stop()
@@ -2231,6 +2449,10 @@ function stopThinkingCue() {
   }
 
   thinkingCuePlayer.stopAll()
+}
+
+function shouldUseDogzillaPiAudio() {
+  return runtimeConfig.dogzilla?.audio?.enabled === true
 }
 
 async function playDogzillaPiCue(cue) {

@@ -27,6 +27,70 @@
             "Bedroom waypoint lives inside the current local room scene."
           ]
         },
+        "front_door": {
+          "position": [0.0, 1.55, 0.0],
+          "yawDegrees": 0.0,
+          "verified": false,
+          "notes": [
+            "Placeholder threshold staging target for semantic parity with the real map."
+          ]
+        },
+        "master_bedroom": {
+          "position": [1.5, 1.55, 0.0],
+          "yawDegrees": 180.0,
+          "verified": false,
+          "notes": [
+            "Placeholder semantic target in the proxy scene."
+          ]
+        },
+        "game_room": {
+          "position": [-1.55, -1.15, 0.0],
+          "yawDegrees": 30.0,
+          "verified": false,
+          "notes": [
+            "Placeholder semantic target in the proxy scene."
+          ]
+        },
+        "guest_room": {
+          "position": [1.45, -1.25, 0.0],
+          "yawDegrees": -150.0,
+          "verified": false,
+          "notes": [
+            "Placeholder semantic target in the proxy scene."
+          ]
+        },
+        "upstairs": {
+          "position": [-0.85, 1.85, 0.0],
+          "yawDegrees": 90.0,
+          "verified": false,
+          "notes": [
+            "Landing staging placeholder only. Do not model stair traversal from this target."
+          ]
+        },
+        "downstairs": {
+          "position": [0.85, -1.85, 0.0],
+          "yawDegrees": -90.0,
+          "verified": false,
+          "notes": [
+            "Landing staging placeholder only. Do not model stair traversal from this target."
+          ]
+        },
+        "office": {
+          "position": [-1.75, 0.85, 0.0],
+          "yawDegrees": 45.0,
+          "verified": false,
+          "notes": [
+            "Placeholder semantic target in the proxy scene."
+          ]
+        },
+        "baby_room": {
+          "position": [1.75, 0.85, 0.0],
+          "yawDegrees": 135.0,
+          "verified": false,
+          "notes": [
+            "Placeholder semantic target in the proxy scene."
+          ]
+        },
         "front_pad": {
           "position": [0.0, 1.95, 0.0],
           "yawDegrees": 0.0,
@@ -52,6 +116,10 @@
           "verified": true
         },
         "source": {
+          "special": "operator_source",
+          "verified": false
+        },
+        "user": {
           "special": "operator_source",
           "verified": false
         }

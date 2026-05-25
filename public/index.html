@@ -241,9 +241,12 @@
           <div class="bridge-action-grid">
             <button type="button" data-connection-action="check-ssh">Check SSH</button>
             <button type="button" data-connection-action="probe-bridges">Check bridges</button>
+            <button type="button" data-connection-action="probe-support">Check support</button>
             <button type="button" data-connection-action="sync-bridges">Sync code</button>
             <button type="button" data-connection-action="start-direct">Start direct dry-run</button>
             <button type="button" data-connection-action="start-ros2">Start ROS2</button>
+            <button type="button" data-connection-action="start-audio">Start audio</button>
+            <button type="button" data-connection-action="start-lidar">Start lidar</button>
             <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
           </div>
           <div class="connection-url-grid">
@@ -365,6 +368,13 @@
             <button id="test-robot-sit-button" type="button">Send sit</button>
           </div>
           <div id="robot-sit-test-status" class="settings-status">Ready.</div>
+
+          <div class="settings-row emergency-stop-row">
+            <label for="emergency-stop-button">Safety</label>
+            <div class="settings-static-field">stop</div>
+            <button id="emergency-stop-button" class="danger-button" type="button">Emergency stop</button>
+          </div>
+          <div id="emergency-stop-status" class="settings-status">Ready.</div>
 
           <div class="settings-row">
             <label for="speech-profile-select">Speech profile</label>

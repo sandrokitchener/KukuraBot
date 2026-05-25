@@ -70,3 +70,34 @@ test('buildDogzillaActionPlan allowlists start-direct background bridge script',
   assert.ok(plan.args.includes('-Bridge'))
   assert.ok(plan.args.includes('direct'))
 })
+
+test('buildDogzillaActionPlan starts audio and lidar support services independently', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+    audio: {
+      enabled: true,
+      port: 8895,
+    },
+    lidar: {
+      enabled: true,
+      port: 8896,
+    },
+  })
+
+  const audioPlan = buildDogzillaActionPlan('start-audio', config)
+  const lidarPlan = buildDogzillaActionPlan('start-lidar', config)
+
+  assert.ok(audioPlan.args.some((arg) => arg.endsWith('start-dogzilla-audio-cue-ssh.ps1')))
+  assert.ok(audioPlan.args.includes('-Port'))
+  assert.ok(audioPlan.args.includes('8895'))
+  assert.ok(audioPlan.args.includes('-Background'))
+  assert.ok(lidarPlan.args.some((arg) => arg.endsWith('start-dogzilla-lidar-ssh.ps1')))
+  assert.ok(lidarPlan.args.includes('-Port'))
+  assert.ok(lidarPlan.args.includes('8896'))
+  assert.ok(lidarPlan.args.includes('-Background'))
+})

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { probeRobotSidecarHealth } from '../lib/robot-sidecar-client.mjs'
+import { probeRobotSidecarHealth, sendRobotEmergencyStop } from '../lib/robot-sidecar-client.mjs'
 
 test('probeRobotSidecarHealth reports degraded when bridge body says ok false', async () => {
   const originalFetch = globalThis.fetch
@@ -39,6 +39,60 @@ test('probeRobotSidecarHealth reports degraded when bridge body says ok false', 
 
     assert.equal(health.status, 'degraded')
     assert.equal(health.responseStatus, 200)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sendRobotEmergencyStop posts a stop action even when runtime dry-run is enabled', async () => {
+  const originalFetch = globalThis.fetch
+  let requestBody = null
+  globalThis.fetch = async (_url, options) => {
+    requestBody = JSON.parse(options.body)
+    return {
+      ok: true,
+      status: 202,
+      async json() {
+        return { accepted: true }
+      },
+    }
+  }
+
+  try {
+    const result = await sendRobotEmergencyStop(
+      {
+        dryRun: true,
+        robotId: 'dogzilla-local',
+        robotModel: 'dogzilla-s2',
+        activeTarget: {
+          id: 'ros2_real',
+          kind: 'ros2-bridge',
+          label: 'ROS2 Real Robot',
+        },
+      },
+      {
+        bridge: {
+          commandPlanTopic: '/dogzilla/command_plan',
+        },
+        topics: {
+          state: '/dogzilla/state',
+        },
+        transport: {
+          kind: 'http',
+          enabled: true,
+          dryRun: true,
+          baseUrl: 'http://192.168.8.88:8892',
+          commandsPath: '/commands',
+          timeoutMs: 1000,
+        },
+      },
+    )
+
+    assert.equal(result.status, 'sent')
+    assert.equal(requestBody.action, 'stop')
+    assert.equal(requestBody.envelope.action, 'stop')
+    assert.equal(requestBody.envelope.canonicalPlan.kind, 'noop')
+    assert.equal(requestBody.envelope.canonicalPlan.params.reason, 'emergency_stop')
   } finally {
     globalThis.fetch = originalFetch
   }

@@ -4,6 +4,7 @@ import { once } from 'node:events'
 import test from 'node:test'
 
 import {
+  getDogzillaLidarDiagnostics,
   getDogzillaLidarHealth,
   getDogzillaLidarScan,
 } from '../lib/dogzilla-lidar-client.mjs'
@@ -54,6 +55,101 @@ test('getDogzillaLidarHealth reports disabled config loudly', async () => {
   assert.equal(result.ok, false)
   assert.equal(result.status, 'disabled')
   assert.match(result.detail, /not configured/)
+})
+
+test('getDogzillaLidarScan preserves no-scan diagnostics from the bridge', async () => {
+  const server = createServer((request, response) => {
+    response.writeHead(503, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      ok: false,
+      status: 'no-scan',
+      error: '/scan is advertised but no frames arrived.',
+      frames: 0,
+      serialPort: '/dev/ttyAMA1',
+      serialDiagnostics: {
+        path: '/dev/ttyAMA1',
+        exists: true,
+        realPath: '/dev/ttyAMA1',
+        byIdPaths: [],
+        readable: true,
+        writable: true,
+      },
+      rosGraph: {
+        publisherCount: 1,
+      },
+      points: [],
+    }))
+  })
+
+  await listen(server)
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const result = await getDogzillaLidarScan({
+      config: {
+        lidar: {
+          enabled: true,
+          scanUrl: `${baseUrl}/scan`,
+        },
+      },
+      timeoutMs: 500,
+    })
+
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 'no-scan')
+    assert.equal(result.frames, 0)
+    assert.equal(result.serialDiagnostics.exists, true)
+    assert.equal(result.rosGraph.publisherCount, 1)
+    assert.match(result.error, /no frames/i)
+  } finally {
+    await close(server)
+  }
+})
+
+test('getDogzillaLidarDiagnostics reads explicit diagnostics endpoint', async () => {
+  const server = createServer((request, response) => {
+    assert.equal(request.url, '/diagnostics')
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      ok: false,
+      status: 'no-scan',
+      driver: 'oradar',
+      serialDiagnostics: {
+        path: '/dev/ttyAMA1',
+        exists: true,
+      },
+      rosGraph: {
+        publisherCount: 1,
+      },
+      nextChecks: [
+        '/scan is advertised but no frames arrived.',
+      ],
+    }))
+  })
+
+  await listen(server)
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const result = await getDogzillaLidarDiagnostics({
+      config: {
+        lidar: {
+          enabled: true,
+          diagnosticsUrl: `${baseUrl}/diagnostics`,
+        },
+      },
+      timeoutMs: 500,
+    })
+
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 'no-scan')
+    assert.equal(result.driver, 'oradar')
+    assert.equal(result.serialDiagnostics.exists, true)
+    assert.equal(result.rosGraph.publisherCount, 1)
+    assert.match(result.nextChecks[0], /no frames/i)
+  } finally {
+    await close(server)
+  }
 })
 
 async function listen(server) {

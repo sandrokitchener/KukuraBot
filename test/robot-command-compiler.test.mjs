@@ -89,6 +89,68 @@ test('compileRobotRuntimePreview maps move command to named waypoint goto plan',
   assert.equal(preview.payload.planTopic, '/dogzilla/command_plan')
 })
 
+test('compileRobotRuntimePreview normalizes space-separated waypoint names', () => {
+  const preview = compileRobotRuntimePreview({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'front door',
+      },
+    },
+    runtimeConfig: {
+      enabled: true,
+      dryRun: true,
+      activeTarget: {
+        id: 'ros2_real',
+        kind: 'ros2-bridge',
+        label: 'ROS2 Real Robot',
+      },
+    },
+    ros2Config: {
+      bridge: {},
+      topics: {},
+      transport: {},
+      feedback: {},
+    },
+    waypointConfig: {
+      activeSet: 'home',
+      sets: {
+        home: {
+          waypoints: {
+            front_door: {
+              kind: 'map_pose',
+              frame: 'map',
+              x: 0,
+              y: 0,
+              yaw: 0,
+              arrivalToleranceMeters: 0.35,
+              verified: false,
+            },
+          },
+        },
+      },
+    },
+    actionConfig: {
+      activeMap: 'default',
+      maps: {
+        default: {
+          tricks: {},
+        },
+      },
+    },
+    motionConfig: {
+      activeProfile: 'default',
+      profiles: {
+        default: {},
+      },
+    },
+  })
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.resolutions.waypoint.normalizedName, 'front_door')
+  assert.equal(preview.canonicalPlan.params.waypoint, 'front_door')
+})
+
 test('compileRobotRuntimePreview rejects trick actions without verified numeric ids', () => {
   const preview = compileRobotRuntimePreview({
     source: {
