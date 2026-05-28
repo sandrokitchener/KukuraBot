@@ -154,6 +154,12 @@ body {
   font-size: 0.86rem;
 }
 
+.rail-icon-button {
+  padding: 0;
+  min-height: 34px;
+  cursor: pointer;
+}
+
 .rail-icon.is-active {
   border-color: rgba(255, 123, 86, 0.8);
   background: var(--accent);
@@ -165,6 +171,38 @@ body {
   border-color: rgba(255, 123, 86, 0.55);
   background: rgba(255, 123, 86, 0.18);
   color: #ffb399;
+}
+
+.camera-rail-icon {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+}
+
+.camera-rail-icon::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: -5px;
+  width: 8px;
+  height: 4px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+}
+
+.camera-rail-icon span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .rail-spacer {
@@ -194,7 +232,8 @@ body {
 }
 
 .connection-drawer,
-.settings-drawer {
+.settings-drawer,
+.recon-gallery-drawer {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -228,7 +267,7 @@ body {
 
 .robot-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 42px;
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -288,7 +327,7 @@ body {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto minmax(72px, auto);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   min-height: 238px;
 }
@@ -466,7 +505,8 @@ body {
 }
 
 .settings-drawer,
-.connection-drawer {
+.connection-drawer,
+.recon-gallery-drawer {
   position: fixed;
   z-index: 15;
   top: 78px;
@@ -482,8 +522,13 @@ body {
   width: min(560px, calc(100vw - 68px));
 }
 
+.recon-gallery-drawer {
+  width: min(680px, calc(100vw - 68px));
+}
+
 .settings-drawer[hidden],
 .connection-drawer[hidden],
+.recon-gallery-drawer[hidden],
 .robot-map-panel[hidden],
 .robot-camera-panel[hidden] {
   display: none;
@@ -506,6 +551,7 @@ body {
 }
 
 .connection-drawer > * + *,
+.recon-gallery-drawer > * + *,
 .connection-panel > * + *,
 .settings-drawer > * + *,
 .settings-panel > * + *,
@@ -515,12 +561,49 @@ body {
 }
 
 .connection-drawer-head,
+.recon-gallery-head,
 .bridge-head,
 .manual-control-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.recon-gallery-head {
+  align-items: flex-start;
+}
+
+.recon-gallery-head p {
+  margin: 4px 0 0;
+}
+
+.recon-gallery-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.drawer-close-button {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff8ef;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.recon-gallery-status {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+.recon-gallery-status[data-state='error'] {
+  color: var(--danger);
 }
 
 .connection-chip {
@@ -1265,27 +1348,44 @@ select {
   padding: 6px 10px;
 }
 
-.snapshot-note-row {
-  min-width: 0;
+.recon-capture-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff8ef;
+}
+
+.recon-capture-panel label {
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .snapshot-note-input {
-  min-height: 34px;
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+}
+
+.recon-capture-panel .snapshot-button {
+  justify-self: start;
 }
 
 .recon-snapshot-list {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
   min-width: 0;
-  min-height: 72px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  min-height: 120px;
+  max-height: calc(100vh - 360px);
+  overflow-y: auto;
+  padding-right: 4px;
   scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
 }
 
 .recon-snapshot-empty,
 .recon-snapshot-item {
-  flex: 0 0 min(260px, 84%);
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #f3eee6;
@@ -1294,33 +1394,34 @@ select {
 .recon-snapshot-empty {
   display: grid;
   place-items: center;
-  min-height: 68px;
-  padding: 10px;
+  min-height: 110px;
+  padding: 14px;
   color: var(--ink-soft);
   font-size: 0.84rem;
 }
 
 .recon-snapshot-item {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
-  gap: 8px;
-  min-height: 72px;
-  padding: 6px;
+  grid-template-columns: minmax(140px, 170px) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 138px;
+  padding: 10px;
 }
 
 .recon-snapshot-item img {
-  width: 78px;
-  height: 58px;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  height: auto;
   object-fit: cover;
   border-radius: 4px;
   background: #201c18;
 }
 
-.recon-snapshot-item div {
+.recon-snapshot-body {
   display: grid;
-  align-content: center;
-  gap: 4px;
+  gap: 7px;
   min-width: 0;
+  align-content: start;
 }
 
 .recon-snapshot-item strong,
@@ -1340,6 +1441,25 @@ select {
 .recon-snapshot-item span {
   color: var(--ink-soft);
   font-size: 0.78rem;
+}
+
+.recon-snapshot-note-editor {
+  width: 100%;
+  min-height: 66px;
+  resize: vertical;
+  font-size: 0.82rem;
+}
+
+.recon-snapshot-save {
+  justify-self: start;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #171513;
+  color: #fffaf4;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .robot-map::before {
@@ -1665,7 +1785,8 @@ select {
   }
 
   .settings-drawer,
-  .connection-drawer {
+  .connection-drawer,
+  .recon-gallery-drawer {
     top: 66px;
     right: 10px;
     width: calc(100vw - 20px);
@@ -1686,7 +1807,7 @@ select {
   }
 
   .robot-tabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .robot-tab {
@@ -1707,9 +1828,12 @@ select {
     justify-content: space-between;
   }
 
-  .recon-snapshot-empty,
   .recon-snapshot-item {
-    flex-basis: min(250px, 90%);
+    grid-template-columns: 1fr;
+  }
+
+  .recon-snapshot-list {
+    max-height: calc(100vh - 390px);
   }
 }
 
@@ -2018,19 +2142,9 @@ html.android-app[data-mobile-view='robot'] .robot-map-panel {
   min-height: 330px;
 }
 
-html.android-app .settings-drawer {
-  top: 62px;
-  right: 14px;
-  width: calc(100vw - 28px);
-  max-height: calc(100vh - 80px);
-  z-index: 30;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--panel);
-  box-shadow: 0 18px 42px rgba(35, 28, 22, 0.22);
-}
-
-html.android-app .connection-drawer {
+html.android-app .settings-drawer,
+html.android-app .connection-drawer,
+html.android-app .recon-gallery-drawer {
   top: 62px;
   right: 14px;
   width: calc(100vw - 28px);

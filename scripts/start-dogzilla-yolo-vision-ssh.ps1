@@ -121,7 +121,9 @@ $releaseVendorCameraCommand = "true"
 if (-not $usesHttpCamera) {
   $releaseVendorCameraCommand = @'
 python3 - <<'PY'
-import os, signal, subprocess
+import os, signal, subprocess, time
+camera_source = os.environ.get('ROBO_DOGE_CAMERA_SOURCE', '')
+camera_realpath = os.path.realpath(camera_source) if camera_source else ''
 try:
     rows = subprocess.check_output(['pgrep', '-af', '/home/pi/DOGZILLA/app_dogzilla/app_dogzilla.py'], text=True).splitlines()
 except subprocess.CalledProcessError:
@@ -137,9 +139,46 @@ for row in rows:
     if comm.startswith('python'):
         os.kill(pid, signal.SIGTERM)
         print(f'stopped vendor camera app {pid}')
+camera_consumers = set()
+if camera_realpath:
+    for name in os.listdir('/proc'):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid in (os.getpid(), os.getppid()):
+            continue
+        fd_dir = f'/proc/{pid}/fd'
+        try:
+            comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
+        except OSError:
+            continue
+        if comm not in ('pipewire', 'wireplumber'):
+            continue
+        try:
+            fd_names = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd_name in fd_names:
+            try:
+                target = os.path.realpath(os.readlink(f'{fd_dir}/{fd_name}'))
+            except OSError:
+                continue
+            if target == camera_realpath:
+                camera_consumers.add((pid, comm))
+                break
+for pid, comm in sorted(camera_consumers):
+    try:
+        os.kill(pid, signal.SIGTERM)
+        print(f'stopped camera desktop consumer {comm} {pid}')
+    except ProcessLookupError:
+        pass
+if rows or camera_consumers:
+    time.sleep(1)
 PY
 '@
-  $releaseVendorCameraCommand = "bash -lc $(ConvertTo-RemoteSingleQuote $releaseVendorCameraCommand.Trim())"
+  $releaseCameraScript = ConvertTo-RemoteSingleQuote $releaseVendorCameraCommand.Trim()
+  $releaseCameraSource = ConvertTo-RemoteSingleQuote $effectiveCameraUrl
+  $releaseVendorCameraCommand = "ROBO_DOGE_CAMERA_SOURCE=$releaseCameraSource bash -lc $releaseCameraScript"
 }
 
 if ($Background) {

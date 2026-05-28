@@ -55,6 +55,7 @@ import {
   readReconSnapshotImage,
   RECON_SNAPSHOT_API_PATH,
   saveReconSnapshot,
+  updateReconSnapshotNote,
 } from './lib/recon-snapshot-store.mjs'
 import {
   getRobotStateSnapshot,
@@ -216,6 +217,22 @@ const server = createServer(async (request, response) => {
       }
 
       return sendJson(response, 201, result.snapshot)
+    }
+
+    const reconSnapshotId = matchReconSnapshotPath(requestUrl.pathname)
+    if (request.method === 'PATCH' && reconSnapshotId) {
+      const body = await readJsonBody(request)
+      try {
+        return sendJson(response, 200, await updateReconSnapshotNote(reconSnapshotId, {
+          note: body?.note,
+          tags: body?.tags,
+        }))
+      } catch (error) {
+        const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
+        return sendJson(response, statusCode, {
+          error: error instanceof Error ? error.message : 'Could not update recon snapshot.',
+        })
+      }
     }
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/chat') {
@@ -610,6 +627,11 @@ async function sendReconSnapshotImage(response, id) {
 
 function matchReconSnapshotImagePath(pathname) {
   const match = /^\/api\/recon\/snapshots\/([^/]+)\/image$/.exec(pathname)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function matchReconSnapshotPath(pathname) {
+  const match = /^\/api\/recon\/snapshots\/([^/]+)$/.exec(pathname)
   return match ? decodeURIComponent(match[1]) : ''
 }
 

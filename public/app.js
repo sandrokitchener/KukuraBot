@@ -74,6 +74,11 @@ const robotCameraChip = document.querySelector('#robot-camera-chip')
 const robotCameraMeta = document.querySelector('#robot-camera-meta')
 const robotCameraSnapshotButton = document.querySelector('#robot-camera-snapshot-button')
 const robotCameraSnapshotNote = document.querySelector('#robot-camera-snapshot-note')
+const reconGalleryToggle = document.querySelector('#recon-gallery-toggle')
+const reconGalleryDrawer = document.querySelector('#recon-gallery-drawer')
+const reconGalleryClose = document.querySelector('#recon-gallery-close')
+const reconGalleryStatus = document.querySelector('#recon-gallery-status')
+const reconGalleryCount = document.querySelector('#recon-gallery-count')
 const reconSnapshotList = document.querySelector('#recon-snapshot-list')
 const settingsToggle = document.querySelector('#settings-toggle')
 const settingsDrawer = document.querySelector('#settings-drawer')
@@ -210,9 +215,9 @@ let appConfig = {
   consoleTitle: 'Questing Beast',
   sendButtonLabel: 'Ask Assistant',
   thinkingStatus: 'Assistant is thinking',
-  introEyebrow: 'Ollama robot-control test',
+  introEyebrow: 'Quadruped inspection console',
   introDescription:
-    'Test a local robot-control wrapper for robot-chat vs robot-command behavior. Edit the prompt and response schema files directly whenever you want.',
+    'Use Questing Beast for safety, maintenance, and security checks in hard-to-reach areas. Capture live camera evidence, robot context, and operator notes in one inspection trail.',
   emptyChatMessage: 'Waiting for first message.',
   emptyChatMeta: 'Prompt ready.',
   waitingForJsonMessage: 'Waiting for valid JSON.',
@@ -274,6 +279,9 @@ saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
+reconGalleryToggle.addEventListener('click', handleReconGalleryToggle)
+reconGalleryClose.addEventListener('click', closeReconGallery)
+reconSnapshotList.addEventListener('click', handleReconSnapshotListClick)
 
 for (const button of connectionActionButtons) {
   button.addEventListener('click', handleDogzillaConnectionAction)
@@ -401,7 +409,7 @@ function setMobileView(view) {
 }
 
 function isSwipeBlockedTarget(target) {
-  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .settings-drawer, .connection-drawer')
+  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .settings-drawer, .connection-drawer, .recon-gallery-drawer')
 }
 
 function findTouchById(touchList, id) {
@@ -1417,7 +1425,7 @@ async function handleReconSnapshot() {
   const streamUrl = robotCameraFrame.dataset.streamUrl || ''
   if (!streamUrl) {
     setStatus('Camera stream not configured.', 'error')
-    robotCameraMeta.textContent = 'Camera stream not configured.'
+    setReconGalleryStatus('Camera stream not configured.', true)
     return
   }
 
@@ -1425,7 +1433,7 @@ async function handleReconSnapshot() {
   robotCameraSnapshotButton.disabled = true
   robotCameraSnapshotButton.textContent = 'Saving'
   robotCameraChip.textContent = 'Snapshot'
-  robotCameraMeta.textContent = 'Saving recon snapshot...'
+  setReconGalleryStatus('Capturing inspection snapshot...')
 
   try {
     const response = await apiFetch('/api/recon/snapshots', {
@@ -1435,7 +1443,7 @@ async function handleReconSnapshot() {
       },
       body: JSON.stringify({
         note: robotCameraSnapshotNote.value,
-        tags: ['needs-review'],
+        tags: ['inspection'],
       }),
     })
     const payload = await response.json()
@@ -1449,10 +1457,11 @@ async function handleReconSnapshot() {
     renderReconSnapshots()
     robotCameraChip.textContent = 'Saved'
     robotCameraMeta.textContent = formatReconSnapshotSavedMeta(payload)
+    setReconGalleryStatus(formatReconSnapshotSavedMeta(payload))
     setStatus(`Recon snapshot saved: ${formatEventTimestamp(payload.capturedAt)}.`)
   } catch (error) {
     robotCameraChip.textContent = 'Snapshot failed'
-    robotCameraMeta.textContent = formatError(error)
+    setReconGalleryStatus(formatError(error), true)
     setStatus(`Recon snapshot failed: ${formatError(error)}`, 'error')
   } finally {
     robotCameraSnapshotButton.disabled = !robotCameraFrame.dataset.streamUrl
@@ -1471,11 +1480,34 @@ async function refreshReconSnapshots() {
 
     reconSnapshots = Array.isArray(payload.snapshots) ? payload.snapshots : []
     renderReconSnapshots()
+    setReconGalleryStatus(reconSnapshots.length ? 'Inspection gallery ready.' : 'No inspection snapshots yet.')
   } catch (error) {
     if (reconSnapshotList) {
       reconSnapshotList.replaceChildren(buildReconSnapshotEmpty(`Snapshot cache unavailable: ${formatError(error)}`))
     }
+    setReconGalleryStatus(`Snapshot cache unavailable: ${formatError(error)}`, true)
   }
+}
+
+function handleReconGalleryToggle() {
+  const shouldOpen = reconGalleryDrawer.hidden
+
+  reconGalleryDrawer.hidden = !shouldOpen
+  reconGalleryToggle.setAttribute('aria-expanded', String(shouldOpen))
+  reconGalleryToggle.classList.toggle('is-active', shouldOpen)
+  if (shouldOpen) {
+    settingsDrawer.hidden = true
+    settingsToggle.setAttribute('aria-expanded', 'false')
+    connectionDrawer.hidden = true
+    connectionToggle.setAttribute('aria-expanded', 'false')
+    void refreshReconSnapshots()
+  }
+}
+
+function closeReconGallery() {
+  reconGalleryDrawer.hidden = true
+  reconGalleryToggle.setAttribute('aria-expanded', 'false')
+  reconGalleryToggle.classList.remove('is-active')
 }
 
 function handleSettingsToggle() {
@@ -1486,6 +1518,7 @@ function handleSettingsToggle() {
   if (shouldOpen) {
     connectionDrawer.hidden = true
     connectionToggle.setAttribute('aria-expanded', 'false')
+    closeReconGallery()
   }
 }
 
@@ -1497,6 +1530,7 @@ function handleConnectionToggle() {
   if (shouldOpen) {
     settingsDrawer.hidden = true
     settingsToggle.setAttribute('aria-expanded', 'false')
+    closeReconGallery()
     void refreshDogzillaConnection()
   }
 }
@@ -1516,7 +1550,7 @@ function handleRobotTabClick(event) {
 
   const primaryRobotName = runtimeConfig.robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
 
-  if (selectedRobot !== primaryRobotName) {
+  if (selectedView === 'overview' && selectedRobot !== primaryRobotName) {
     setStatus(`${selectedRobot} selected. Telemetry stream still follows ${primaryRobotName}.`)
   }
 }
@@ -2503,6 +2537,8 @@ function renderReconSnapshots() {
     return
   }
 
+  reconGalleryCount.textContent = `${reconSnapshots.length} saved`
+
   if (!reconSnapshots.length) {
     reconSnapshotList.replaceChildren(buildReconSnapshotEmpty('No snapshots saved.'))
     return
@@ -2521,6 +2557,7 @@ function buildReconSnapshotEmpty(message) {
 function buildReconSnapshotItem(snapshot) {
   const item = document.createElement('article')
   item.className = 'recon-snapshot-item'
+  item.dataset.snapshotId = snapshot.id
 
   const image = document.createElement('img')
   image.src = toApiUrl(snapshot.image?.url || '')
@@ -2528,23 +2565,88 @@ function buildReconSnapshotItem(snapshot) {
   image.loading = 'lazy'
 
   const body = document.createElement('div')
+  body.className = 'recon-snapshot-body'
+
   const title = document.createElement('strong')
-  title.textContent = snapshot.note || 'Needs review'
+  title.textContent = `Inspection ${formatEventTimestamp(snapshot.capturedAt)}`
 
   const meta = document.createElement('span')
   meta.textContent = formatReconSnapshotItemMeta(snapshot)
 
-  body.append(title, meta)
+  const note = document.createElement('textarea')
+  note.className = 'recon-snapshot-note-editor'
+  note.rows = 3
+  note.maxLength = 500
+  note.value = snapshot.note || ''
+  note.placeholder = 'Add inspection note...'
+  note.setAttribute('aria-label', `Note for snapshot ${formatEventTimestamp(snapshot.capturedAt)}`)
+
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'recon-snapshot-save'
+  save.dataset.snapshotNoteSave = snapshot.id
+  save.textContent = 'Save note'
+
+  body.append(title, meta, note, save)
   item.append(image, body)
   return item
+}
+
+async function handleReconSnapshotListClick(event) {
+  const button = event.target.closest?.('[data-snapshot-note-save]')
+  if (!button) {
+    return
+  }
+
+  const item = button.closest('.recon-snapshot-item')
+  const snapshotId = button.dataset.snapshotNoteSave
+  const note = item?.querySelector('.recon-snapshot-note-editor')?.value || ''
+
+  button.disabled = true
+  button.textContent = 'Saving'
+  setReconGalleryStatus('Saving inspection note...')
+
+  try {
+    const response = await apiFetch(`/api/recon/snapshots/${encodeURIComponent(snapshotId)}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ note }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not save inspection note.')
+    }
+
+    reconSnapshots = reconSnapshots.map((snapshot) => snapshot.id === payload.id ? payload : snapshot)
+    renderReconSnapshots()
+    setReconGalleryStatus('Inspection note saved.')
+  } catch (error) {
+    setReconGalleryStatus(`Note save failed: ${formatError(error)}`, true)
+  } finally {
+    button.disabled = false
+    button.textContent = 'Save note'
+  }
+}
+
+function setReconGalleryStatus(message, isError = false) {
+  if (!reconGalleryStatus) {
+    return
+  }
+
+  reconGalleryStatus.textContent = message
+  reconGalleryStatus.dataset.state = isError ? 'error' : 'ok'
 }
 
 function formatReconSnapshotSavedMeta(snapshot) {
   const robot = snapshot.activeRobot
   const robotName = robot?.name || runtimeConfig.robotRuntime.robotName || 'robot'
-  const stateText = robot ? `${robotName} ${robot.task || 'state'} seq ${robot.seq ?? '-'}` : `${robotName} state unavailable`
+  const stateText = robot ? `${robotName} ${robot.task || 'state'} seq ${robot.seq ?? '-'}` : `${robotName} state pending`
+  const locationText = formatReconSnapshotLocation(snapshot)
   const lidarText = snapshot.map?.lidarStatus ? ` Lidar ${snapshot.map.lidarStatus}.` : ''
-  return `Saved ${formatEventTimestamp(snapshot.capturedAt)}. ${stateText}.${lidarText}`
+  return `Saved ${formatEventTimestamp(snapshot.capturedAt)}. ${stateText}.${locationText ? ` ${locationText}.` : ''}${lidarText}`
 }
 
 function formatReconSnapshotItemMeta(snapshot) {
@@ -2553,6 +2655,8 @@ function formatReconSnapshotItemMeta(snapshot) {
 
   if (robot) {
     parts.push(`${robot.name || 'Robot'} ${robot.task || 'state'} #${robot.seq ?? '-'}`)
+  } else if (snapshot.map?.activeTarget?.label) {
+    parts.push(snapshot.map.activeTarget.label)
   }
 
   const battery = toFiniteNumber(robot?.telemetry?.battery)
@@ -2560,13 +2664,25 @@ function formatReconSnapshotItemMeta(snapshot) {
     parts.push(formatBatteryValue(battery))
   }
 
-  if (snapshot.map?.pose) {
-    parts.push(`x ${formatTelemetryNumber(toFiniteNumber(snapshot.map.pose.x))}, y ${formatTelemetryNumber(toFiniteNumber(snapshot.map.pose.y))}`)
-  } else if (snapshot.map?.lidarStatus) {
+  const locationText = formatReconSnapshotLocation(snapshot)
+  if (locationText) {
+    parts.push(locationText)
+  }
+
+  if (!snapshot.map?.pose && snapshot.map?.lidarStatus) {
     parts.push(`lidar ${snapshot.map.lidarStatus}`)
   }
 
   return parts.join(' | ')
+}
+
+function formatReconSnapshotLocation(snapshot) {
+  const pose = snapshot.map?.pose
+  if (pose) {
+    return `x ${formatTelemetryNumber(toFiniteNumber(pose.x))}, y ${formatTelemetryNumber(toFiniteNumber(pose.y))}`
+  }
+
+  return snapshot.map?.status === 'pending-pose' ? 'location pending' : ''
 }
 
 function renderProfileOptions() {

@@ -100,7 +100,8 @@ test('normalizeAppConfig accepts app-level brand overrides', () => {
   assert.equal(config.pageTitle, 'Questing Beast')
   assert.equal(config.consoleTitle, 'Questing Beast')
   assert.equal(config.sendButtonLabel, 'Ask Dog')
-  assert.match(config.introDescription, /Questing Beast command system/)
+  assert.match(config.introDescription, /safety, maintenance, and security checks/)
+  assert.match(config.introDescription, /operator notes/)
 })
 
 test('renderTemplate replaces assistant placeholders', () => {

@@ -8,6 +8,7 @@ import {
   listReconSnapshots,
   readReconSnapshotImage,
   saveReconSnapshot,
+  updateReconSnapshotNote,
 } from '../lib/recon-snapshot-store.mjs'
 
 test('saveReconSnapshot writes image and metadata with robot context', async () => {
@@ -79,6 +80,40 @@ test('listReconSnapshots returns newest records first and honors limit', async (
     assert.equal(snapshots.length, 1)
     assert.equal(snapshots[0].id, newer.id)
     assert.notEqual(snapshots[0].id, older.id)
+  })
+})
+
+test('updateReconSnapshotNote edits saved inspection notes without losing context', async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'robo-doge-recon-'))
+  await usingTempDir(cacheDir, async () => {
+    const record = await saveReconSnapshot({
+      cacheDir,
+      imageBuffer: Buffer.from([0xff, 0xd8, 0x03, 0xff, 0xd9]),
+      note: 'initial note',
+      tags: ['inspection'],
+      robotState: {
+        activeRobot: {
+          name: 'DOGZILLA',
+          pose: { x: 2.5, y: -1.5, theta: 0.7 },
+          task: 'INSPECTING',
+          seq: 9,
+        },
+      },
+    })
+
+    const updated = await updateReconSnapshotNote(record.id, {
+      cacheDir,
+      note: 'pipe corrosion visible behind the service panel',
+    })
+
+    assert.equal(updated.note, 'pipe corrosion visible behind the service panel')
+    assert.deepEqual(updated.tags, ['inspection'])
+    assert.equal(updated.activeRobot.name, 'DOGZILLA')
+    assert.deepEqual(updated.activeRobot.pose, { x: 2.5, y: -1.5, theta: 0.7 })
+
+    const snapshots = await listReconSnapshots({ cacheDir })
+    assert.equal(snapshots[0].id, record.id)
+    assert.equal(snapshots[0].note, 'pipe corrosion visible behind the service panel')
   })
 })
 

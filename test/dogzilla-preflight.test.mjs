@@ -74,6 +74,7 @@ test('buildPreflightChecks warns loudly when configured YOLO and Pi speaker cues
 })
 
 test('buildPreflightChecks treats direct YOLO camera device as the source', () => {
+  const cameraSource = '/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB_2.0_Camera-video-index0'
   const checks = buildPreflightChecks({
     connectionConfig: {
       ssh: {
@@ -86,11 +87,11 @@ test('buildPreflightChecks treats direct YOLO camera device as the source', () =
       },
       camera: {
         processed: true,
-        sourceStreamUrl: '/dev/video0',
+        sourceStreamUrl: cameraSource,
       },
       vision: {
         enabled: true,
-        sourceStreamUrl: '/dev/video0',
+        sourceStreamUrl: cameraSource,
       },
       audio: { enabled: false },
     },
@@ -111,7 +112,10 @@ test('buildPreflightChecks treats direct YOLO camera device as the source', () =
         status: 'ok',
         parsed: {
           identity: { hostname: 'raspberrypi' },
-          devices: { video: ['/dev/video0'] },
+          devices: {
+            video: ['/dev/video0'],
+            videoById: [cameraSource],
+          },
           docker: { images: [] },
           commands: {},
           paths: {},
@@ -124,5 +128,5 @@ test('buildPreflightChecks treats direct YOLO camera device as the source', () =
 
   const sourceCheck = checks.find((check) => check.id === 'camera-source-device')
   assert.equal(sourceCheck?.status, 'ok')
-  assert.match(sourceCheck?.detail || '', /\/dev\/video0 visible/)
+  assert.match(sourceCheck?.detail || '', /\/dev\/v4l\/by-id\/usb-Sonix/)
 })
