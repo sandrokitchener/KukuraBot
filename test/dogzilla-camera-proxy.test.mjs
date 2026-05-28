@@ -7,9 +7,10 @@ import test from 'node:test'
 import {
   openDogzillaCameraControlSession,
   probeDogzillaCameraStream,
+  readDogzillaCameraSnapshot,
 } from '../lib/dogzilla-camera-proxy.mjs'
 
-test('probeDogzillaCameraStream reports responding MJPEG headers', async () => {
+test('probeDogzillaCameraStream reports reachable camera TCP without opening the stream', async () => {
   const server = createServer((request, response) => {
     response.writeHead(200, {
       'content-type': 'multipart/x-mixed-replace; boundary=frame',
@@ -37,16 +38,72 @@ test('probeDogzillaCameraStream reports responding MJPEG headers', async () => {
     assert.equal(status.status, 'ok')
     assert.equal(status.ok, true)
     assert.equal(status.tcp.status, 'ok')
-    assert.equal(status.http.status, 'ok')
-    assert.match(status.http.contentType, /multipart\/x-mixed-replace/)
+    assert.equal(status.http.status, 'skipped')
+    assert.match(status.detail, /Stream not opened/)
   } finally {
     await close(server)
   }
 })
 
-test('probeDogzillaCameraStream distinguishes reachable TCP from stuck HTTP', async () => {
-  const server = net.createServer((socket) => {
+test('readDogzillaCameraSnapshot extracts one JPEG while the control session is active', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9])
+  let controlActive = false
+  const controlServer = net.createServer((socket) => {
+    controlActive = true
     socket.on('data', () => {})
+    socket.on('close', () => {
+      controlActive = false
+    })
+  })
+  const streamServer = createServer((request, response) => {
+    if (!controlActive) {
+      return
+    }
+
+    response.writeHead(200, {
+      'content-type': 'multipart/x-mixed-replace; boundary=frame',
+    })
+    response.write(Buffer.concat([
+      Buffer.from('--frame\r\nContent-Type: image/jpeg\r\n\r\n', 'utf-8'),
+      jpeg,
+      Buffer.from('\r\n', 'utf-8'),
+    ]))
+  })
+
+  await listen(controlServer)
+  await listen(streamServer)
+
+  try {
+    const snapshot = await readDogzillaCameraSnapshot(
+      {
+        camera: {
+          streamUrl: `http://127.0.0.1:${streamServer.address().port}/video_feed`,
+          controlPort: controlServer.address().port,
+          wakeCommand: '$010F040115#',
+        },
+      },
+      {
+        controlConnectTimeoutMs: 500,
+        snapshotTimeoutMs: 500,
+      },
+    )
+
+    assert.equal(snapshot.status, 'ok')
+    assert.equal(snapshot.ok, true)
+    assert.equal(snapshot.contentType, 'image/jpeg')
+    assert.deepEqual(snapshot.jpeg, jpeg)
+  } finally {
+    await close(streamServer)
+    await close(controlServer)
+  }
+})
+
+test('probeDogzillaCameraStream does not open HTTP while checking camera availability', async () => {
+  let receivedData = false
+  const server = net.createServer((socket) => {
+    socket.on('data', () => {
+      receivedData = true
+    })
   })
 
   await listen(server)
@@ -65,17 +122,18 @@ test('probeDogzillaCameraStream distinguishes reachable TCP from stuck HTTP', as
       },
     )
 
-    assert.equal(status.status, 'warn')
-    assert.equal(status.ok, false)
+    assert.equal(status.status, 'ok')
+    assert.equal(status.ok, true)
     assert.equal(status.tcp.status, 'ok')
-    assert.equal(status.http.status, 'timeout')
-    assert.match(status.detail, /TCP port is reachable/)
+    assert.equal(status.http.status, 'skipped')
+    assert.equal(receivedData, false)
+    assert.match(status.detail, /Stream not opened/)
   } finally {
     await close(server)
   }
 })
 
-test('probeDogzillaCameraStream fails loudly when configured control wake fails', async () => {
+test('readDogzillaCameraSnapshot fails loudly when configured control wake fails', async () => {
   const server = createServer((request, response) => {
     response.writeHead(200, {
       'content-type': 'multipart/x-mixed-replace; boundary=frame',
@@ -88,7 +146,7 @@ test('probeDogzillaCameraStream fails loudly when configured control wake fails'
 
   try {
     const streamUrl = `http://127.0.0.1:${server.address().port}/video_feed`
-    const status = await probeDogzillaCameraStream(
+    const status = await readDogzillaCameraSnapshot(
       {
         camera: {
           streamUrl,
@@ -105,10 +163,8 @@ test('probeDogzillaCameraStream fails loudly when configured control wake fails'
 
     assert.equal(status.status, 'error')
     assert.equal(status.ok, false)
-    assert.equal(status.tcp.status, 'ok')
-    assert.equal(status.control.status, 'error')
-    assert.equal(status.http.status, 'skipped')
-    assert.match(status.detail, /Camera control wake failed/)
+    assert.equal(status.statusCode, 502)
+    assert.match(status.error, /Camera control TCP|ECONNREFUSED|connect/)
   } finally {
     await close(server)
   }

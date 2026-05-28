@@ -33,6 +33,7 @@
     "streamPath": "/stream.mjpg",
     "statusPath": "/healthz",
     "detectionsPath": "/detections",
+    "sourceStreamUrl": "/dev/video0",
     "modelRemotePath": "/home/pi/robodoge/models/dogzilla_yolo/best.onnx"
   },
   "audio": {

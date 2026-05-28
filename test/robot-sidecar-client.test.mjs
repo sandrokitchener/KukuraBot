@@ -44,6 +44,44 @@ test('probeRobotSidecarHealth reports degraded when bridge body says ok false', 
   }
 })
 
+test('probeRobotSidecarHealth reports connection details from fetch failures', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => {
+    throw new TypeError('fetch failed', {
+      cause: {
+        code: 'ECONNREFUSED',
+        address: '10.0.4.32',
+        port: 8893,
+      },
+    })
+  }
+
+  try {
+    const health = await probeRobotSidecarHealth(
+      {
+        activeTarget: {
+          id: 'dogzilla_direct',
+          kind: 'dogzilla-direct',
+        },
+      },
+      {
+        transport: {
+          kind: 'http',
+          enabled: true,
+          baseUrl: 'http://10.0.4.32:8893',
+          healthPath: '/healthz',
+          timeoutMs: 1000,
+        },
+      },
+    )
+
+    assert.equal(health.status, 'error')
+    assert.equal(health.error, 'fetch failed (ECONNREFUSED 10.0.4.32:8893)')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('sendRobotEmergencyStop posts a stop action even when runtime dry-run is enabled', async () => {
   const originalFetch = globalThis.fetch
   let requestBody = null

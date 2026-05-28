@@ -21,8 +21,8 @@
             type="button"
             aria-controls="connection-drawer"
             aria-expanded="false"
-            aria-label="Toggle DOGZILLA connection center"
-            title="DOGZILLA connection"
+            aria-label="Toggle DOGZILLA diagnostics"
+            title="DOGZILLA diagnostics"
           >
             <span class="router-icon" aria-hidden="true">
               <span class="router-antenna router-antenna-left"></span>
@@ -30,7 +30,7 @@
               <span class="router-led router-led-one"></span>
               <span class="router-led router-led-two"></span>
             </span>
-            <span class="app-action-label">Connection</span>
+            <span class="app-action-label">Diagnostics</span>
           </button>
           <button
             id="settings-toggle"
@@ -115,6 +115,38 @@
             <button class="robot-tab" type="button" aria-selected="false">Dock</button>
           </nav>
 
+          <section id="manual-control-panel" class="manual-control-panel" data-state="disabled">
+            <div class="manual-control-head">
+              <h2>Manual Control</h2>
+              <span id="manual-control-chip" class="manual-control-chip">Off</span>
+            </div>
+            <div class="manual-control-actions">
+              <button id="manual-control-toggle-button" type="button">Enable gamepad</button>
+              <button id="manual-control-neutral-button" type="button">Neutral</button>
+            </div>
+            <div class="manual-control-readout" aria-label="Manual control input">
+              <div class="manual-control-axis">
+                <span>Forward</span>
+                <strong id="manual-control-forward-value">0.00</strong>
+                <span id="manual-control-forward-meter" class="manual-control-meter" aria-hidden="true"></span>
+              </div>
+              <div class="manual-control-axis">
+                <span>Strafe</span>
+                <strong id="manual-control-strafe-value">0.00</strong>
+                <span id="manual-control-strafe-meter" class="manual-control-meter" aria-hidden="true"></span>
+              </div>
+              <div class="manual-control-axis">
+                <span>Turn</span>
+                <strong id="manual-control-turn-value">0.00</strong>
+                <span id="manual-control-turn-meter" class="manual-control-meter" aria-hidden="true"></span>
+              </div>
+            </div>
+            <div class="manual-control-meta">
+              <span id="manual-control-pad-name">No gamepad</span>
+              <span id="manual-control-status" aria-live="polite">Real robot target required.</span>
+            </div>
+          </section>
+
           <section id="robot-state-panel" class="robot-state-panel" data-state="waiting">
             <div class="robot-state-head">
               <h2>Robot Info</h2>
@@ -198,7 +230,7 @@
 
       <aside id="connection-drawer" class="connection-drawer" hidden>
         <div class="connection-drawer-head">
-          <h2>Connection Center</h2>
+          <h2>DOGZILLA Diagnostics</h2>
           <span id="connection-chip" class="connection-chip">Not set</span>
         </div>
 
@@ -230,45 +262,17 @@
               <input id="dogzilla-remote-root-input" type="text" autocomplete="off" />
             </div>
           </div>
-          <button id="save-dogzilla-connection-button" type="button">Save connection</button>
+          <button id="save-dogzilla-connection-button" type="button">Save address</button>
           <p id="connection-status" class="connection-status">Loading connection.</p>
-        </section>
-
-        <section class="connection-panel">
-          <div class="bridge-head">
-            <h2>Remote Bridge</h2>
-          </div>
-          <div class="bridge-action-grid">
-            <button type="button" data-connection-action="check-ssh">Check SSH</button>
-            <button type="button" data-connection-action="probe-bridges">Check bridges</button>
-            <button type="button" data-connection-action="probe-support">Check support</button>
-            <button type="button" data-connection-action="sync-bridges">Sync code</button>
-            <button type="button" data-connection-action="start-direct">Start direct dry-run</button>
-            <button type="button" data-connection-action="start-ros2">Start ROS2</button>
-            <button type="button" data-connection-action="start-audio">Start audio</button>
-            <button type="button" data-connection-action="start-lidar">Start lidar</button>
-            <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
-          </div>
-          <div class="connection-url-grid">
-            <div>
-              <span class="meta-label">Direct</span>
-              <strong id="dogzilla-direct-url">-</strong>
-            </div>
-            <div>
-              <span class="meta-label">ROS2</span>
-              <strong id="dogzilla-ros2-url">-</strong>
-            </div>
-          </div>
-          <pre id="connection-output" class="connection-output">Waiting for connection action.</pre>
         </section>
 
         <section class="connection-panel preflight-panel">
           <div class="bridge-head">
-            <h2>Preflight Diagnostics</h2>
-            <button id="run-dogzilla-preflight-button" type="button">Run preflight</button>
+            <h2>Diagnostics</h2>
+            <button id="run-dogzilla-preflight-button" type="button">Run diagnostics</button>
           </div>
           <p id="dogzilla-preflight-status" class="connection-status" aria-live="polite">Not run.</p>
-          <div id="dogzilla-preflight-summary" class="preflight-summary" aria-label="DOGZILLA preflight summary">
+          <div id="dogzilla-preflight-summary" class="preflight-summary" aria-label="DOGZILLA diagnostics summary">
             <div>
               <span class="meta-label">OK</span>
               <strong>0</strong>
@@ -283,7 +287,40 @@
             </div>
           </div>
           <div id="dogzilla-preflight-checks" class="preflight-checks"></div>
-          <pre id="dogzilla-preflight-output" class="connection-output">Run preflight to inspect Pi readiness.</pre>
+          <pre id="dogzilla-preflight-output" class="connection-output">Diagnostics idle.</pre>
+        </section>
+
+        <section class="connection-panel">
+          <div class="bridge-head">
+            <h2>Robot Link</h2>
+            <button type="button" data-connection-action="start-direct">Repair robot link</button>
+          </div>
+          <div class="bridge-action-grid bridge-action-grid-primary">
+            <button type="button" data-connection-action="check-ssh">Check network</button>
+            <button type="button" data-connection-action="probe-bridges">Check robot link</button>
+            <button type="button" data-connection-action="probe-support">Check extras</button>
+          </div>
+          <div class="connection-url-grid">
+            <div>
+              <span class="meta-label">Robot bridge</span>
+              <strong id="dogzilla-direct-url">-</strong>
+            </div>
+            <div>
+              <span class="meta-label">ROS2 bridge</span>
+              <strong id="dogzilla-ros2-url">-</strong>
+            </div>
+          </div>
+          <details class="advanced-service-tools">
+            <summary>Advanced service controls</summary>
+            <div class="bridge-action-grid">
+              <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
+              <button type="button" data-connection-action="start-ros2">Start ROS2 bridge</button>
+              <button type="button" data-connection-action="start-audio">Restart Pi audio</button>
+              <button type="button" data-connection-action="start-lidar">Start lidar bridge</button>
+              <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
+            </div>
+          </details>
+          <pre id="connection-output" class="connection-output">Waiting for connection action.</pre>
         </section>
       </aside>
 
@@ -333,19 +370,6 @@
         </div>
 
         <section class="settings-panel">
-          <div class="settings-row">
-            <label for="backend-url-input">Backend URL</label>
-            <input
-              id="backend-url-input"
-              type="url"
-              inputmode="url"
-              placeholder="http://192.168.1.10:3037"
-              autocomplete="off"
-            />
-            <button id="save-backend-button" type="button">Use backend</button>
-          </div>
-          <p id="backend-status" class="settings-status">Using same-origin backend.</p>
-
           <div class="settings-row">
             <label for="profile-select">Model profile</label>
             <select id="profile-select"></select>

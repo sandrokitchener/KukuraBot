@@ -2,8 +2,7 @@ param(
   [Alias("Host")]
   [string]$PiIp = "",
 
-  [Parameter(Mandatory = $true)]
-  [string]$ModelPath,
+  [string]$ModelPath = "",
 
   [string]$DataYamlPath = "",
   [string]$User = "pi",
@@ -25,10 +24,13 @@ Require-LocalCommand ssh
 Require-LocalCommand scp
 
 $repoRoot = Resolve-RoboDogeRoot
-$resolvedModelPath = (Resolve-Path -LiteralPath $ModelPath).Path
-$modelFileName = Split-Path -Leaf $resolvedModelPath
-if (-not $modelFileName.ToLowerInvariant().EndsWith(".onnx")) {
-  throw "ModelPath must point to an ONNX file: $resolvedModelPath"
+$resolvedModelPath = ""
+if ($ModelPath) {
+  $resolvedModelPath = (Resolve-Path -LiteralPath $ModelPath).Path
+  $modelFileName = Split-Path -Leaf $resolvedModelPath
+  if (-not $modelFileName.ToLowerInvariant().EndsWith(".onnx")) {
+    throw "ModelPath must point to an ONNX file: $resolvedModelPath"
+  }
 }
 
 $resolvedDataYamlPath = ""
@@ -58,10 +60,18 @@ if ($LASTEXITCODE -ne 0) {
   throw "scp failed for dogzilla_yolo_vision sidecar"
 }
 
-Write-Host "Copying YOLO ONNX model -> ${Alias}:$remoteModelPath"
-& scp -F $configPath $resolvedModelPath "${Alias}:$remoteModelPath"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for YOLO ONNX model"
+if ($resolvedModelPath) {
+  Write-Host "Copying YOLO ONNX model -> ${Alias}:$remoteModelPath"
+  & scp -F $configPath $resolvedModelPath "${Alias}:$remoteModelPath"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for YOLO ONNX model"
+  }
+} else {
+  Write-Host "Using existing remote YOLO ONNX model: $remoteModelPath"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "test -s '$remoteModelPath'"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Remote YOLO ONNX model missing. Provide -ModelPath once to sync it to $remoteModelPath."
+  }
 }
 
 if ($resolvedDataYamlPath) {
@@ -70,6 +80,8 @@ if ($resolvedDataYamlPath) {
   if ($LASTEXITCODE -ne 0) {
     throw "scp failed for YOLO labels"
   }
+} else {
+  Write-Host "Using existing remote YOLO labels: $remoteLabelsPath"
 }
 
 $installCommand = "python3 - <<'PY'
@@ -96,13 +108,39 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $effectiveCameraUrl = if ($CameraUrl) { $CameraUrl } else { "/dev/video0" }
-$cameraControlArgs = if ($effectiveCameraUrl.StartsWith("http://") -or $effectiveCameraUrl.StartsWith("https://")) {
+$usesHttpCamera = $effectiveCameraUrl.StartsWith("http://") -or $effectiveCameraUrl.StartsWith("https://")
+$cameraControlArgs = if ($usesHttpCamera) {
   $cameraHost = if ($PiIp) { $PiIp } else { "127.0.0.1" }
   "--camera-control-host $cameraHost --camera-control-port 6000"
 } else {
   "--camera-control-host '' --camera-control-port 0"
 }
 $serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_yolo_vision/server.py --host 0.0.0.0 --port $Port --model $remoteModelPath --labels $remoteLabelsPath --camera-url $effectiveCameraUrl $cameraControlArgs"
+
+$releaseVendorCameraCommand = "true"
+if (-not $usesHttpCamera) {
+  $releaseVendorCameraCommand = @'
+python3 - <<'PY'
+import os, signal, subprocess
+try:
+    rows = subprocess.check_output(['pgrep', '-af', '/home/pi/DOGZILLA/app_dogzilla/app_dogzilla.py'], text=True).splitlines()
+except subprocess.CalledProcessError:
+    rows = []
+for row in rows:
+    pid = int(row.split()[0])
+    if pid in (os.getpid(), os.getppid()):
+        continue
+    try:
+        comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
+    except OSError:
+        continue
+    if comm.startswith('python'):
+        os.kill(pid, signal.SIGTERM)
+        print(f'stopped vendor camera app {pid}')
+PY
+'@
+  $releaseVendorCameraCommand = "bash -lc $(ConvertTo-RemoteSingleQuote $releaseVendorCameraCommand.Trim())"
+}
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
@@ -126,12 +164,12 @@ PY
 '@
   $stopCommand = $stopCommand.Trim()
   $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand
-  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && if [ -f logs/yolo-vision.pid ]; then kill `$(cat logs/yolo-vision.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/yolo-vision.log 2>&1 < /dev/null & echo `$! > logs/yolo-vision.pid) && sleep 2 && cat logs/yolo-vision.pid && tail -n 20 logs/yolo-vision.log"
+  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && $releaseVendorCameraCommand && if [ -f logs/yolo-vision.pid ]; then kill `$(cat logs/yolo-vision.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/yolo-vision.log 2>&1 < /dev/null & echo `$! > logs/yolo-vision.pid) && sleep 2 && cat logs/yolo-vision.pid && tail -n 20 logs/yolo-vision.log"
   Write-Host "Starting DOGZILLA YOLO vision sidecar on $Alias port $Port in remote background."
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
   exit $LASTEXITCODE
 }
 
-$remoteCommand = "cd $remoteRootQuoted && $serverCommand"
+$remoteCommand = "cd $remoteRootQuoted && $releaseVendorCameraCommand && $serverCommand"
 Write-Host "Starting DOGZILLA YOLO vision sidecar on $Alias port $Port. This SSH session stays attached."
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand

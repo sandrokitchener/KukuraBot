@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  compileRobotManualControlPreview,
   compileRobotRuntimePreview,
   shouldAutoDispatchRobotRuntime,
 } from '../lib/robot-command-compiler.mjs'
@@ -262,6 +263,119 @@ test('compileRobotRuntimePreview maps sit trick to verified DOGZILLA action id',
   assert.equal(preview.status, 'ready')
   assert.equal(preview.canonicalPlan.kind, 'action.once')
   assert.equal(preview.canonicalPlan.params.actionId, 12)
+})
+
+test('compileRobotManualControlPreview maps gamepad axes to DOGZILLA relative motion', () => {
+  const preview = compileRobotManualControlPreview({
+    control: {
+      forward: 1,
+      strafe: 0.5,
+      turn: -0.75,
+      source: 'gamepad',
+    },
+    runtimeConfig: {
+      enabled: true,
+      dryRun: false,
+      robotId: 'dogzilla-local',
+      robotModel: 'dogzilla-s2',
+      selectedMotionProfile: 'default',
+      activeTarget: {
+        id: 'dogzilla_direct',
+        kind: 'dogzilla-direct',
+        label: 'DOGZILLA Direct Bridge',
+      },
+    },
+    ros2Config: {
+      bridge: {
+        commandPlanTopic: '/dogzilla/command_plan',
+      },
+      topics: {
+        state: '/dogzilla/state',
+      },
+      transport: {
+        enabled: true,
+        dryRun: false,
+        dispatchOnChat: true,
+        baseUrl: 'http://127.0.0.1:8893',
+        commandsPath: '/commands',
+      },
+      feedback: {},
+    },
+    motionConfig: {
+      activeProfile: 'default',
+      profiles: {
+        default: {
+          gaits: ['walk', 'trot'],
+          paceModes: ['slow', 'normal', 'high'],
+          limits: {
+            xStep: { min: -25, max: 25 },
+            yStep: { min: -18, max: 18 },
+            turnRate: { min: -100, max: 100 },
+          },
+          twistCalibration: {
+            deadband: 0.05,
+            linearXFullScaleStep: 25,
+            linearYFullScaleStep: 18,
+            angularZFullScaleStep: 100,
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.command, 'manual')
+  assert.equal(preview.action, 'dogzilla.manual_control')
+  assert.equal(preview.canonicalPlan.kind, 'locomotion.relative')
+  assert.deepEqual(preview.canonicalPlan.params, {
+    x_step: 25,
+    y_step: 9,
+    turn_rate: -75,
+    gait: 'walk',
+    pace: 'normal',
+    source: 'gamepad',
+  })
+  assert.equal(preview.payload.canonicalPlan, preview.canonicalPlan)
+})
+
+test('compileRobotManualControlPreview deadbands neutral gamepad drift', () => {
+  const preview = compileRobotManualControlPreview({
+    control: {
+      forward: 0.03,
+      strafe: -0.04,
+      turn: 0.049,
+    },
+    runtimeConfig: {
+      activeTarget: {
+        id: 'dogzilla_direct',
+        kind: 'dogzilla-direct',
+        label: 'DOGZILLA Direct Bridge',
+      },
+    },
+    ros2Config: {
+      bridge: {},
+      topics: {},
+      transport: {},
+      feedback: {},
+    },
+    motionConfig: {
+      activeProfile: 'default',
+      profiles: {
+        default: {
+          twistCalibration: {
+            deadband: 0.05,
+            linearXFullScaleStep: 25,
+            linearYFullScaleStep: 18,
+            angularZFullScaleStep: 100,
+          },
+        },
+      },
+    },
+  })
+
+  assert.equal(preview.canonicalPlan.params.x_step, 0)
+  assert.equal(preview.canonicalPlan.params.y_step, 0)
+  assert.equal(preview.canonicalPlan.params.turn_rate, 0)
 })
 
 test('shouldAutoDispatchRobotRuntime only enables dispatch when chat dispatch is configured', () => {

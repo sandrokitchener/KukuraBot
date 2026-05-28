@@ -31,9 +31,18 @@ const testRobotSitButton = document.querySelector('#test-robot-sit-button')
 const robotSitTestStatus = document.querySelector('#robot-sit-test-status')
 const emergencyStopButton = document.querySelector('#emergency-stop-button')
 const emergencyStopStatus = document.querySelector('#emergency-stop-status')
-const backendUrlInput = document.querySelector('#backend-url-input')
-const saveBackendButton = document.querySelector('#save-backend-button')
-const backendStatus = document.querySelector('#backend-status')
+const manualControlPanel = document.querySelector('#manual-control-panel')
+const manualControlChip = document.querySelector('#manual-control-chip')
+const manualControlToggleButton = document.querySelector('#manual-control-toggle-button')
+const manualControlNeutralButton = document.querySelector('#manual-control-neutral-button')
+const manualControlStatus = document.querySelector('#manual-control-status')
+const manualControlPadName = document.querySelector('#manual-control-pad-name')
+const manualControlForwardValue = document.querySelector('#manual-control-forward-value')
+const manualControlStrafeValue = document.querySelector('#manual-control-strafe-value')
+const manualControlTurnValue = document.querySelector('#manual-control-turn-value')
+const manualControlForwardMeter = document.querySelector('#manual-control-forward-meter')
+const manualControlStrafeMeter = document.querySelector('#manual-control-strafe-meter')
+const manualControlTurnMeter = document.querySelector('#manual-control-turn-meter')
 const speechPanel = document.querySelector('.speech-panel')
 const speechProfileName = document.querySelector('#speech-profile-name')
 const speechProfileSelect = document.querySelector('#speech-profile-select')
@@ -148,15 +157,33 @@ const DEFAULT_ROBOT_RUNTIME = {
   selectionLocked: false,
   source: 'runtime',
 }
+const MANUAL_CONTROL_DEADBAND = 0.08
+const MANUAL_CONTROL_SEND_INTERVAL_MS = 180
+const MANUAL_CONTROL_REPEAT_MS = 700
+const MANUAL_CONTROL_ERROR_RETRY_MS = 1200
+const MANUAL_CONTROL_CHANGE_EPSILON = 0.035
+const DOGZILLA_CAMERA_LOAD_TIMEOUT_MS = 8000
 
 let thinkingState = null
 let robotFeedbackTimerId = null
 let robotStateTimerId = null
 let robotLidarTimerId = null
+let robotCameraLoadTimerId = null
+let manualControlFrameId = null
 let activeThinkingCue = null
 let thinkingCueToken = 0
 let robotMapBaseMeta = ''
 let robotLidarSummary = ''
+const manualControlState = {
+  enabled: false,
+  pending: false,
+  gamepadIndex: null,
+  lastVector: null,
+  lastSentAt: 0,
+  lastOutputAt: 0,
+  zeroSent: true,
+  errorRetryAt: 0,
+}
 const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS, {
   gain: 0.28,
   playbackRate: 1,
@@ -220,6 +247,7 @@ let dogzillaConnection = null
 let speechController = null
 let mobileView = MOBILE_DEFAULT_VIEW
 let mobileTouch = null
+let dogzillaStartupRepairAttempted = false
 const isaacCompletionState = {
   initialized: false,
   lastEventId: null,
@@ -234,7 +262,8 @@ saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
 testRobotSitButton.addEventListener('click', handleRobotSitTest)
 emergencyStopButton.addEventListener('click', handleEmergencyStop)
-saveBackendButton.addEventListener('click', handleBackendSave)
+manualControlToggleButton.addEventListener('click', handleManualControlToggle)
+manualControlNeutralButton.addEventListener('click', handleManualControlNeutral)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 connectionToggle.addEventListener('click', handleConnectionToggle)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
@@ -251,6 +280,8 @@ for (const tab of robotTabs) {
 
 robotCameraFrame.addEventListener('error', handleDogzillaCameraFrameError)
 robotCameraFrame.addEventListener('load', handleDogzillaCameraFrameLoad)
+window.addEventListener('gamepadconnected', handleGamepadConnected)
+window.addEventListener('gamepaddisconnected', handleGamepadDisconnected)
 
 function initAndroidAppShell() {
   if (!isAndroidAppShell()) {
@@ -397,6 +428,7 @@ async function boot() {
     }
 
     await refreshRobotFeedback()
+    void ensureDogzillaRobotLinkReady()
     setStatus(`Ready on ${runtimeConfig.activeProfile.label}. Target: ${runtimeConfig.robotRuntime.activeTarget.label}.`)
   } catch (error) {
     setStatus(`Config load failed: ${formatError(error)}`, 'error')
@@ -679,6 +711,9 @@ async function handleRobotTargetSave() {
   saveRobotTargetButton.disabled = true
   robotTargetSelect.disabled = true
   robotTargetStatus.textContent = 'Saving runtime target...'
+  if (manualControlState.enabled) {
+    disableManualControl({ sendNeutral: true })
+  }
 
   try {
     const response = await apiFetch('/api/settings/robot-target', {
@@ -799,22 +834,376 @@ async function handleEmergencyStop() {
   }
 }
 
-async function handleBackendSave() {
-  saveBackendButton.disabled = true
-  backendUrlInput.disabled = true
-  backendStatus.textContent = 'Checking backend...'
-
-  try {
-    const label = await saveBackendUrl(backendUrlInput.value)
-    backendStatus.textContent = `Connected: ${label}`
-    connectionBackendStatus.textContent = `Connected: ${label}`
-  } catch (error) {
-    backendStatus.textContent = formatError(error)
-    setStatus(`Backend failed: ${formatError(error)}`, 'error')
-  } finally {
-    saveBackendButton.disabled = false
-    backendUrlInput.disabled = false
+function handleManualControlToggle() {
+  if (manualControlState.enabled) {
+    disableManualControl({ sendNeutral: true })
+    return
   }
+
+  enableManualControl()
+}
+
+function handleManualControlNeutral() {
+  sendManualNeutral('manual-neutral').catch((error) => {
+    setManualControlStatus(formatError(error), true)
+  })
+}
+
+function handleGamepadConnected(event) {
+  manualControlState.gamepadIndex = event.gamepad.index
+  renderManualControlPad(event.gamepad)
+  setManualControlStatus(`${formatGamepadName(event.gamepad)} connected.`)
+}
+
+function handleGamepadDisconnected(event) {
+  if (manualControlState.gamepadIndex !== event.gamepad.index) {
+    return
+  }
+
+  manualControlState.gamepadIndex = null
+  renderManualControlVector(createNeutralManualVector())
+  setManualControlStatus('Gamepad disconnected.')
+  if (manualControlState.enabled) {
+    sendManualNeutral('gamepad-disconnected').catch((error) => {
+      setManualControlStatus(formatError(error), true)
+    })
+  }
+}
+
+function enableManualControl() {
+  if (!isGamepadSupported()) {
+    setManualControlStatus('Gamepad API unavailable in this browser.', true)
+    applyManualControlState()
+    return
+  }
+
+  if (!isRealRobotTargetActive()) {
+    setManualControlStatus('Switch to DOGZILLA Direct or ROS2 Real Robot first.', true)
+    applyManualControlState()
+    return
+  }
+
+  const gamepad = findManualGamepad()
+  manualControlState.enabled = true
+  manualControlState.pending = false
+  manualControlState.lastVector = null
+  manualControlState.lastSentAt = 0
+  manualControlState.zeroSent = true
+  manualControlState.errorRetryAt = 0
+  manualControlState.gamepadIndex = gamepad?.index ?? manualControlState.gamepadIndex
+  renderManualControlPad(gamepad)
+  renderManualControlVector(createNeutralManualVector())
+  setManualControlStatus(gamepad ? `Manual control using ${formatGamepadName(gamepad)}.` : 'Manual control waiting for gamepad.')
+  applyManualControlState()
+  scheduleManualControlFrame()
+}
+
+function disableManualControl({ sendNeutral = false } = {}) {
+  manualControlState.enabled = false
+  applyManualControlState()
+
+  if (manualControlFrameId) {
+    window.cancelAnimationFrame(manualControlFrameId)
+    manualControlFrameId = null
+  }
+
+  renderManualControlVector(createNeutralManualVector())
+  setManualControlStatus('Manual control off.')
+
+  if (sendNeutral && isRealRobotTargetActive()) {
+    sendManualNeutral('manual-off').catch((error) => {
+      setManualControlStatus(formatError(error), true)
+    })
+  }
+}
+
+function scheduleManualControlFrame() {
+  if (!manualControlState.enabled || manualControlFrameId) {
+    return
+  }
+
+  manualControlFrameId = window.requestAnimationFrame(tickManualControl)
+}
+
+function tickManualControl() {
+  manualControlFrameId = null
+
+  if (!manualControlState.enabled) {
+    return
+  }
+
+  if (!isRealRobotTargetActive()) {
+    disableManualControl({ sendNeutral: true })
+    setManualControlStatus('Manual control stopped because the active target changed.', true)
+    return
+  }
+
+  const gamepad = findManualGamepad()
+
+  if (!gamepad) {
+    renderManualControlPad(null)
+    renderManualControlVector(createNeutralManualVector())
+    if (!manualControlState.zeroSent) {
+      sendManualNeutral('gamepad-missing').catch((error) => {
+        setManualControlStatus(formatError(error), true)
+      })
+    } else {
+      setManualControlStatus('Press a button on a connected gamepad.')
+    }
+    scheduleManualControlFrame()
+    return
+  }
+
+  manualControlState.gamepadIndex = gamepad.index
+  const vector = readManualGamepadVector(gamepad)
+  renderManualControlPad(gamepad)
+  renderManualControlVector(vector)
+
+  if (shouldSendManualControlVector(vector)) {
+    sendManualControlVector(vector, gamepad).catch((error) => {
+      manualControlState.errorRetryAt = Date.now() + MANUAL_CONTROL_ERROR_RETRY_MS
+      setManualControlStatus(formatError(error), true)
+    })
+  } else if (!manualControlState.pending) {
+    setManualControlStatus(`Manual control active: ${formatManualVector(vector)}.`)
+  }
+
+  scheduleManualControlFrame()
+}
+
+function shouldSendManualControlVector(vector) {
+  const now = Date.now()
+  const moving = hasManualVectorInput(vector)
+
+  if (manualControlState.pending || now < manualControlState.errorRetryAt) {
+    return false
+  }
+
+  if (!moving) {
+    return !manualControlState.zeroSent
+  }
+
+  if (now - manualControlState.lastSentAt < MANUAL_CONTROL_SEND_INTERVAL_MS) {
+    return false
+  }
+
+  return (
+    hasManualVectorChanged(vector, manualControlState.lastVector) ||
+    now - manualControlState.lastSentAt >= MANUAL_CONTROL_REPEAT_MS
+  )
+}
+
+function hasManualVectorChanged(nextVector, previousVector) {
+  if (!previousVector) {
+    return true
+  }
+
+  return (
+    Math.abs(nextVector.forward - previousVector.forward) >= MANUAL_CONTROL_CHANGE_EPSILON ||
+    Math.abs(nextVector.strafe - previousVector.strafe) >= MANUAL_CONTROL_CHANGE_EPSILON ||
+    Math.abs(nextVector.turn - previousVector.turn) >= MANUAL_CONTROL_CHANGE_EPSILON
+  )
+}
+
+function hasManualVectorInput(vector) {
+  return !!(
+    Math.abs(vector.forward) > 0 ||
+    Math.abs(vector.strafe) > 0 ||
+    Math.abs(vector.turn) > 0
+  )
+}
+
+async function sendManualNeutral(source) {
+  if (!isRealRobotTargetActive()) {
+    setManualControlStatus('Real robot target required for manual neutral.', true)
+    return
+  }
+
+  await sendManualControlVector(createNeutralManualVector(), null, { source, force: true })
+}
+
+async function sendManualControlVector(vector, gamepad, options = {}) {
+  if (manualControlState.pending && !options.force) {
+    return
+  }
+
+  manualControlState.pending = true
+  applyManualControlState()
+
+  const source = options.source || 'gamepad'
+  try {
+    const response = await apiFetch('/api/robot/manual-control', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        forward: vector.forward,
+        strafe: vector.strafe,
+        turn: vector.turn,
+        source,
+        gamepadId: gamepad?.id || '',
+        gamepadIndex: gamepad?.index ?? manualControlState.gamepadIndex,
+        gait: 'walk',
+        pace: 'normal',
+      }),
+    })
+    const payload = await response.json()
+
+    manualControlState.lastVector = { ...vector }
+    manualControlState.lastSentAt = Date.now()
+    manualControlState.zeroSent = !hasManualVectorInput(vector)
+
+    if (!response.ok || payload.dispatch?.status === 'error') {
+      throw new Error(payload.dispatch?.error || payload.error || 'Manual control failed.')
+    }
+
+    const summary = formatManualControlSummary(payload)
+    setManualControlStatus(summary)
+    setStatus(summary, payload.dispatch?.status === 'error' ? 'error' : 'idle')
+
+    if (Date.now() - manualControlState.lastOutputAt > 1000 || manualControlState.zeroSent) {
+      runtimeFeedbackOutput.textContent = JSON.stringify({
+        manualControl: payload,
+      }, null, 2)
+      manualControlState.lastOutputAt = Date.now()
+    }
+
+    return payload
+  } finally {
+    manualControlState.pending = false
+    applyManualControlState()
+  }
+}
+
+function findManualGamepad() {
+  if (!isGamepadSupported()) {
+    return null
+  }
+
+  const gamepads = navigator.getGamepads()
+  const preferred = Number.isInteger(manualControlState.gamepadIndex)
+    ? gamepads[manualControlState.gamepadIndex]
+    : null
+
+  if (preferred?.connected) {
+    return preferred
+  }
+
+  return Array.from(gamepads).find((gamepad) => gamepad?.connected) || null
+}
+
+function readManualGamepadVector(gamepad) {
+  const axes = gamepad?.axes || []
+  const leftX = normalizeManualAxis(axes[0])
+  const leftY = normalizeManualAxis(axes[1])
+  const rightX = normalizeManualAxis(axes[2] ?? axes[3])
+
+  return {
+    forward: normalizeManualAxis(-leftY),
+    strafe: normalizeManualAxis(-leftX),
+    turn: normalizeManualAxis(-rightX),
+  }
+}
+
+function normalizeManualAxis(value) {
+  const numeric = clamp(Number(value) || 0, -1, 1)
+  return Math.abs(numeric) <= MANUAL_CONTROL_DEADBAND ? 0 : Number(numeric.toFixed(3))
+}
+
+function createNeutralManualVector() {
+  return {
+    forward: 0,
+    strafe: 0,
+    turn: 0,
+  }
+}
+
+function applyManualControlState() {
+  const supported = isGamepadSupported()
+  const realTarget = isRealRobotTargetActive()
+
+  manualControlPanel.dataset.state = manualControlState.enabled ? 'active' : supported && realTarget ? 'ready' : 'disabled'
+  manualControlChip.textContent = manualControlState.enabled ? 'Gamepad' : 'Off'
+  manualControlToggleButton.textContent = manualControlState.enabled ? 'Disable gamepad' : 'Enable gamepad'
+  manualControlToggleButton.disabled = !supported || !realTarget
+  manualControlNeutralButton.disabled = !realTarget || manualControlState.pending
+
+  if (!supported) {
+    manualControlStatus.textContent = 'Gamepad API unavailable in this browser.'
+    return
+  }
+
+  if (!realTarget) {
+    manualControlStatus.textContent = 'Real robot target required.'
+    return
+  }
+
+  const currentStatus = manualControlStatus.textContent
+  if (
+    !manualControlState.enabled &&
+    !manualControlState.pending &&
+    (!currentStatus || currentStatus === 'Real robot target required.' || currentStatus === 'Gamepad idle.')
+  ) {
+    manualControlStatus.textContent = 'Gamepad idle.'
+  }
+}
+
+function renderManualControlPad(gamepad) {
+  manualControlPadName.textContent = gamepad ? formatGamepadName(gamepad) : 'No gamepad'
+}
+
+function renderManualControlVector(vector) {
+  manualControlForwardValue.textContent = formatManualAxis(vector.forward)
+  manualControlStrafeValue.textContent = formatManualAxis(vector.strafe)
+  manualControlTurnValue.textContent = formatManualAxis(vector.turn)
+  setManualMeter(manualControlForwardMeter, vector.forward)
+  setManualMeter(manualControlStrafeMeter, vector.strafe)
+  setManualMeter(manualControlTurnMeter, vector.turn)
+}
+
+function setManualMeter(meter, value) {
+  meter.style.setProperty('--manual-meter-value', `${50 + clamp(value, -1, 1) * 50}%`)
+  meter.dataset.direction = value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral'
+}
+
+function setManualControlStatus(message, isError = false) {
+  if (isError) {
+    manualControlPanel.dataset.state = 'error'
+  } else if (manualControlPanel.dataset.state === 'error') {
+    manualControlPanel.dataset.state = manualControlState.enabled ? 'active' : 'ready'
+  }
+  manualControlStatus.textContent = message
+}
+
+function formatManualControlSummary(payload) {
+  const dispatchStatus = payload.dispatch?.status || 'unknown'
+  const plan = payload.preview?.canonicalPlan?.params || {}
+  const mode = runtimeConfig.robotRuntime.dryRun || dispatchStatus === 'dry-run' ? 'dry-run' : dispatchStatus
+
+  return `Manual ${mode}: x ${formatStep(plan.x_step)}, y ${formatStep(plan.y_step)}, turn ${formatStep(plan.turn_rate)}.`
+}
+
+function formatManualVector(vector) {
+  return `x ${formatManualAxis(vector.forward)}, y ${formatManualAxis(vector.strafe)}, turn ${formatManualAxis(vector.turn)}`
+}
+
+function formatManualAxis(value) {
+  return value.toFixed(2)
+}
+
+function formatStep(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric.toFixed(1) : '0.0'
+}
+
+function formatGamepadName(gamepad) {
+  const rawName = String(gamepad?.id || '').trim()
+  return rawName ? rawName.replace(/\s+\(.*?\)/g, '').slice(0, 42) : 'Gamepad'
+}
+
+function isGamepadSupported() {
+  return typeof navigator.getGamepads === 'function'
 }
 
 async function handleDogzillaBackendSave() {
@@ -824,7 +1213,6 @@ async function handleDogzillaBackendSave() {
 
   try {
     const label = await saveBackendUrl(dogzillaBackendUrlInput.value)
-    backendStatus.textContent = `Connected: ${label}`
     connectionBackendStatus.textContent = `Connected: ${label}`
   } catch (error) {
     connectionBackendStatus.textContent = formatError(error)
@@ -1161,10 +1549,53 @@ async function handleDogzillaConnectionAction(event) {
   }
 }
 
+async function ensureDogzillaRobotLinkReady() {
+  if (dogzillaStartupRepairAttempted || runtimeConfig.robotRuntime.activeTarget?.kind !== 'dogzilla-direct') {
+    return
+  }
+
+  dogzillaStartupRepairAttempted = true
+
+  try {
+    const healthResponse = await apiFetch('/api/robot/health')
+    const healthPayload = await healthResponse.json()
+    const error = String(healthPayload?.error || '')
+    const repairable = healthPayload?.status === 'error' && /ECONNREFUSED/i.test(error)
+
+    if (!repairable) {
+      return
+    }
+
+    connectionStatus.textContent = 'Repairing robot link...'
+    connectionOutput.textContent = 'Repairing robot link...'
+    const response = await apiFetch('/api/dogzilla/connection/action', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'start-direct' }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok || payload.status === 'error') {
+      throw new Error(payload.error || payload.stderr || 'Robot link repair failed.')
+    }
+
+    connectionStatus.textContent = 'Robot link repaired.'
+    connectionOutput.textContent = formatDogzillaActionOutput(payload)
+    setStatus('DOGZILLA robot link repaired.')
+    await refreshRobotFeedback()
+  } catch (error) {
+    const message = formatError(error)
+    connectionStatus.textContent = message
+    connectionOutput.textContent = message
+  }
+}
+
 async function handleDogzillaPreflight() {
   setConnectionActionsDisabled(true)
-  dogzillaPreflightStatus.textContent = 'Running read-only preflight...'
-  dogzillaPreflightOutput.textContent = 'Checking SSH, bridge, battery, camera TCP, Docker, lidar, and Pi processes...'
+  dogzillaPreflightStatus.textContent = 'Running diagnostics...'
+  dogzillaPreflightOutput.textContent = 'Checking network, robot bridge, battery, camera, audio, lidar, and Pi processes...'
   dogzillaPreflightChecks.replaceChildren()
 
   try {
@@ -1178,11 +1609,11 @@ async function handleDogzillaPreflight() {
     const payload = await response.json()
 
     if (!response.ok) {
-      throw new Error(payload.error || 'DOGZILLA preflight failed.')
+      throw new Error(payload.error || 'DOGZILLA diagnostics failed.')
     }
 
     renderDogzillaPreflight(payload)
-    setStatus(`DOGZILLA preflight ${payload.status}.`)
+    setStatus(`DOGZILLA diagnostics ${payload.status}.`)
   } catch (error) {
     const message = formatError(error)
     dogzillaPreflightStatus.textContent = message
@@ -1206,7 +1637,7 @@ function renderDogzillaConnection(payload) {
   dogzillaRos2Url.textContent = bridges.ros2?.baseUrl || '-'
   connectionChip.textContent = ssh.host ? ssh.host : 'No IP'
   connectionStatus.textContent = ssh.host
-    ? `SSH ${ssh.user}@${ssh.host}:${ssh.port}. Config ${payload.sshConfigExists ? 'ready' : 'not written'}.`
+    ? `${ssh.user}@${ssh.host}:${ssh.port}. SSH config ${payload.sshConfigExists ? 'ready' : 'not written'}.`
     : 'Set DOGZILLA IP.'
 }
 
@@ -1289,19 +1720,21 @@ function setConnectionActionsDisabled(disabled) {
 function formatConnectionAction(action) {
   switch (action) {
     case 'check-ssh':
-      return 'SSH check'
+      return 'network check'
     case 'probe-bridges':
-      return 'bridge check'
+      return 'robot link check'
     case 'probe-support':
-      return 'support check'
+      return 'extras check'
     case 'sync-bridges':
-      return 'bridge sync'
+      return 'bridge code deploy'
     case 'start-direct':
-      return 'direct bridge start'
+      return 'robot link repair'
     case 'start-ros2':
       return 'ROS2 bridge start'
+    case 'start-yolo':
+      return 'object recognition restart'
     case 'start-audio':
-      return 'audio bridge start'
+      return 'Pi audio restart'
     case 'start-lidar':
       return 'lidar bridge start'
     case 'stop-bridges':
@@ -1343,9 +1776,9 @@ function formatDogzillaActionOutput(payload) {
 function formatServiceName(id) {
   switch (id) {
     case 'direct':
-      return 'Direct'
+      return 'Robot bridge'
     case 'ros2':
-      return 'ROS2'
+      return 'ROS2 bridge'
     case 'audio':
       return 'Audio'
     case 'lidar':
@@ -1353,7 +1786,7 @@ function formatServiceName(id) {
     case 'camera':
       return 'Camera'
     case 'vision':
-      return 'Vision'
+      return 'Object recognition'
     default:
       return id
   }
@@ -1361,9 +1794,7 @@ function formatServiceName(id) {
 
 function applyBackendControls() {
   const apiBaseUrl = getApiBaseUrl()
-  backendUrlInput.value = apiBaseUrl
   dogzillaBackendUrlInput.value = apiBaseUrl
-  backendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
   connectionBackendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
 }
 
@@ -1400,6 +1831,7 @@ function applyPayload(payload) {
   applySpeechConfig()
   applyRobotRuntimeConfig()
   applyDogzillaCameraConfig()
+  startDogzillaCameraViewer()
 }
 
 function applyModelConfig(payload) {
@@ -1851,12 +2283,14 @@ function applyDogzillaCameraConfig() {
   const camera = runtimeConfig.dogzilla?.camera
   const streamUrl = camera?.proxyStreamPath ? toApiUrl(camera.proxyStreamPath) : camera?.streamUrl || ''
   const upstreamStreamUrl = camera?.streamUrl || ''
-  const indexUrl = camera?.indexUrl || camera?.baseUrl || ''
 
   if (!streamUrl) {
+    clearDogzillaCameraTimers()
     robotCameraFrame.removeAttribute('src')
     robotCameraFrame.dataset.streamUrl = ''
     robotCameraFrame.dataset.statusPath = ''
+    robotCameraFrame.dataset.snapshotPath = ''
+    robotCameraFrame.dataset.viewerMode = ''
     robotCameraChip.textContent = 'No stream'
     robotCameraMeta.textContent = 'Camera stream not configured.'
     return
@@ -1864,10 +2298,10 @@ function applyDogzillaCameraConfig() {
 
   robotCameraFrame.dataset.streamUrl = streamUrl
   robotCameraFrame.dataset.statusPath = camera?.proxyStatusPath || ''
-  robotCameraChip.textContent = 'Camera proxy'
-  robotCameraMeta.textContent = upstreamStreamUrl
-    ? `${streamUrl} | source ${upstreamStreamUrl}${indexUrl ? ` | app ${indexUrl}` : ''}`
-    : streamUrl
+  robotCameraFrame.dataset.snapshotPath = camera?.proxySnapshotPath ? toApiUrl(camera.proxySnapshotPath) : ''
+  robotCameraFrame.dataset.viewerMode = 'stream'
+  robotCameraChip.textContent = robotCameraFrame.getAttribute('src') === streamUrl ? 'Live' : 'Starting'
+  robotCameraMeta.textContent = formatDogzillaCameraSource(camera, upstreamStreamUrl)
 }
 
 function applyRobotView(view) {
@@ -1877,15 +2311,54 @@ function applyRobotView(view) {
   robotMapPanel.hidden = showCamera
 
   if (showCamera) {
-    applyDogzillaCameraConfig()
-    const streamUrl = robotCameraFrame.dataset.streamUrl || ''
-    if (streamUrl && robotCameraFrame.src !== streamUrl) {
-      robotCameraChip.textContent = 'Opening stream'
-      robotCameraMeta.textContent = 'Opening DOGZILLA camera stream through the backend proxy.'
-      robotCameraFrame.src = streamUrl
+    startDogzillaCameraViewer()
+  }
+}
+
+function startDogzillaCameraViewer() {
+  const streamUrl = robotCameraFrame.dataset.streamUrl || ''
+  if (!streamUrl) {
+    return
+  }
+
+  if (robotCameraFrame.getAttribute('src') === streamUrl) {
+    return
+  }
+
+  clearDogzillaCameraTimers()
+  robotCameraChip.textContent = 'Starting'
+  robotCameraMeta.textContent = 'Starting DOGZILLA camera stream through the backend proxy.'
+  robotCameraFrame.removeAttribute('src')
+  setDogzillaCameraFrameSource(streamUrl)
+  scheduleDogzillaCameraLoadTimeout()
+}
+
+function setDogzillaCameraFrameSource(streamUrl) {
+  robotCameraFrame.src = streamUrl
+}
+
+function scheduleDogzillaCameraLoadTimeout() {
+  clearDogzillaCameraLoadTimeout()
+  robotCameraLoadTimerId = window.setTimeout(() => {
+    if (!robotCameraFrame.dataset.streamUrl || robotCameraFrame.naturalWidth > 0) {
+      return
     }
-  } else {
+
+    clearDogzillaCameraTimers()
     robotCameraFrame.removeAttribute('src')
+    robotCameraChip.textContent = 'Camera unavailable'
+    robotCameraMeta.textContent = 'Camera did not respond. Run Diagnostics to check the Pi camera and YOLO services.'
+  }, DOGZILLA_CAMERA_LOAD_TIMEOUT_MS)
+}
+
+function clearDogzillaCameraTimers() {
+  clearDogzillaCameraLoadTimeout()
+}
+
+function clearDogzillaCameraLoadTimeout() {
+  if (robotCameraLoadTimerId) {
+    window.clearTimeout(robotCameraLoadTimerId)
+    robotCameraLoadTimerId = null
   }
 }
 
@@ -1905,8 +2378,8 @@ async function refreshDogzillaCameraStatus() {
     }
 
     if (payload.status === 'ok') {
-      robotCameraChip.textContent = 'Live ready'
-      robotCameraMeta.textContent = `${payload.detail || 'Camera stream is responding.'} ${payload.streamUrl || ''}`.trim()
+      robotCameraChip.textContent = robotCameraFrame.getAttribute('src') ? 'Live' : 'Ready'
+      robotCameraMeta.textContent = `${payload.detail || 'Camera port is reachable.'} ${payload.streamUrl || ''}`.trim()
       return
     }
 
@@ -1919,23 +2392,36 @@ async function refreshDogzillaCameraStatus() {
 }
 
 function handleDogzillaCameraFrameError() {
-  if (robotCameraPanel.hidden || !robotCameraFrame.dataset.streamUrl) {
+  if (!robotCameraFrame.dataset.streamUrl) {
     return
   }
 
-  robotCameraChip.textContent = 'Stream error'
-  if (!robotCameraMeta.textContent || /responding/i.test(robotCameraMeta.textContent)) {
-    robotCameraMeta.textContent = 'Camera stream failed to load through the backend proxy.'
-  }
+  clearDogzillaCameraTimers()
+  robotCameraFrame.removeAttribute('src')
+  robotCameraChip.textContent = 'Camera unavailable'
+  robotCameraMeta.textContent = 'Camera failed to load through the backend proxy. Run Diagnostics to check the Pi camera and YOLO services.'
 }
 
 function handleDogzillaCameraFrameLoad() {
-  if (robotCameraPanel.hidden || !robotCameraFrame.dataset.streamUrl) {
+  if (!robotCameraFrame.dataset.streamUrl) {
     return
   }
 
+  clearDogzillaCameraLoadTimeout()
   robotCameraChip.textContent = 'Live'
   robotCameraMeta.textContent = 'Receiving DOGZILLA camera stream through the backend proxy.'
+}
+
+function formatDogzillaCameraSource(camera, upstreamStreamUrl) {
+  if (camera?.processed && camera?.sourceStreamUrl) {
+    return `YOLO camera stream from ${camera.sourceStreamUrl}.`
+  }
+
+  if (upstreamStreamUrl) {
+    return `Camera source: ${upstreamStreamUrl}.`
+  }
+
+  return 'Camera stream starting.'
 }
 
 function renderProfileOptions() {
@@ -2008,6 +2494,7 @@ function applyRobotTargetSelectionState() {
   emergencyStopStatus.textContent = isRealRobotTargetActive()
     ? 'Ready.'
     : 'Switch to a real robot target before stop can reach DOGZILLA.'
+  applyManualControlState()
 }
 
 function formatSource(source) {
@@ -2552,6 +3039,23 @@ function applyAppConfig() {
 window.addEventListener('beforeunload', () => {
   speechController?.dispose?.()
   speechController?.stop()
+  if (manualControlState.enabled && isRealRobotTargetActive()) {
+    navigator.sendBeacon?.(
+      toApiUrl('/api/robot/manual-control'),
+      new Blob([JSON.stringify({
+        forward: 0,
+        strafe: 0,
+        turn: 0,
+        source: 'page-unload',
+        gait: 'walk',
+        pace: 'normal',
+      })], { type: 'application/json' }),
+    )
+  }
+
+  if (manualControlFrameId) {
+    window.cancelAnimationFrame(manualControlFrameId)
+  }
 
   if (robotFeedbackTimerId) {
     window.clearInterval(robotFeedbackTimerId)

@@ -112,9 +112,10 @@ class VisionWorker(threading.Thread):
 
     def capture_loop(self) -> None:
         while not self.stop_event.is_set():
+            control_socket: socket.socket | None = None
             try:
                 if is_http_camera(self.args.camera_url):
-                    wake_camera(self.args)
+                    control_socket = open_camera_control_session(self.args)
 
                 for frame in read_camera_frames(self.args.camera_url, self.args.camera_timeout):
                     if self.stop_event.is_set():
@@ -141,6 +142,9 @@ class VisionWorker(threading.Thread):
                 with self.state.lock:
                     self.state.latest_error = str(error)
                 time.sleep(self.args.restart_delay)
+            finally:
+                if control_socket:
+                    control_socket.close()
 
     def inference_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -300,12 +304,14 @@ def detection_to_json(detection: Detection) -> dict[str, Any]:
     }
 
 
-def wake_camera(args: argparse.Namespace) -> None:
+def open_camera_control_session(args: argparse.Namespace) -> socket.socket | None:
     if not args.camera_control_host or not args.camera_control_port:
-        return
+        return None
+
     try:
-        with socket.create_connection((args.camera_control_host, args.camera_control_port), timeout=args.camera_control_timeout) as sock:
-            sock.sendall(args.camera_wake_command.encode("utf-8"))
+        sock = socket.create_connection((args.camera_control_host, args.camera_control_port), timeout=args.camera_control_timeout)
+        sock.sendall(args.camera_wake_command.encode("utf-8"))
+        return sock
     except Exception as error:
         raise RuntimeError(f"Camera control wake failed: {error}") from error
 

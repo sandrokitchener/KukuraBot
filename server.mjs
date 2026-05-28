@@ -19,10 +19,12 @@ import {
   getDogzillaLidarScan,
 } from './lib/dogzilla-lidar-client.mjs'
 import {
+  DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH,
   DOGZILLA_CAMERA_STATUS_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
   getDogzillaCameraStatus,
   proxyDogzillaCameraStream,
+  sendDogzillaCameraSnapshot,
 } from './lib/dogzilla-camera-proxy.mjs'
 import { runDogzillaPreflight } from './lib/dogzilla-preflight.mjs'
 import {
@@ -33,7 +35,7 @@ import {
 import { loadPublicConfig, processModelResult, processUserInput } from './lib/app-service.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
-import { buildRobotRuntimePreview } from './lib/robot-command-compiler.mjs'
+import { buildRobotManualControlPreview, buildRobotRuntimePreview } from './lib/robot-command-compiler.mjs'
 import {
   dispatchRobotEmergencyStop,
   dispatchRobotCommand,
@@ -169,6 +171,10 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STATUS_PATH) {
       return sendJson(response, 200, await getDogzillaCameraStatus())
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH) {
+      return sendDogzillaCameraSnapshot(response)
     }
 
     if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STREAM_PROXY_PATH) {
@@ -358,6 +364,14 @@ const server = createServer(async (request, response) => {
       return sendJson(response, statusCode, { preview, dispatch })
     }
 
+    if (request.method === 'POST' && requestUrl.pathname === '/api/robot/manual-control') {
+      const body = await readJsonBody(request)
+      const preview = await buildRobotManualControlPreview(body || {})
+      const dispatch = await dispatchRobotCommand(preview)
+      const statusCode = dispatch.status === 'error' ? 502 : 200
+      return sendJson(response, statusCode, { preview, dispatch })
+    }
+
     if (request.method === 'POST' && requestUrl.pathname === '/api/robot/stop') {
       await readJsonBody(request)
       const dispatch = await dispatchRobotEmergencyStop()
@@ -386,6 +400,15 @@ server.on('upgrade', (request, socket, head) => {
   }).catch((error) => {
     rejectFailedUpgrade(socket, error)
   })
+})
+
+server.on('error', (error) => {
+  if (error?.code === 'EADDRINUSE') {
+    console.error(`App server could not start because http://${HOST}:${PORT} is already in use.`)
+    process.exit(1)
+  }
+
+  throw error
 })
 
 server.listen(PORT, HOST, async () => {

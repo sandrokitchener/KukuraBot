@@ -1,6 +1,7 @@
 .omx/
 node_modules/
 models/
+output/
 npm-debug.log*
 dogzilla_flash_work_*/
 __pycache__/

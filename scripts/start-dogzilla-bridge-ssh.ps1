@@ -56,15 +56,39 @@ if ($Bridge -eq "direct") {
   $liveFlag = if ($Live) { " --live" } else { "" }
   $serverCommand = "$envPrefix python3 sidecars/dogzilla_lib_bridge/server.py --host 0.0.0.0 --port $port$liveFlag"
   $logName = "direct-bridge"
+  $processPath = "sidecars/dogzilla_lib_bridge/server.py"
 } else {
   $port = if ($BridgePort -gt 0) { $BridgePort } else { 8892 }
   $serverCommand = "$envPrefix python3 sidecars/ros2_bridge/server.py --host 0.0.0.0 --port $port"
   $logName = "ros2-bridge"
+  $processPath = "sidecars/ros2_bridge/server.py"
 }
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
-  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && (nohup bash -lc $serverCommandQuoted > logs/$logName.log 2>&1 < /dev/null & echo `$! > logs/$logName.pid) && sleep 1 && cat logs/$logName.pid"
+  $stopCommand = @"
+python3 - <<'PY'
+import os, signal, subprocess
+target = '$processPath'
+try:
+    rows = subprocess.check_output(['pgrep', '-af', target], text=True).splitlines()
+except subprocess.CalledProcessError:
+    rows = []
+for row in rows:
+    pid = int(row.split()[0])
+    if pid in (os.getpid(), os.getppid()):
+        continue
+    try:
+        comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
+    except OSError:
+        continue
+    if comm.startswith('python'):
+        os.kill(pid, signal.SIGTERM)
+        print(f'stopped {target} {pid}')
+PY
+"@
+  $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand.Trim()
+  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && if [ -f logs/$logName.pid ]; then kill `$(cat logs/$logName.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1 && (nohup bash -lc $serverCommandQuoted > logs/$logName.log 2>&1 < /dev/null & echo `$! > logs/$logName.pid) && sleep 1 && cat logs/$logName.pid"
   Write-Host "Starting $Bridge bridge on $Alias port $port in remote background."
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
   exit $LASTEXITCODE
