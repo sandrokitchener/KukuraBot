@@ -6,6 +6,7 @@ import { loadAppConfig } from './lib/app-config.mjs'
 import { buildIsaacSimPreview } from './lib/isaacsim-command-compiler.mjs'
 import {
   getDogzillaConnectionCenter,
+  loadDogzillaConnectionConfig,
   runDogzillaConnectionAction,
   saveDogzillaConnectionConfig,
 } from './lib/dogzilla-connection-center.mjs'
@@ -22,6 +23,7 @@ import {
   DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH,
   DOGZILLA_CAMERA_STATUS_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
+  getDogzillaCameraSnapshot,
   getDogzillaCameraStatus,
   proxyDogzillaCameraStream,
   sendDogzillaCameraSnapshot,
@@ -48,6 +50,12 @@ import {
   loadRobotRuntimeConfig,
   setActiveRobotTarget,
 } from './lib/robot-runtime-config.mjs'
+import {
+  listReconSnapshots,
+  readReconSnapshotImage,
+  RECON_SNAPSHOT_API_PATH,
+  saveReconSnapshot,
+} from './lib/recon-snapshot-store.mjs'
 import {
   getRobotStateSnapshot,
   handleRobotStateStreamUpgrade,
@@ -181,6 +189,35 @@ const server = createServer(async (request, response) => {
       return proxyDogzillaCameraStream(response)
     }
 
+    if (request.method === 'GET' && requestUrl.pathname === RECON_SNAPSHOT_API_PATH) {
+      const limit = parsePositiveInteger(requestUrl.searchParams.get('limit'), 24)
+      return sendJson(response, 200, {
+        status: 'ok',
+        snapshots: await listReconSnapshots({ limit }),
+      })
+    }
+
+    const reconSnapshotImageId = matchReconSnapshotImagePath(requestUrl.pathname)
+    if (request.method === 'GET' && reconSnapshotImageId) {
+      return sendReconSnapshotImage(response, reconSnapshotImageId)
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === RECON_SNAPSHOT_API_PATH) {
+      const body = await readJsonBody(request)
+      const result = await captureReconSnapshot(body || {})
+
+      if (!result.ok) {
+        return sendJson(response, result.statusCode || 502, {
+          status: 'error',
+          error: result.error || 'Recon snapshot failed.',
+          robotState: result.robotState,
+          lidarScan: result.lidarScan,
+        })
+      }
+
+      return sendJson(response, 201, result.snapshot)
+    }
+
     if (request.method === 'POST' && requestUrl.pathname === '/api/chat') {
       const body = await readJsonBody(request)
       return sendJson(response, 200, await processUserInput(body?.input))
@@ -284,24 +321,7 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === 'GET' && requestUrl.pathname === '/api/robot/state') {
-      const robotRuntimeConfig = await loadRobotRuntimeConfig()
-      const robotRos2Config = await loadRobotRos2Config()
-      const streamSnapshot = getRobotStateSnapshot()
-      const bridgeState = await fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config)
-      const bridgeRobot = buildRobotStateFromBridge(bridgeState, robotRuntimeConfig)
-      const robots = bridgeRobot
-        ? [bridgeRobot, ...streamSnapshot.robots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
-        : streamSnapshot.robots
-
-      return sendJson(response, 200, {
-        ...streamSnapshot,
-        status: bridgeRobot ? 'ok' : streamSnapshot.status,
-        activeRobot: bridgeRobot || streamSnapshot.activeRobot,
-        robots,
-        streamPath: ROBOT_STATE_STREAM_PATH,
-        activeTarget: robotRuntimeConfig.activeTarget,
-        bridgeState,
-      })
+      return sendJson(response, 200, await buildCurrentRobotStateSnapshot())
     }
 
     if (request.method === 'GET' && requestUrl.pathname === '/api/speech/health') {
@@ -487,6 +507,115 @@ async function readJsonBody(request) {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString('utf-8'))
+}
+
+async function buildCurrentRobotStateSnapshot() {
+  const robotRuntimeConfig = await loadRobotRuntimeConfig()
+  const robotRos2Config = await loadRobotRos2Config()
+  const streamSnapshot = getRobotStateSnapshot()
+  const bridgeState = await fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config)
+  const bridgeRobot = buildRobotStateFromBridge(bridgeState, robotRuntimeConfig)
+  const robots = bridgeRobot
+    ? [bridgeRobot, ...streamSnapshot.robots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
+    : streamSnapshot.robots
+
+  return {
+    ...streamSnapshot,
+    status: bridgeRobot ? 'ok' : streamSnapshot.status,
+    activeRobot: bridgeRobot || streamSnapshot.activeRobot,
+    robots,
+    streamPath: ROBOT_STATE_STREAM_PATH,
+    activeTarget: robotRuntimeConfig.activeTarget,
+    bridgeState,
+  }
+}
+
+async function captureReconSnapshot(body) {
+  const note = typeof body?.note === 'string' ? body.note : ''
+  const tags = Array.isArray(body?.tags) ? body.tags : []
+  const connectionConfig = await loadDogzillaConnectionConfig()
+  const capturedAt = new Date()
+  const [cameraSnapshot, robotState, lidarScan] = await Promise.all([
+    getDogzillaCameraSnapshot({ config: connectionConfig }),
+    buildCurrentRobotStateSnapshot(),
+    getDogzillaLidarScan({ config: connectionConfig, timeoutMs: 1200 }),
+  ])
+
+  if (!cameraSnapshot.ok) {
+    return {
+      ok: false,
+      statusCode: cameraSnapshot.statusCode || 502,
+      error: cameraSnapshot.error || 'Camera snapshot failed.',
+      robotState,
+      lidarScan,
+    }
+  }
+
+  const snapshot = await saveReconSnapshot({
+    imageBuffer: cameraSnapshot.jpeg,
+    imageContentType: cameraSnapshot.contentType || 'image/jpeg',
+    robotState,
+    lidarScan,
+    map: buildReconMapContext(robotState, lidarScan),
+    camera: buildReconCameraContext(connectionConfig.camera),
+    note,
+    tags,
+    capturedAt,
+  })
+
+  return {
+    ok: true,
+    snapshot,
+  }
+}
+
+function buildReconCameraContext(camera = {}) {
+  return {
+    label: camera.label || 'DOGZILLA camera',
+    processed: camera.processed === true,
+    streamUrl: camera.streamUrl || '',
+    sourceStreamUrl: camera.sourceStreamUrl || '',
+    proxyStreamPath: camera.proxyStreamPath || DOGZILLA_CAMERA_STREAM_PROXY_PATH,
+    proxySnapshotPath: camera.proxySnapshotPath || DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH,
+    capturedVia: 'backend-camera-snapshot',
+  }
+}
+
+function buildReconMapContext(robotState, lidarScan) {
+  return {
+    status: robotState?.activeRobot?.pose ? 'pose' : 'pending-pose',
+    pose: robotState?.activeRobot?.pose ?? null,
+    activeTarget: robotState?.activeTarget ?? null,
+    lidarStatus: lidarScan?.status || 'unknown',
+    lidarPointCount: Array.isArray(lidarScan?.points) ? lidarScan.points.length : 0,
+    source: 'robot-state-plus-lidar',
+  }
+}
+
+async function sendReconSnapshotImage(response, id) {
+  try {
+    const image = await readReconSnapshotImage(id)
+    response.writeHead(200, {
+      'content-type': image.contentType,
+      'cache-control': 'private, max-age=60',
+    })
+    response.end(image.buffer)
+  } catch (error) {
+    const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
+    return sendJson(response, statusCode, {
+      error: error instanceof Error ? error.message : 'Recon snapshot image unavailable.',
+    })
+  }
+}
+
+function matchReconSnapshotImagePath(pathname) {
+  const match = /^\/api\/recon\/snapshots\/([^/]+)\/image$/.exec(pathname)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function parsePositiveInteger(value, fallback) {
+  const numeric = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
 }
 
 function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig) {
