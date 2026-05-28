@@ -72,6 +72,9 @@ const robotCameraPanel = document.querySelector('#robot-camera-panel')
 const robotCameraFrame = document.querySelector('#robot-camera-frame')
 const robotCameraChip = document.querySelector('#robot-camera-chip')
 const robotCameraMeta = document.querySelector('#robot-camera-meta')
+const robotCameraSnapshotButton = document.querySelector('#robot-camera-snapshot-button')
+const robotCameraSnapshotNote = document.querySelector('#robot-camera-snapshot-note')
+const reconSnapshotList = document.querySelector('#recon-snapshot-list')
 const settingsToggle = document.querySelector('#settings-toggle')
 const settingsDrawer = document.querySelector('#settings-drawer')
 const connectionToggle = document.querySelector('#connection-toggle')
@@ -174,6 +177,7 @@ let activeThinkingCue = null
 let thinkingCueToken = 0
 let robotMapBaseMeta = ''
 let robotLidarSummary = ''
+let reconSnapshots = []
 const manualControlState = {
   enabled: false,
   pending: false,
@@ -269,6 +273,7 @@ connectionToggle.addEventListener('click', handleConnectionToggle)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
+robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
 
 for (const button of connectionActionButtons) {
   button.addEventListener('click', handleDogzillaConnectionAction)
@@ -428,6 +433,7 @@ async function boot() {
     }
 
     await refreshRobotFeedback()
+    void refreshReconSnapshots()
     void ensureDogzillaRobotLinkReady()
     setStatus(`Ready on ${runtimeConfig.activeProfile.label}. Target: ${runtimeConfig.robotRuntime.activeTarget.label}.`)
   } catch (error) {
@@ -1407,6 +1413,71 @@ async function refreshDogzillaLidarScan() {
   }
 }
 
+async function handleReconSnapshot() {
+  const streamUrl = robotCameraFrame.dataset.streamUrl || ''
+  if (!streamUrl) {
+    setStatus('Camera stream not configured.', 'error')
+    robotCameraMeta.textContent = 'Camera stream not configured.'
+    return
+  }
+
+  const originalLabel = robotCameraSnapshotButton.textContent
+  robotCameraSnapshotButton.disabled = true
+  robotCameraSnapshotButton.textContent = 'Saving'
+  robotCameraChip.textContent = 'Snapshot'
+  robotCameraMeta.textContent = 'Saving recon snapshot...'
+
+  try {
+    const response = await apiFetch('/api/recon/snapshots', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        note: robotCameraSnapshotNote.value,
+        tags: ['needs-review'],
+      }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Recon snapshot failed.')
+    }
+
+    robotCameraSnapshotNote.value = ''
+    reconSnapshots = [payload, ...reconSnapshots.filter((snapshot) => snapshot.id !== payload.id)].slice(0, 8)
+    renderReconSnapshots()
+    robotCameraChip.textContent = 'Saved'
+    robotCameraMeta.textContent = formatReconSnapshotSavedMeta(payload)
+    setStatus(`Recon snapshot saved: ${formatEventTimestamp(payload.capturedAt)}.`)
+  } catch (error) {
+    robotCameraChip.textContent = 'Snapshot failed'
+    robotCameraMeta.textContent = formatError(error)
+    setStatus(`Recon snapshot failed: ${formatError(error)}`, 'error')
+  } finally {
+    robotCameraSnapshotButton.disabled = !robotCameraFrame.dataset.streamUrl
+    robotCameraSnapshotButton.textContent = originalLabel
+  }
+}
+
+async function refreshReconSnapshots() {
+  try {
+    const response = await apiFetch('/api/recon/snapshots?limit=8')
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Recon snapshots unavailable.')
+    }
+
+    reconSnapshots = Array.isArray(payload.snapshots) ? payload.snapshots : []
+    renderReconSnapshots()
+  } catch (error) {
+    if (reconSnapshotList) {
+      reconSnapshotList.replaceChildren(buildReconSnapshotEmpty(`Snapshot cache unavailable: ${formatError(error)}`))
+    }
+  }
+}
+
 function handleSettingsToggle() {
   const shouldOpen = settingsDrawer.hidden
 
@@ -2291,6 +2362,7 @@ function applyDogzillaCameraConfig() {
     robotCameraFrame.dataset.statusPath = ''
     robotCameraFrame.dataset.snapshotPath = ''
     robotCameraFrame.dataset.viewerMode = ''
+    robotCameraSnapshotButton.disabled = true
     robotCameraChip.textContent = 'No stream'
     robotCameraMeta.textContent = 'Camera stream not configured.'
     return
@@ -2300,6 +2372,7 @@ function applyDogzillaCameraConfig() {
   robotCameraFrame.dataset.statusPath = camera?.proxyStatusPath || ''
   robotCameraFrame.dataset.snapshotPath = camera?.proxySnapshotPath ? toApiUrl(camera.proxySnapshotPath) : ''
   robotCameraFrame.dataset.viewerMode = 'stream'
+  robotCameraSnapshotButton.disabled = false
   robotCameraChip.textContent = robotCameraFrame.getAttribute('src') === streamUrl ? 'Live' : 'Starting'
   robotCameraMeta.textContent = formatDogzillaCameraSource(camera, upstreamStreamUrl)
 }
@@ -2312,6 +2385,7 @@ function applyRobotView(view) {
 
   if (showCamera) {
     startDogzillaCameraViewer()
+    void refreshReconSnapshots()
   }
 }
 
@@ -2422,6 +2496,77 @@ function formatDogzillaCameraSource(camera, upstreamStreamUrl) {
   }
 
   return 'Camera stream starting.'
+}
+
+function renderReconSnapshots() {
+  if (!reconSnapshotList) {
+    return
+  }
+
+  if (!reconSnapshots.length) {
+    reconSnapshotList.replaceChildren(buildReconSnapshotEmpty('No snapshots saved.'))
+    return
+  }
+
+  reconSnapshotList.replaceChildren(...reconSnapshots.slice(0, 8).map(buildReconSnapshotItem))
+}
+
+function buildReconSnapshotEmpty(message) {
+  const empty = document.createElement('div')
+  empty.className = 'recon-snapshot-empty'
+  empty.textContent = message
+  return empty
+}
+
+function buildReconSnapshotItem(snapshot) {
+  const item = document.createElement('article')
+  item.className = 'recon-snapshot-item'
+
+  const image = document.createElement('img')
+  image.src = toApiUrl(snapshot.image?.url || '')
+  image.alt = `Recon snapshot ${formatEventTimestamp(snapshot.capturedAt)}`
+  image.loading = 'lazy'
+
+  const body = document.createElement('div')
+  const title = document.createElement('strong')
+  title.textContent = snapshot.note || 'Needs review'
+
+  const meta = document.createElement('span')
+  meta.textContent = formatReconSnapshotItemMeta(snapshot)
+
+  body.append(title, meta)
+  item.append(image, body)
+  return item
+}
+
+function formatReconSnapshotSavedMeta(snapshot) {
+  const robot = snapshot.activeRobot
+  const robotName = robot?.name || runtimeConfig.robotRuntime.robotName || 'robot'
+  const stateText = robot ? `${robotName} ${robot.task || 'state'} seq ${robot.seq ?? '-'}` : `${robotName} state unavailable`
+  const lidarText = snapshot.map?.lidarStatus ? ` Lidar ${snapshot.map.lidarStatus}.` : ''
+  return `Saved ${formatEventTimestamp(snapshot.capturedAt)}. ${stateText}.${lidarText}`
+}
+
+function formatReconSnapshotItemMeta(snapshot) {
+  const parts = [formatEventTimestamp(snapshot.capturedAt)]
+  const robot = snapshot.activeRobot
+
+  if (robot) {
+    parts.push(`${robot.name || 'Robot'} ${robot.task || 'state'} #${robot.seq ?? '-'}`)
+  }
+
+  const battery = toFiniteNumber(robot?.telemetry?.battery)
+  if (Number.isFinite(battery)) {
+    parts.push(formatBatteryValue(battery))
+  }
+
+  if (snapshot.map?.pose) {
+    parts.push(`x ${formatTelemetryNumber(toFiniteNumber(snapshot.map.pose.x))}, y ${formatTelemetryNumber(toFiniteNumber(snapshot.map.pose.y))}`)
+  } else if (snapshot.map?.lidarStatus) {
+    parts.push(`lidar ${snapshot.map.lidarStatus}`)
+  }
+
+  return parts.join(' | ')
 }
 
 function renderProfileOptions() {

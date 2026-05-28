@@ -196,12 +196,26 @@
           <section id="robot-camera-panel" class="robot-camera-panel" hidden>
             <div class="robot-map-head">
               <h2>Camera</h2>
-              <span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
+              <div class="robot-camera-actions">
+                <span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
+                <button id="robot-camera-snapshot-button" class="snapshot-button" type="button" disabled>Snapshot</button>
+              </div>
+            </div>
+            <div class="snapshot-note-row">
+              <input
+                id="robot-camera-snapshot-note"
+                class="snapshot-note-input"
+                type="text"
+                maxlength="160"
+                aria-label="Snapshot note"
+                placeholder="Inspection note"
+              />
             </div>
             <div class="robot-camera-frame-wrap">
               <img id="robot-camera-frame" class="robot-camera-frame" alt="DOGZILLA camera stream" />
             </div>
             <div id="robot-camera-meta" class="robot-map-meta">Camera stream not configured.</div>
+            <div id="recon-snapshot-list" class="recon-snapshot-list" aria-live="polite"></div>
           </section>
 
           <section class="output-panel">

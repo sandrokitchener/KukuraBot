@@ -288,7 +288,7 @@ body {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto minmax(72px, auto);
   gap: 10px;
   min-height: 238px;
 }
@@ -1247,6 +1247,101 @@ select {
   background: #201c18;
 }
 
+.robot-camera-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.robot-camera-actions .runtime-chip {
+  max-width: 118px;
+}
+
+.snapshot-button {
+  min-width: 94px;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.snapshot-note-row {
+  min-width: 0;
+}
+
+.snapshot-note-input {
+  min-height: 34px;
+}
+
+.recon-snapshot-list {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  min-height: 72px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
+}
+
+.recon-snapshot-empty,
+.recon-snapshot-item {
+  flex: 0 0 min(260px, 84%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f3eee6;
+}
+
+.recon-snapshot-empty {
+  display: grid;
+  place-items: center;
+  min-height: 68px;
+  padding: 10px;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+}
+
+.recon-snapshot-item {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 72px;
+  padding: 6px;
+}
+
+.recon-snapshot-item img {
+  width: 78px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #201c18;
+}
+
+.recon-snapshot-item div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.recon-snapshot-item strong,
+.recon-snapshot-item span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recon-snapshot-item strong {
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.recon-snapshot-item span {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
 .robot-map::before {
   content: "";
   position: absolute;
@@ -1602,6 +1697,20 @@ select {
   .robot-tab:last-child {
     border-right: 0;
   }
+
+  .robot-camera-panel .robot-map-head {
+    flex-wrap: wrap;
+  }
+
+  .robot-camera-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .recon-snapshot-empty,
+  .recon-snapshot-item {
+    flex-basis: min(250px, 90%);
+  }
 }
 
 @media (min-width: 1500px) {
@@ -1854,6 +1963,11 @@ html.android-app .robot-camera-frame-wrap {
   width: 100%;
   border-color: var(--line);
   border-radius: 6px;
+}
+
+html.android-app .recon-snapshot-empty,
+html.android-app .recon-snapshot-item {
+  background: #f3eee6;
 }
 
 html.android-app .robot-map::after {
