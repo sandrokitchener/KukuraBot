@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass, field
+from math import cos, sin
 from typing import Any
 
 
@@ -66,6 +67,18 @@ class DogzillaAdapter:
     def read_state(self, *, want_joints: bool = False, want_battery: bool = True, want_attitude: bool = True) -> AdapterResult:
         raise AdapterError(f"{self.name} does not support state.read")
 
+    def navigate_to_pose(
+        self,
+        *,
+        frame: str,
+        x: float,
+        y: float,
+        yaw: float,
+        waypoint: str = "",
+        arrival_tolerance_meters: float | None = None,
+    ) -> AdapterResult:
+        raise AdapterError(f"{self.name} does not support locomotion.goto")
+
 
 class RecordingDogzillaAdapter(DogzillaAdapter):
     name = "dry-run"
@@ -116,6 +129,26 @@ class RecordingDogzillaAdapter(DogzillaAdapter):
     def read_state(self, *, want_joints: bool = False, want_battery: bool = True, want_attitude: bool = True) -> AdapterResult:
         return self._record("read_state", want_joints=want_joints, want_battery=want_battery, want_attitude=want_attitude)
 
+    def navigate_to_pose(
+        self,
+        *,
+        frame: str,
+        x: float,
+        y: float,
+        yaw: float,
+        waypoint: str = "",
+        arrival_tolerance_meters: float | None = None,
+    ) -> AdapterResult:
+        return self._record(
+            "navigate_to_pose",
+            frame=frame,
+            x=x,
+            y=y,
+            yaw=yaw,
+            waypoint=waypoint,
+            arrival_tolerance_meters=arrival_tolerance_meters,
+        )
+
 
 class RosPublisherDogzillaAdapter(DogzillaAdapter):
     name = "ros-publisher"
@@ -133,6 +166,9 @@ class RosPublisherDogzillaAdapter(DogzillaAdapter):
         linear_x_full_scale_step: float,
         linear_y_full_scale_step: float,
         angular_z_full_scale_step: float,
+        navigate_to_pose_type: Any = None,
+        nav_action_client: Any = None,
+        clock: Any = None,
     ) -> None:
         self.cmd_vel_publisher = cmd_vel_publisher
         self.action_publisher = action_publisher
@@ -140,6 +176,9 @@ class RosPublisherDogzillaAdapter(DogzillaAdapter):
         self.twist_type = twist_type
         self.uint16_type = uint16_type
         self.bool_type = bool_type
+        self.navigate_to_pose_type = navigate_to_pose_type
+        self.nav_action_client = nav_action_client
+        self.clock = clock
         self.deadband = deadband
         self.linear_x_full_scale_step = linear_x_full_scale_step
         self.linear_y_full_scale_step = linear_y_full_scale_step
@@ -182,6 +221,42 @@ class RosPublisherDogzillaAdapter(DogzillaAdapter):
         message.data = enabled
         self.stabilize_publisher.publish(message)
         return AdapterResult(adapter=self.name, executed=True, calls=[{"operation": "publish_stabilize", "params": {"enabled": enabled}}])
+
+    def navigate_to_pose(
+        self,
+        *,
+        frame: str,
+        x: float,
+        y: float,
+        yaw: float,
+        waypoint: str = "",
+        arrival_tolerance_meters: float | None = None,
+    ) -> AdapterResult:
+        if self.navigate_to_pose_type is None or self.nav_action_client is None:
+            raise AdapterError("Nav2 NavigateToPose action client is not configured")
+
+        goal = self.navigate_to_pose_type.Goal()
+        goal.pose.header.frame_id = frame or "map"
+        if self.clock is not None:
+            goal.pose.header.stamp = self.clock.now().to_msg()
+        goal.pose.pose.position.x = x
+        goal.pose.pose.position.y = y
+        goal.pose.pose.position.z = 0.0
+        goal.pose.pose.orientation.z = sin(yaw / 2.0)
+        goal.pose.pose.orientation.w = cos(yaw / 2.0)
+        self.nav_action_client.send_goal_async(goal)
+        call = {
+            "operation": "send_nav2_goal",
+            "params": {
+                "frame": goal.pose.header.frame_id,
+                "x": x,
+                "y": y,
+                "yaw": yaw,
+                "waypoint": waypoint,
+                "arrival_tolerance_meters": arrival_tolerance_meters,
+            },
+        }
+        return AdapterResult(adapter=self.name, executed=True, calls=[call])
 
 
 class YahboomPythonDogzillaAdapter(DogzillaAdapter):
@@ -258,6 +333,7 @@ class YahboomPythonDogzillaAdapter(DogzillaAdapter):
 
     def action_once(self, action_id: int) -> AdapterResult:
         calls: list[dict[str, Any]] = []
+        self._call_if_present("perform", 0, calls=calls)
         self._call("action", action_id, calls=calls)
         return AdapterResult(adapter=self.name, executed=True, calls=calls)
 

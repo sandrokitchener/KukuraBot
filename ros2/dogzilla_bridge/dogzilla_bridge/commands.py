@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import isfinite
+from math import isfinite, pi
 from typing import Any
 
 from dogzilla_bridge.adapters import AdapterResult, DogzillaAdapter
@@ -34,6 +34,7 @@ class DogzillaCommandLimits:
     yaw: RangeLimit = RangeLimit(-11.0, 11.0)
     gaits: tuple[str, ...] = ("walk", "trot")
     paces: tuple[str, ...] = ("slow", "normal", "high")
+    navigation_frames: tuple[str, ...] = ("map",)
 
 
 @dataclass
@@ -135,7 +136,32 @@ def execute_canonical_plan(
         return CommandExecution(status="state.read", adapter_result=adapter_result, details=adapter_result.telemetry)
 
     if kind == "locomotion.goto":
-        return CommandExecution(status="goto-request", details={"reason": "navigation adapter not implemented", "params": params})
+        frame = optional_choice(params.get("frame", "map"), limits.navigation_frames, "frame") or "map"
+        x = coerce_float(params.get("x"))
+        y = coerce_float(params.get("y"))
+        yaw = normalize_angle(coerce_float(params.get("yaw"), default=0.0))
+        waypoint = str(params.get("waypoint") or "")
+        arrival_tolerance_meters = coerce_optional_float(params.get("arrivalToleranceMeters", params.get("arrival_tolerance_meters")))
+        adapter_result = adapter.navigate_to_pose(
+            frame=frame,
+            x=x,
+            y=y,
+            yaw=yaw,
+            waypoint=waypoint,
+            arrival_tolerance_meters=arrival_tolerance_meters,
+        )
+        return CommandExecution(
+            status="locomotion.goto",
+            adapter_result=adapter_result,
+            details={
+                "frame": frame,
+                "x": x,
+                "y": y,
+                "yaw": yaw,
+                "waypoint": waypoint,
+                "arrivalToleranceMeters": arrival_tolerance_meters,
+            },
+        )
 
     if isinstance(kind, str) and kind.startswith("behavior."):
         return CommandExecution(status="unsupported", details={"reason": "behavior adapter not implemented", "kind": kind})
@@ -167,6 +193,21 @@ def coerce_float(value: Any, *, default: float = 0.0) -> float:
         raise CommandValidationError(f"expected finite numeric value, got {value!r}")
 
     return numeric
+
+
+def coerce_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+
+    return coerce_float(value)
+
+
+def normalize_angle(value: float) -> float:
+    while value > pi:
+        value -= 2 * pi
+    while value <= -pi:
+        value += 2 * pi
+    return value
 
 
 def optional_clamp(limit: RangeLimit, params: dict[str, Any], *keys: str) -> float | None:

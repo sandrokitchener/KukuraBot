@@ -8,12 +8,11 @@ param(
   [string]$KeyPath = "$HOME\.ssh\robodoge_pi_ed25519",
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8896,
-  [ValidateSet("oradar", "ydlidar")]
+  [ValidateSet("oradar")]
   [string]$Driver = "oradar",
-  [string]$SerialPort = "/dev/ttyAMA1",
+  [string]$SerialPort = "auto",
   [int]$Baudrate = 230400,
   [string]$Topic = "/scan",
-  [string]$YdlidarParams = "/root/yahboomcar_ws/install/ydlidar_ros2_driver/share/ydlidar_ros2_driver/params/X2.yaml",
   [int]$RosDomainId = 16,
   [string]$DockerImage = "yahboomtechnology/ros-humble:3.6",
   [switch]$Background,
@@ -45,7 +44,20 @@ if ($LASTEXITCODE -ne 0) {
   throw "scp failed for dogzilla_lidar_bridge sidecar"
 }
 
-$serverCommand = "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd $RemoteRoot && python3 sidecars/dogzilla_lidar_bridge/server.py --host 0.0.0.0 --port $Port --driver $Driver --serial-port $SerialPort --baudrate $Baudrate --topic $Topic --ydlidar-params $YdlidarParams"
+$effectiveSerialPort = $SerialPort
+if ($SerialPort -eq "auto") {
+  $detectSerialCommand = @'
+printf '/dev/ttyAMA1'
+'@
+  $effectiveSerialPort = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $detectSerialCommand
+  $effectiveSerialPort = ($effectiveSerialPort | Out-String).Trim()
+  if (-not $effectiveSerialPort) {
+    $effectiveSerialPort = "/dev/ttyAMA1"
+  }
+  Write-Host "Auto-selected DOGZILLA lidar serial port: $effectiveSerialPort"
+}
+
+$serverCommand = "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd $RemoteRoot && python3 sidecars/dogzilla_lidar_bridge/server.py --host 0.0.0.0 --port $Port --driver $Driver --serial-port $effectiveSerialPort --baudrate $Baudrate --topic $Topic --no-scan-odom"
 $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
 $containerName = "robodoge-lidar-bridge"
 

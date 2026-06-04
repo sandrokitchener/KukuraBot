@@ -121,7 +121,22 @@
 
         <section class="robot-column">
           <nav class="robot-tabs" aria-label="Robot tabs">
-            <button class="robot-tab is-active" type="button" aria-selected="true" data-robot-view="overview">DOGZILLA</button>
+            <div id="primary-robot-tab-shell" class="robot-tab-shell">
+              <button class="robot-tab is-active" type="button" aria-selected="true" data-robot-view="overview">
+                <span id="primary-robot-tab-name">Questing Beast</span>
+              </button>
+              <button
+                id="robot-name-edit-button"
+                class="robot-name-edit-button"
+                type="button"
+                aria-label="Edit robot name"
+                title="Edit robot name"
+              >✎</button>
+              <form id="robot-name-edit-form" class="robot-name-edit-form" hidden>
+                <input id="robot-name-input" type="text" maxlength="64" autocomplete="off" aria-label="Robot name" />
+                <button id="robot-name-save-button" type="submit" aria-label="Save robot name" title="Save robot name">✓</button>
+              </form>
+            </div>
             <button class="robot-tab" type="button" aria-selected="false" data-robot-view="camera">Camera</button>
           </nav>
 
@@ -178,7 +193,10 @@
               </div>
               <div>
                 <span class="robot-state-label">Battery</span>
-                <strong id="robot-battery-value">-</strong>
+                <div id="robot-battery-meter" class="battery-meter" data-state="unknown" style="--battery-fill: 0%;" role="img" aria-label="Battery unavailable">
+                  <span class="battery-meter-fill" aria-hidden="true"></span>
+                  <strong id="robot-battery-value" class="battery-meter-value">-</strong>
+                </div>
                 <div id="robot-telemetry-meta" class="meta-note"></div>
               </div>
               <div>
@@ -198,7 +216,9 @@
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
               <span class="robot-map-axis robot-map-axis-y" aria-hidden="true"></span>
+              <span id="robot-map-track" class="robot-map-track" aria-hidden="true"></span>
               <span id="robot-map-dot" class="robot-map-dot" aria-hidden="true"></span>
+              <span id="robot-pose-readout" class="robot-pose-readout">pose -</span>
             </div>
             <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>
           </section>
@@ -340,6 +360,14 @@
             <button type="button" data-connection-action="probe-support">Check extras</button>
           </div>
           <div class="connection-url-grid">
+            <div>
+              <span class="meta-label">Robot ID</span>
+              <strong id="dogzilla-robot-id">-</strong>
+            </div>
+            <div>
+              <span class="meta-label">Robot name</span>
+              <strong id="dogzilla-robot-name">Questing Beast</strong>
+            </div>
             <div>
               <span class="meta-label">Robot bridge</span>
               <strong id="dogzilla-direct-url">-</strong>

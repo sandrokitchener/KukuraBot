@@ -28,6 +28,10 @@ import {
   getDogzillaLidarScan,
 } from './lib/dogzilla-lidar-client.mjs'
 import {
+  loadDogzillaMapOrigin,
+  saveDogzillaMapOriginFromPose,
+} from './lib/dogzilla-map-frame.mjs'
+import {
   DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH,
   DOGZILLA_CAMERA_STATUS_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
@@ -97,7 +101,7 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
   'onnxruntime-web',
   'dist',
 )
-const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '127.0.0.1'
+const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '0.0.0.0'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const appConfig = await loadAppConfig()
 const APP_GENERATION_ID = randomUUID()
@@ -227,6 +231,35 @@ const server = createServer(async (request, response) => {
       const result = await getDogzillaRobotPose()
       const statusCode = result.status === 'disabled' ? 404 : 200
       return sendJson(response, statusCode, result)
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/map-origin') {
+      const origin = await loadDogzillaMapOrigin()
+      return sendJson(response, 200, {
+        ok: true,
+        configured: !!origin,
+        origin,
+      })
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/map-origin/capture') {
+      const body = await readJsonBody(request)
+      const pose = await getDogzillaRobotPose()
+      if (pose.status === 'disabled' || pose.ok === false) {
+        return sendJson(response, 502, {
+          ok: false,
+          error: pose.error || 'DOGZILLA map pose unavailable',
+          pose,
+        })
+      }
+
+      const origin = await saveDogzillaMapOriginFromPose(pose, {
+        label: body?.label || 'home_origin',
+      })
+      return sendJson(response, 200, {
+        ok: true,
+        origin,
+      })
     }
 
     if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/pose/track') {

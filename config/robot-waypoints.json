@@ -32,6 +32,22 @@
             "Keep enough clearance that the body can rotate without clipping furniture."
           ]
         },
+
+        "kitchen": {
+          "kind": "map_pose",
+          "frame": "map",
+          "x": 5.18,
+          "y": 0.38,
+          "yaw": 2.66,
+          "arrivalToleranceMeters": 0.25,
+          "physicalSpot": "Verified kitchen waypoint in the current map frame",
+          "anchorHint": "Re-capture this waypoint if the Cartographer map origin is reset or a new map is built",
+          "verified": true,
+          "notes": [
+            "Captured map pose: x=5.18, y=0.38, yaw=2.66.",
+            "Keep enough clearance that the body can rotate without clipping furniture."
+          ]
+        },
         "garage": {
           "kind": "map_pose",
           "frame": "map",

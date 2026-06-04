@@ -15,6 +15,11 @@ test('Android shell and web app share the connection center surface', async () =
   const piConfirmCue = appJs.match(/async function playRobotConfirmCue[\s\S]+?\n}/)?.[0] || ''
   const piThinkingCue = appJs.match(/async function playRobotThinkingCue[\s\S]+?\n}/)?.[0] || ''
   const lidarFailureFormatter = appJs.match(/function formatLidarFailureSummary[\s\S]+?function setRobotMapMeta/)?.[0] || ''
+  const assistantMetaFormatter = appJs.match(/function buildAssistantMeta[\s\S]+?function buildCompletionStatus/)?.[0] || ''
+  const completionStatusFormatter = appJs.match(/function buildCompletionStatus[\s\S]+?function formatParsedOutput/)?.[0] || ''
+  const parsedOutputFormatter = appJs.match(/function formatParsedOutput[\s\S]+?function formatActiveRuntimeSummary/)?.[0] || ''
+  const chatSubmitHandler = appJs.match(/async function handleChatSubmit[\s\S]+?async function submitChatMessage/)?.[0] || ''
+  const assistantTextFormatter = appJs.match(/function buildAssistantText[\s\S]+?function buildCompletionStatus/)?.[0] || ''
   const tauriConfig = JSON.parse(tauriConfigText)
   const [logo, appIcon, qbMark] = await Promise.all([
     stat('public/assets/questing-beast-logo.png'),
@@ -79,6 +84,20 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(appJs, /DOGZILLA direct bridge unreachable/)
   assert.match(appJs, /Stale robot pose cleared/)
   assert.match(appJs, /renderRobotPoseTrack\(snapshot\?\.poseTrack/)
+  assert.ok(assistantMetaFormatter)
+  assert.ok(completionStatusFormatter)
+  assert.ok(parsedOutputFormatter)
+  assert.ok(chatSubmitHandler)
+  assert.ok(assistantTextFormatter)
+  assert.match(chatSubmitHandler, /text: buildAssistantText\(payload\)/)
+  assert.doesNotMatch(chatSubmitHandler, /text: payload\.response/)
+  assert.match(assistantTextFormatter, /buildTrickAssistantText\(payload\)/)
+  assert.match(assistantMetaFormatter, /formatActiveRuntimeSummary\(payload\)/)
+  assert.doesNotMatch(assistantMetaFormatter, /formatIsaacSummary\(payload\.isaacSim/)
+  assert.match(completionStatusFormatter, /formatActiveRuntimeSummary\(payload\)/)
+  assert.doesNotMatch(completionStatusFormatter, /formatIsaacSummary\(payload\.isaacSim/)
+  assert.match(parsedOutputFormatter, /isIsaacRuntimeTarget\(payload\) && payload\.isaacSim/)
+  assert.match(parsedOutputFormatter, /isRobotRuntimeTarget\(payload\) && payload\.robotRuntime/)
   assert.doesNotMatch(serverJs, /pose:\s*localPose/)
   assert.doesNotMatch(serverJs, /local-odom-only/)
   assert.match(serverJs, /bridgeOwnsActiveRobot/)

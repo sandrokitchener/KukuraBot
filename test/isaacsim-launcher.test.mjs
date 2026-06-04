@@ -81,6 +81,50 @@ test('startManagedIsaacEnvironment still launches Isaac when sidecar already hea
   assert.equal(spawnCalls[0][0], path.join(rootDir, 'scripts', 'launch-isaac-robot-controller.bat'))
 })
 
+test('startManagedIsaacEnvironment replaces healthy sidecar when requested', async () => {
+  const rootDir = path.resolve('C:/Users/sandr/OneDrive/Documents/Robo-Doge')
+  const spawnCalls = []
+  const stopCalls = []
+  const fakeChild = createFakeChild()
+
+  const result = await startManagedIsaacEnvironment({
+    rootDir,
+    replaceExisting: true,
+    sidecarConfig: {
+      transport: {
+        baseUrl: 'http://127.0.0.1:8891',
+      },
+      launch: {
+        managedByApp: true,
+        pythonPath: 'python',
+        scriptPath: 'sidecars/isaac_bridge/server.py',
+        workdir: '.',
+      },
+    },
+    logger: {
+      log() {},
+    },
+    stopStaleSidecarImpl: async (call) => {
+      stopCalls.push(call)
+      return { stopped: [{ processId: 202 }] }
+    },
+    probeIsaacSidecarHealthImpl: async () => ({
+      status: 'ok',
+      destination: 'http://127.0.0.1:8891/healthz',
+    }),
+    spawnImpl: (...args) => {
+      spawnCalls.push(args)
+      return fakeChild
+    },
+  })
+
+  assert.equal(result.reusedSidecar, false)
+  assert.equal(stopCalls.length, 1)
+  assert.match(stopCalls[0].scriptPath, /isaac_bridge/)
+  assert.equal(stopCalls[0].port, 8891)
+  assert.equal(spawnCalls.length, 1)
+})
+
 function createFakeChild() {
   const child = new EventEmitter()
   child.pid = 4242

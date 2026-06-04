@@ -21,6 +21,9 @@ Safe known action tests:
 - `pee`: action `11`
 - `crawl`: action `3`
 - `pray`: action `17`
+- `shake` / `handshake` / `paw_shake`: action `19`
+- `start_dance_loop`: `perform(1)` performance/action rotation mode
+- `stop_dance`: `perform(0)` stops performance/action rotation mode
 
 Default mode is dry-run. Start with `--live` or set `DOGZILLA_DIRECT_DRY_RUN=0` only when the robot is on the floor with clearance.
 

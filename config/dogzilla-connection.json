@@ -33,7 +33,7 @@
     "streamPath": "/stream.mjpg",
     "statusPath": "/healthz",
     "detectionsPath": "/detections",
-    "sourceStreamUrl": "/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB_2.0_Camera-video-index0",
+    "sourceStreamUrl": "auto",
     "modelRemotePath": "/home/pi/robodoge/models/dogzilla_yolo/best.onnx"
   },
   "audio": {
@@ -49,8 +49,10 @@
     "label": "DOGZILLA lidar bridge",
     "baseUrl": "http://10.0.4.32:8896",
     "port": 8896,
+    "serialPort": "/dev/ttyAMA1",
     "healthPath": "/healthz",
-    "scanPath": "/scan"
+    "scanPath": "/scan",
+    "posePath": "/pose"
   },
   "notes": [
     "DOGZILLA is reserved on eeroWiFi at 10.0.4.32. Hotspot fallback IP was 192.168.8.88.",

@@ -1,9 +1,9 @@
 {
   "enabled": true,
-  "dryRun": true,
-  "requiresOperatorConfirmation": true,
-  "robotId": "dogzilla-local",
-  "robotName": "DOGZILLA",
+  "dryRun": false,
+  "requiresOperatorConfirmation": false,
+  "robotId": "6819d5e7-d1c5-471d-83fa-702393988524",
+  "robotName": "Questing Beast",
   "robotModel": "dogzilla-s2",
   "defaultTarget": "dogzilla_direct",
   "previewTargets": [

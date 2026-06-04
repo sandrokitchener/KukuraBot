@@ -9,7 +9,7 @@ param(
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8895,
   [string]$Player = "aplay",
-  [string]$AplayDevice = "default",
+  [string]$AplayDevice = "plughw:CARD=Device,DEV=0",
   [switch]$Background,
   [switch]$NoHostKeyScan
 )
@@ -59,11 +59,12 @@ if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
   $stopCommand = @'
 python3 - <<'PY'
-import os, signal, subprocess
+import os, signal, subprocess, time
 try:
     rows = subprocess.check_output(['pgrep', '-af', 'sidecars/dogzilla_audio_cue/server.py'], text=True).splitlines()
 except subprocess.CalledProcessError:
     rows = []
+stopped = []
 for row in rows:
     pid = int(row.split()[0])
     try:
@@ -72,7 +73,16 @@ for row in rows:
         continue
     if comm.startswith('python'):
         os.kill(pid, signal.SIGTERM)
+        stopped.append(pid)
         print(f'stopped audio cue {pid}')
+time.sleep(0.8)
+for pid in stopped:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        continue
+    os.kill(pid, signal.SIGKILL)
+    print(f'force-stopped audio cue {pid}')
 PY
 '@
   $stopCommand = $stopCommand.Trim()

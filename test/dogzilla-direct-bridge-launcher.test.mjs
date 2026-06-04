@@ -88,6 +88,87 @@ test('forceDogzillaDirectBridgeOnStartup starts and waits for missing direct bri
   ])
 })
 
+test('forceDogzillaDirectBridgeOnStartup reuses bridge when only Nav2 is unavailable', async () => {
+  const actionCalls = []
+
+  const result = await forceDogzillaDirectBridgeOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    logger: quietLogger(),
+    probeRobotSidecarHealthImpl: async () => ({
+      status: 'ok',
+      destination: 'http://10.0.4.32:8893/healthz',
+      body: {
+        runtime: {
+          available: true,
+          nav2: {
+            available: false,
+            importError: 'Nav2 NavigateToPose action server is not running in the ROS graph',
+          },
+        },
+      },
+    }),
+    runDogzillaConnectionActionImpl: async (action) => {
+      actionCalls.push(action)
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reusedBridge, true)
+  assert.deepEqual(actionCalls, ['stop-vendor-app'])
+})
+
+test('forceDogzillaDirectBridgeOnStartup restarts bridge when DOGZILLALib runtime is unavailable', async () => {
+  const healthSequence = [
+    {
+      status: 'ok',
+      destination: 'http://10.0.4.32:8893/healthz',
+      body: {
+        runtime: {
+          available: false,
+          importError: 'No DOGZILLA Python control factory found',
+        },
+      },
+    },
+    {
+      status: 'ok',
+      destination: 'http://10.0.4.32:8893/healthz',
+      body: {
+        runtime: {
+          available: true,
+        },
+      },
+    },
+  ]
+  const startActions = []
+
+  const result = await forceDogzillaDirectBridgeOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    logger: quietLogger(),
+    sleepImpl: async () => {},
+    probeRobotSidecarHealthImpl: async () => healthSequence.shift() || healthSequence.at(-1),
+    runDogzillaConnectionActionImpl: async (action, options) => {
+      startActions.push({ action, options })
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reusedBridge, false)
+  assert.deepEqual(startActions, [
+    {
+      action: 'stop-vendor-app',
+      options: undefined,
+    },
+    {
+      action: 'start-direct',
+      options: { live: false },
+    },
+  ])
+})
+
 test('forceDogzillaDirectBridgeOnStartup replaces healthy direct bridge when requested', async () => {
   const healthSequence = [
     { status: 'ok', destination: 'http://10.0.4.32:8893/healthz' },

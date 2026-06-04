@@ -1,6 +1,6 @@
 param(
   [string]$BridgeBaseUrl = "http://10.0.4.32:8892",
-  [ValidateSet("health", "feedback", "state", "reset", "sit", "stand", "lie_down", "stretch", "three_axis", "swing", "pee", "crawl", "pray")]
+  [ValidateSet("health", "feedback", "state", "reset", "sit", "stand", "lie_down", "stretch", "three_axis", "swing", "pee", "crawl", "pray", "shake", "paw_shake", "dance", "stop_dance")]
   [string]$Command = "health",
   [int]$TimeoutSec = 8
 )
@@ -27,6 +27,10 @@ $actionMap = @{
   pee        = @{ actionId = 11; trick = "pee" }
   crawl      = @{ actionId = 3; trick = "crawl" }
   pray       = @{ actionId = 17; trick = "pray" }
+  shake      = @{ actionId = 19; trick = "handshake" }
+  paw_shake  = @{ actionId = 19; trick = "paw_shake" }
+  dance      = @{ kind = "action.loop"; enabled = $true; trick = "dance" }
+  stop_dance = @{ kind = "action.loop"; enabled = $false; trick = "stop_dance" }
 }
 
 if ($Command -eq "health") {
@@ -45,12 +49,23 @@ if ($Command -eq "state") {
 }
 
 $action = $actionMap[$Command]
-$canonicalPlan = @{
-  kind = "action.once"
-  params = @{
-    actionId = $action.actionId
-    trick = $action.trick
-    verified = $true
+if ($action.kind -eq "action.loop") {
+  $canonicalPlan = @{
+    kind = "action.loop"
+    params = @{
+      enabled = $action.enabled
+      trick = $action.trick
+      verified = $true
+    }
+  }
+} else {
+  $canonicalPlan = @{
+    kind = "action.once"
+    params = @{
+      actionId = $action.actionId
+      trick = $action.trick
+      verified = $true
+    }
   }
 }
 

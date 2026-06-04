@@ -66,6 +66,57 @@
             "Official Performing actions widget map lists Pray as action 17."
           ]
         },
+        "shake": {
+          "actionId": 19,
+          "verified": true,
+          "notes": [
+            "Alias for Handshake. Official Performing actions widget map lists Handshake as action 19."
+          ]
+        },
+        "handshake": {
+          "actionId": 19,
+          "verified": true,
+          "notes": [
+            "Official Performing actions widget map lists Handshake as action 19."
+          ]
+        },
+        "paw_shake": {
+          "actionId": 19,
+          "verified": true,
+          "notes": [
+            "Natural-language alias for Handshake / shake paw. Uses verified DOGZILLA action 19."
+          ]
+        },
+        "shake_paw": {
+          "actionId": 19,
+          "verified": true,
+          "notes": [
+            "Natural-language alias for Handshake / paw shake. Uses verified DOGZILLA action 19."
+          ]
+        },
+        "give_paw": {
+          "actionId": 19,
+          "verified": true,
+          "notes": [
+            "Natural-language alias for Handshake / paw shake. Uses verified DOGZILLA action 19."
+          ]
+        },
+        "start_dance_loop": {
+          "planKind": "action.loop",
+          "enabled": true,
+          "verified": true,
+          "notes": [
+            "Explicit continuous DOGZILLA performance/action rotation mode. Do not map generic trick requests here."
+          ]
+        },
+        "stop_dance": {
+          "planKind": "action.loop",
+          "enabled": false,
+          "verified": true,
+          "notes": [
+            "Stops DOGZILLA performance/action rotation mode with perform(0)."
+          ]
+        },
         "backflip": {
           "actionId": "proxy_backflip_v1",
           "verified": true,

@@ -157,7 +157,8 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.speech.activationPhrasesFile, 'config/activation_phrases.txt')
   assert.ok(Array.isArray(payload.speech.activationPhrases))
   assert.ok(payload.speech.activationPhrases.length > 0)
-  assert.equal(payload.robotRuntime.robotName, 'DOGZILLA')
+  assert.equal(payload.robotRuntime.robotName, 'Questing Beast')
+  assert.equal(payload.robotRuntime.robot_name, 'Questing Beast')
   assert.equal(payload.app.appName, 'Questing Beast')
 })
 

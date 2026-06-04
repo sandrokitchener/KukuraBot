@@ -79,6 +79,7 @@ test('buildDogzillaActionPlan allowlists start-direct background bridge script',
   assert.ok(plan.args.includes('-Background'))
   assert.ok(plan.args.includes('-Bridge'))
   assert.ok(plan.args.includes('direct'))
+  assert.equal(plan.timeoutMs, 150_000)
 })
 
 test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services independently', () => {

@@ -5,7 +5,9 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
+  deleteReconSnapshot,
   listReconSnapshots,
+  readReconSnapshotArtifact,
   readReconSnapshotImage,
   saveReconSnapshot,
   updateReconSnapshotNote,
@@ -33,7 +35,7 @@ test('saveReconSnapshot writes image and metadata with robot context', async () 
       imageBuffer,
       imageContentType: 'image/jpeg',
       robotState,
-      lidarScan: { status: 'ok', points: [{ x: 0.1, y: 0.2, range: 0.3 }] },
+      lidarScan: { status: 'ok', frameId: 'laser_frame', points: [{ angle: 1.57, x: 0.1, y: 0.2, range: 0.3 }] },
       map: { status: 'pose', pose: robotState.activeRobot.pose },
       camera: { label: 'YOLO camera', processed: true },
       note: 'human needs to inspect this doorway',
@@ -49,10 +51,22 @@ test('saveReconSnapshot writes image and metadata with robot context', async () 
     assert.equal(record.image.contentType, 'image/jpeg')
     assert.equal(record.image.bytes, imageBuffer.length)
     assert.match(record.image.url, new RegExp(`/api/recon/snapshots/${record.id}/image$`))
+    assert.match(record.lidarArtifacts.json.url, new RegExp(`/api/recon/snapshots/${record.id}/lidar\\.json$`))
+    assert.match(record.lidarArtifacts.csv.url, new RegExp(`/api/recon/snapshots/${record.id}/lidar\\.csv$`))
+    assert.equal(record.lidarArtifacts.csv.pointCount, 1)
 
     const metadata = JSON.parse(await readFile(path.join(cacheDir, `${record.id}.json`), 'utf-8'))
     assert.equal(metadata.image.fileName, `${record.id}.jpg`)
     assert.equal(metadata.robotState.activeRobot.name, 'DOGZILLA')
+    assert.equal(metadata.lidarArtifacts.json.fileName, `${record.id}.lidar.json`)
+
+    const lidarJson = await readReconSnapshotArtifact(record.id, 'json', { cacheDir })
+    assert.equal(lidarJson.contentType, 'application/json; charset=utf-8')
+    assert.equal(JSON.parse(lidarJson.buffer.toString('utf-8')).frameId, 'laser_frame')
+
+    const lidarCsv = await readReconSnapshotArtifact(record.id, 'csv', { cacheDir })
+    assert.equal(lidarCsv.contentType, 'text/csv; charset=utf-8')
+    assert.match(lidarCsv.buffer.toString('utf-8'), /^index,angle,range,x,y\n0,1.57,0.3,0.1,0.2\n$/)
 
     const image = await readReconSnapshotImage(record.id, { cacheDir })
     assert.equal(image.contentType, 'image/jpeg')
@@ -114,6 +128,31 @@ test('updateReconSnapshotNote edits saved inspection notes without losing contex
     const snapshots = await listReconSnapshots({ cacheDir })
     assert.equal(snapshots[0].id, record.id)
     assert.equal(snapshots[0].note, 'pipe corrosion visible behind the service panel')
+  })
+})
+
+test('deleteReconSnapshot removes image and metadata files', async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'robo-doge-recon-'))
+  await usingTempDir(cacheDir, async () => {
+    const record = await saveReconSnapshot({
+      cacheDir,
+      imageBuffer: Buffer.from([0xff, 0xd8, 0x04, 0xff, 0xd9]),
+      note: 'delete me',
+    })
+
+    const result = await deleteReconSnapshot(record.id, { cacheDir })
+    assert.equal(result.deleted, true)
+    assert.equal(result.id, record.id)
+    assert.ok(result.deletedFiles.includes(`${record.id}.json`))
+    assert.ok(result.deletedFiles.includes(`${record.id}.jpg`))
+    assert.ok(result.deletedFiles.includes(`${record.id}.lidar.json`))
+    assert.ok(result.deletedFiles.includes(`${record.id}.lidar.csv`))
+    assert.deepEqual(await listReconSnapshots({ cacheDir }), [])
+
+    await assert.rejects(
+      readReconSnapshotImage(record.id, { cacheDir }),
+      /was not found/,
+    )
   })
 })
 

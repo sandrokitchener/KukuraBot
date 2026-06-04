@@ -515,13 +515,10 @@ async function handleChatSubmit(event) {
     const payload = await submitChatMessage(message)
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
-    const completionState =
-      payload.isaacDispatch?.status === 'error' || isRobotDispatchFailure(payload.robotDispatch)
-        ? 'error'
-        : 'idle'
+    const completionState = isActiveDispatchFailure(payload) ? 'error' : 'idle'
 
     finishThinkingFeedback(pendingMessage, {
-      text: payload.response,
+      text: buildAssistantText(payload),
       meta: completionMeta,
     })
     playCommandCueIfNeeded(payload.parsed)
@@ -3134,18 +3131,74 @@ function buildAssistantMeta(payload, startedAt) {
     `Reply received in ${formatElapsed(Date.now() - startedAt)} via ${payload.profileLabel} (${payload.model}).`,
     `Target ${payload.runtimeTarget?.label || runtimeConfig.robotRuntime.activeTarget.label}.`,
   ]
-  const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
-  const robotSummary = formatRobotSummary(payload.robotRuntime, payload.robotDispatch)
+  const activeSummary = formatActiveRuntimeSummary(payload)
 
-  if (isaacSummary) {
-    parts.push(isaacSummary)
-  }
-
-  if (robotSummary) {
-    parts.push(robotSummary)
+  if (activeSummary) {
+    parts.push(activeSummary)
   }
 
   return parts.join(' ')
+}
+
+function buildAssistantText(payload) {
+  if (!payload?.parsed || typeof payload.parsed !== 'object') {
+    return payload?.response || 'No structured command returned.'
+  }
+
+  const command = normalizeCommandName(payload.parsed.command)
+  if (command === 'trick') {
+    return buildTrickAssistantText(payload)
+  }
+
+  if (command === 'talk') {
+    return normalizeOneLineText(payload.response) || 'Talk request handled locally.'
+  }
+
+  return formatActiveRuntimeSummary(payload) || summarizeParsedCommand(command, payload)
+}
+
+function buildTrickAssistantText(payload) {
+  const targetLabel = payload.runtimeTarget?.label || runtimeConfig.robotRuntime.activeTarget.label || 'robot'
+  const preview = isRobotRuntimeTarget(payload) ? payload.robotRuntime : payload.isaacSim
+  const dispatch = isRobotRuntimeTarget(payload) ? payload.robotDispatch : payload.isaacDispatch
+  const params = preview?.canonicalPlan?.params || preview?.payload?.canonicalPlan?.params || {}
+  const trickName = formatTrickName(params.trick || payload.parsed?.trick || 'trick')
+  const actionId = Number.isInteger(params.actionId) ? params.actionId : null
+  const actionSuffix = actionId === null ? '' : ` Action ${actionId}.`
+  const kind = preview?.canonicalPlan?.kind || preview?.payload?.canonicalPlan?.kind || ''
+
+  if (dispatch?.status === 'sent') {
+    if (kind === 'action.loop') {
+      return params.enabled === false
+        ? `Stopped ${trickName} mode on ${targetLabel}.`
+        : `Started ${trickName} mode on ${targetLabel}.`
+    }
+
+    return `Sent ${trickName} to ${targetLabel}.${actionSuffix}`
+  }
+
+  if (dispatch?.status === 'dry-run') {
+    return `Dry-run only: ${trickName} not sent to ${targetLabel}.${actionSuffix}`
+  }
+
+  if (isRobotRuntimeTarget(payload) && isRobotDispatchFailure(dispatch)) {
+    return `Trick failed: ${dispatch.error || `HTTP ${dispatch.responseStatus || 'unknown'}`}.`
+  }
+
+  if (dispatch?.status === 'error') {
+    return `Trick failed: ${dispatch.error || `HTTP ${dispatch.responseStatus || 'unknown'}`}.`
+  }
+
+  if (preview?.status === 'ready') {
+    return `Trick ready for ${targetLabel}: ${trickName}.${actionSuffix}`
+  }
+
+  if (preview?.status && !['no-command', 'no-action'].includes(preview.status)) {
+    const reason = firstWarning(preview) || formatActiveRuntimeSummary(payload)
+    return `Trick not sent: ${reason || preview.status}.`
+  }
+
+  return `Trick not sent: ${firstWarning(preview) || 'No executable trick action was compiled.'}`
 }
 
 function buildCompletionStatus(payload) {
@@ -3153,15 +3206,10 @@ function buildCompletionStatus(payload) {
     `Done via ${payload.profileLabel}.`,
     `Target ${payload.runtimeTarget?.label || runtimeConfig.robotRuntime.activeTarget.label}.`,
   ]
-  const isaacSummary = formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
-  const robotSummary = formatRobotSummary(payload.robotRuntime, payload.robotDispatch)
+  const activeSummary = formatActiveRuntimeSummary(payload)
 
-  if (isaacSummary) {
-    parts.push(isaacSummary)
-  }
-
-  if (robotSummary) {
-    parts.push(robotSummary)
+  if (activeSummary) {
+    parts.push(activeSummary)
   }
 
   return parts.join(' ')
@@ -3173,23 +3221,44 @@ function formatParsedOutput(payload) {
     `Active target:\n${JSON.stringify(payload.runtimeTarget || runtimeConfig.robotRuntime.activeTarget, null, 2)}`,
   ]
 
-  if (payload.isaacSim) {
+  if (isIsaacRuntimeTarget(payload) && payload.isaacSim) {
     sections.push(`Isaac preview:\n${JSON.stringify(payload.isaacSim, null, 2)}`)
   }
 
-  if (payload.isaacDispatch) {
+  if (isIsaacRuntimeTarget(payload) && payload.isaacDispatch) {
     sections.push(`Isaac dispatch:\n${JSON.stringify(payload.isaacDispatch, null, 2)}`)
   }
 
-  if (payload.robotRuntime) {
+  if (isRobotRuntimeTarget(payload) && payload.robotRuntime) {
     sections.push(`Robot preview:\n${JSON.stringify(payload.robotRuntime, null, 2)}`)
   }
 
-  if (payload.robotDispatch) {
+  if (isRobotRuntimeTarget(payload) && payload.robotDispatch) {
     sections.push(`Robot dispatch:\n${JSON.stringify(payload.robotDispatch, null, 2)}`)
   }
 
   return sections.join('\n\n')
+}
+
+function formatActiveRuntimeSummary(payload) {
+  if (isIsaacRuntimeTarget(payload)) {
+    return formatIsaacSummary(payload.isaacSim, payload.isaacDispatch)
+  }
+
+  if (isRobotRuntimeTarget(payload)) {
+    return formatRobotSummary(payload.robotRuntime, payload.robotDispatch)
+  }
+
+  return ''
+}
+
+function summarizeParsedCommand(command, payload) {
+  const targetLabel = payload?.runtimeTarget?.label || runtimeConfig.robotRuntime.activeTarget.label || 'target'
+  if (command) {
+    return `${formatCommandName(command)} handled for ${targetLabel}.`
+  }
+
+  return payload?.response || 'Command handled.'
 }
 
 function formatIsaacSummary(isaacSim, isaacDispatch) {
@@ -3266,6 +3335,51 @@ function formatRobotSummary(robotRuntime, robotDispatch) {
 
 function isRobotDispatchFailure(robotDispatch) {
   return ['error', 'navigation-unavailable', 'preempt-failed'].includes(robotDispatch?.status)
+}
+
+function isActiveDispatchFailure(payload) {
+  if (isIsaacRuntimeTarget(payload)) {
+    return payload.isaacDispatch?.status === 'error'
+  }
+
+  if (isRobotRuntimeTarget(payload)) {
+    return isRobotDispatchFailure(payload.robotDispatch)
+  }
+
+  return false
+}
+
+function isIsaacRuntimeTarget(payload) {
+  return getRuntimeTargetKind(payload) === 'isaacsim'
+}
+
+function isRobotRuntimeTarget(payload) {
+  return ['ros2-bridge', 'dogzilla-direct'].includes(getRuntimeTargetKind(payload))
+}
+
+function getRuntimeTargetKind(payload) {
+  return payload?.runtimeTarget?.kind || runtimeConfig.robotRuntime.activeTarget?.kind || ''
+}
+
+function normalizeCommandName(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function formatCommandName(value) {
+  return normalizeCommandName(value).replace(/_/g, ' ') || 'command'
+}
+
+function formatTrickName(value) {
+  const normalized = String(value || '').trim().replace(/_/g, ' ')
+  return normalized || 'trick'
+}
+
+function normalizeOneLineText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
+}
+
+function firstWarning(preview) {
+  return Array.isArray(preview?.warnings) ? normalizeOneLineText(preview.warnings[0]) : ''
 }
 
 function formatRobotSitTestSummary(health, preview, dispatch) {

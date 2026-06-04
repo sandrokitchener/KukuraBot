@@ -25,11 +25,42 @@ test('query apiBase overrides stored backend URL', () => {
   assert.equal(getApiBaseUrl(), 'http://10.0.0.2:3037')
 })
 
-function installMockWindow(search = '') {
+test('Android shell defaults to the PC tailnet backend', () => {
+  installMockWindow('', {
+    userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36 wv',
+    tauri: true,
+  })
+
+  assert.equal(getApiBaseUrl(), 'http://100.89.71.113:3037')
+  assert.equal(toApiUrl('/api/config'), 'http://100.89.71.113:3037/api/config')
+})
+
+test('stored Android backend URL overrides the bundled tailnet default', () => {
+  installMockWindow('', {
+    userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Version/4.0 Mobile Safari/537.36 wv',
+    tauri: true,
+  })
+
+  setApiBaseUrl('http://192.168.1.50:3037')
+
+  assert.equal(getApiBaseUrl(), 'http://192.168.1.50:3037')
+})
+
+test('query apiBase overrides Android tailnet default', () => {
+  installMockWindow('?apiBase=http://10.0.0.2:3037', {
+    userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36 wv',
+    tauri: true,
+  })
+
+  assert.equal(getApiBaseUrl(), 'http://10.0.0.2:3037')
+})
+
+function installMockWindow(search = '', options = {}) {
   const store = new Map()
 
   global.window = {
     location: { search },
+    ...(options.tauri ? { __TAURI_INTERNALS__: {} } : {}),
     localStorage: {
       getItem(key) {
         return store.get(key) || null
@@ -42,4 +73,11 @@ function installMockWindow(search = '') {
       },
     },
   }
+
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+      userAgent: options.userAgent || 'Mozilla/5.0',
+    },
+  })
 }

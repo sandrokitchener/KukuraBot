@@ -181,6 +181,52 @@ test('startManagedSpeechSidecar starts bridge after unavailable health check', a
   assert.equal(fakeChild.killed, true)
 })
 
+test('startManagedSpeechSidecar replaces healthy bridge when requested', async () => {
+  const rootDir = path.resolve('C:/Users/sandr/OneDrive/Documents/Robo-Doge')
+  const spawnCalls = []
+  const stopCalls = []
+  const fakeChild = createFakeChild()
+
+  const result = await startManagedSpeechSidecar({
+    rootDir,
+    replaceExisting: true,
+    sidecarConfig: {
+      transport: {
+        enabled: true,
+        baseUrl: 'http://127.0.0.1:8893',
+      },
+      launch: {
+        managedByApp: true,
+        pythonPath: 'python',
+        scriptPath: 'sidecars/parakeet_onnx_bridge/server.py',
+        workdir: '.',
+        sidecarReadyTimeoutMs: 1000,
+      },
+    },
+    logger: {
+      log() {},
+    },
+    stopStaleSidecarImpl: async (call) => {
+      stopCalls.push(call)
+      return { stopped: [{ processId: 101 }] }
+    },
+    probeSpeechSidecarHealthImpl: async () => ({
+      status: 'ok',
+      destination: 'http://127.0.0.1:8893/healthz',
+    }),
+    spawnImpl: (...args) => {
+      spawnCalls.push(args)
+      return fakeChild
+    },
+  })
+
+  assert.equal(result.reusedSidecar, false)
+  assert.equal(stopCalls.length, 1)
+  assert.match(stopCalls[0].scriptPath, /parakeet_onnx_bridge/)
+  assert.equal(stopCalls[0].port, 8893)
+  assert.equal(spawnCalls.length, 1)
+})
+
 function createFakeChild() {
   const child = new EventEmitter()
   child.pid = 4242

@@ -11,7 +11,7 @@ param(
   [string]$KeyPath = "$HOME\.ssh\robodoge_pi_ed25519",
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8894,
-  [string]$CameraUrl = "",
+  [string]$CameraUrl = "auto",
   [switch]$Background,
   [switch]$NoInstallDeps,
   [switch]$NoHostKeyScan
@@ -107,7 +107,24 @@ if ($LASTEXITCODE -ne 0) {
   }
 }
 
-$effectiveCameraUrl = if ($CameraUrl) { $CameraUrl } else { "/dev/video0" }
+$effectiveCameraUrl = if ($CameraUrl) { $CameraUrl } else { "auto" }
+if ($effectiveCameraUrl -eq "auto") {
+  $detectCameraCommand = @'
+for candidate in /dev/v4l/by-id/*video-index0 /dev/video0 /dev/video1 /dev/video2 /dev/video3; do
+  if [ -e "$candidate" ]; then
+    printf '%s' "$candidate"
+    exit 0
+  fi
+done
+printf '/dev/video0'
+'@
+  $effectiveCameraUrl = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $detectCameraCommand
+  $effectiveCameraUrl = ($effectiveCameraUrl | Out-String).Trim()
+  if (-not $effectiveCameraUrl) {
+    $effectiveCameraUrl = "/dev/video0"
+  }
+  Write-Host "Auto-selected DOGZILLA YOLO camera source: $effectiveCameraUrl"
+}
 $usesHttpCamera = $effectiveCameraUrl.StartsWith("http://") -or $effectiveCameraUrl.StartsWith("https://")
 $cameraControlArgs = if ($usesHttpCamera) {
   $cameraHost = if ($PiIp) { $PiIp } else { "127.0.0.1" }
@@ -185,11 +202,12 @@ if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
   $stopCommand = @'
 python3 - <<'PY'
-import os, signal, subprocess
+import os, signal, subprocess, time
 try:
     rows = subprocess.check_output(['pgrep', '-af', 'sidecars/dogzilla_yolo_vision/server.py'], text=True).splitlines()
 except subprocess.CalledProcessError:
     rows = []
+stopped = []
 for row in rows:
     pid = int(row.split()[0])
     try:
@@ -198,7 +216,16 @@ for row in rows:
         continue
     if comm.startswith('python'):
         os.kill(pid, signal.SIGTERM)
+        stopped.append(pid)
         print(f'stopped yolo vision {pid}')
+time.sleep(0.8)
+for pid in stopped:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        continue
+    os.kill(pid, signal.SIGKILL)
+    print(f'force-stopped yolo vision {pid}')
 PY
 '@
   $stopCommand = $stopCommand.Trim()

@@ -7,6 +7,7 @@ import {
   getDogzillaAudioCueHealth,
   sendDogzillaAudioCue,
 } from '../lib/dogzilla-audio-cue-client.mjs'
+import { withMockedFetch } from '../test-support/http-fixtures.mjs'
 
 test('sendDogzillaAudioCue posts cue requests to the configured Pi bridge', async () => {
   let requestBody = null
@@ -58,33 +59,31 @@ test('getDogzillaAudioCueHealth reports disabled config loudly', async () => {
 })
 
 test('getDogzillaAudioCueHealth reports fetch failure connection details', async () => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => {
-    throw new TypeError('fetch failed', {
-      cause: {
-        code: 'ECONNREFUSED',
-        address: '10.0.4.32',
-        port: 8895,
-      },
-    })
-  }
-
-  try {
-    const result = await getDogzillaAudioCueHealth({
-      config: {
-        audio: {
-          enabled: true,
-          healthUrl: 'http://10.0.4.32:8895/healthz',
+  await withMockedFetch(
+    async () => {
+      throw new TypeError('fetch failed', {
+        cause: {
+          code: 'ECONNREFUSED',
+          address: '10.0.4.32',
+          port: 8895,
         },
-      },
-    })
+      })
+    },
+    async () => {
+      const result = await getDogzillaAudioCueHealth({
+        config: {
+          audio: {
+            enabled: true,
+            healthUrl: 'http://10.0.4.32:8895/healthz',
+          },
+        },
+      })
 
-    assert.equal(result.ok, false)
-    assert.equal(result.status, 'error')
-    assert.equal(result.error, 'fetch failed (ECONNREFUSED 10.0.4.32:8895)')
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+      assert.equal(result.ok, false)
+      assert.equal(result.status, 'error')
+      assert.equal(result.error, 'fetch failed (ECONNREFUSED 10.0.4.32:8895)')
+    },
+  )
 })
 
 async function readJsonBody(request) {

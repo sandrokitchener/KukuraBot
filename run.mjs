@@ -19,10 +19,10 @@ import { startManagedSpeechSidecar } from './lib/speech-sidecar-launcher.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
-const HOST = cliOptions.host || process.env.APP_HOST || process.env.KUKURA_HOST || '127.0.0.1'
+const HOST = cliOptions.host || process.env.APP_HOST || process.env.KUKURA_HOST || '0.0.0.0'
 const PORT = Number(cliOptions.port || process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const MODEL_PROFILE = cliOptions.profile || process.env.APP_MODEL_PROFILE || ''
-const APP_URL = `http://${HOST}:${PORT}`
+const APP_URL = `http://${resolveProbeHost(HOST)}:${PORT}`
 const startupStatus = createStartupStatus()
 
 startupStatus.start(`Questing Beast startup at ${APP_URL}`)
@@ -32,16 +32,13 @@ const replaceManagedSidecars = shouldReplaceManagedSidecars(cliOptions, process.
 
 if (existingAppConfig && reuseExistingApp) {
   startupStatus.update('Reusing existing app')
-  await ensureExistingAppDogzillaDirectBridge(APP_URL, existingAppConfig)
   const requiredServicesStartup = ensureExistingAppDogzillaRequiredServices(existingAppConfig)
+  await requiredServicesStartup
+  await ensureExistingAppDogzillaDirectBridge(APP_URL, existingAppConfig)
   startupStatus.update('Running robot startup sequence')
   const startupSequence = await runExistingAppRobotStartupSequence(APP_URL, existingAppConfig, {
-    requiredServicesReady: requiredServicesStartup,
     logger: console,
   })
-  if (startupSequence.status === 'skipped') {
-    await requiredServicesStartup
-  }
   startupStatus.stop(`App already ready at ${APP_URL}. Reusing existing process.`)
 } else {
   if (existingAppConfig) {
@@ -69,18 +66,20 @@ if (existingAppConfig && reuseExistingApp) {
   const shouldManageIsaac = !robotRuntimeConfig.enabled || (robotRuntimeConfig.activeTarget?.kind || '') === 'isaacsim'
   const shouldManageRobot = robotRuntimeConfig.enabled && (robotRuntimeConfig.activeTarget?.kind || '') === 'ros2-bridge'
 
+  startupStatus.update('Checking DOGZILLA support services')
+  const requiredServicesStartup = forceDogzillaRequiredServicesOnStartup({
+    logger: console,
+    replaceExisting: replaceManagedSidecars,
+  }).catch((error) => {
+    console.warn(`DOGZILLA required service startup failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+  await requiredServicesStartup
   startupStatus.update('Checking robot bridge')
   await forceDogzillaDirectBridgeOnStartup({
     runtimeConfig: robotRuntimeConfig,
     ros2Config: robotRos2Config,
     logger: console,
     replaceExisting: replaceManagedSidecars,
-  })
-  const requiredServicesStartup = forceDogzillaRequiredServicesOnStartup({
-    logger: console,
-    replaceExisting: replaceManagedSidecars,
-  }).catch((error) => {
-    console.warn(`DOGZILLA required service startup failed: ${error instanceof Error ? error.message : String(error)}`)
   })
 
   startupStatus.update(shouldManageIsaac ? 'Starting Isaac runtime' : 'Skipping Isaac runtime')
@@ -122,7 +121,6 @@ if (existingAppConfig && reuseExistingApp) {
   await runRobotStartupSequence({
     runtimeConfig: robotRuntimeConfig,
     ros2Config: robotRos2Config,
-    requiredServicesReady: requiredServicesStartup,
     logger: console,
   })
 
@@ -244,7 +242,7 @@ function createStartupStatus() {
 }
 
 function isLocalDesktopHost(host) {
-  return host === '127.0.0.1' || host === 'localhost'
+  return host === '127.0.0.1' || host === 'localhost' || host === '0.0.0.0' || host === '::'
 }
 
 async function fetchExistingAppConfig(host, port) {
@@ -280,16 +278,21 @@ async function ensureExistingAppDogzillaDirectBridge(appUrl, appConfig) {
   }
 
   console.log('App is already open, but DOGZILLA direct bridge is not ready. Starting it now.')
-  await runExistingAppDogzillaAction(appUrl, 'start-direct', 45_000)
+  await runExistingAppDogzillaAction(appUrl, 'start-direct', 150_000, {
+    live: shouldExistingAppDirectBridgeLive(appConfig),
+  })
 }
 
-async function runExistingAppDogzillaAction(appUrl, action, timeoutMs) {
+async function runExistingAppDogzillaAction(appUrl, action, timeoutMs, options = {}) {
   const response = await fetch(new URL('/api/dogzilla/connection/action', appUrl), {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({
+      action,
+      ...(options.live === true ? { live: true } : {}),
+    }),
     signal: AbortSignal.timeout(timeoutMs),
   })
   const result = await safeReadJson(response)
@@ -297,6 +300,10 @@ async function runExistingAppDogzillaAction(appUrl, action, timeoutMs) {
   if (!response.ok || result?.status === 'error') {
     console.warn(`DOGZILLA ${action} failed: ${result?.error || result?.stderr || `HTTP ${response.status}`}`)
   }
+}
+
+function shouldExistingAppDirectBridgeLive(appConfig) {
+  return appConfig?.robotRuntime?.dryRun === false
 }
 
 async function ensureExistingAppDogzillaRequiredServices(appConfig) {
@@ -406,11 +413,15 @@ function shouldReuseExistingApp(options = {}, env = process.env) {
 }
 
 function shouldReplaceManagedSidecars(options = {}, env = process.env) {
+  if (options.replaceManagedSidecars === true || isTruthy(env.APP_REPLACE_MANAGED_SIDECARS)) {
+    return true
+  }
+
   if (options.reuseManagedSidecars === true || isTruthy(env.APP_REUSE_MANAGED_SIDECARS)) {
     return false
   }
 
-  return !isFalsy(env.APP_REPLACE_MANAGED_SIDECARS)
+  return false
 }
 
 async function startOptionalManagedSpeechSidecar(options) {
@@ -460,6 +471,11 @@ function parseCliArgs(argv) {
 
     if (value === '--reuse-managed-sidecars') {
       options.reuseManagedSidecars = true
+      continue
+    }
+
+    if (value === '--replace-managed-sidecars') {
+      options.replaceManagedSidecars = true
     }
   }
 

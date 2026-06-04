@@ -57,6 +57,7 @@ test('buildRequiredServiceDescriptors maps YOLO, audio, lidar, and map pose to s
       action: 'start-map-pose',
       healthUrl: 'http://dogzilla:8896/pose',
       expectMapPose: true,
+      requiresService: 'lidar',
     },
   ])
 })
@@ -239,6 +240,37 @@ test('forceDogzillaRequiredServicesOnStartup starts map pose when lidar is healt
   assert.deepEqual(startedActions, ['start-map-pose'])
   assert.equal(result.results.lidar.reusedService, true)
   assert.equal(result.results.mapPose.reusedService, false)
+})
+
+test('forceDogzillaRequiredServicesOnStartup skips map pose when lidar startup fails', async () => {
+  const startedActions = []
+
+  const result = await forceDogzillaRequiredServicesOnStartup({
+    config: {
+      lidar: {
+        enabled: true,
+        healthUrl: 'http://dogzilla:8896/healthz',
+        poseUrl: 'http://dogzilla:8896/pose',
+      },
+    },
+    logger: silentLogger(),
+    fetchImpl: async () => jsonResponse(false, { ok: false }),
+    runDogzillaConnectionActionImpl: async (action) => {
+      startedActions.push(action)
+      return {
+        status: 'error',
+        action,
+        error: 'docker failed',
+      }
+    },
+    sleepImpl: async () => {},
+  })
+
+  assert.equal(result.status, 'error')
+  assert.deepEqual(startedActions, ['start-lidar'])
+  assert.equal(result.results.lidar.status, 'error')
+  assert.equal(result.results.mapPose.status, 'skipped')
+  assert.match(result.results.mapPose.reason, /lidar is not ready/)
 })
 
 function jsonResponse(ok, body) {

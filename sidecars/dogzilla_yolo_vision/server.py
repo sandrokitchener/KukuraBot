@@ -12,6 +12,7 @@ import socket
 import sys
 import threading
 import time
+import zlib
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,7 +118,13 @@ class VisionWorker(threading.Thread):
                 if is_http_camera(self.args.camera_url):
                     control_socket = open_camera_control_session(self.args)
 
-                for frame in read_camera_frames(self.args.camera_url, self.args.camera_timeout):
+                for frame in read_camera_frames(
+                    self.args.camera_url,
+                    self.args.camera_timeout,
+                    self.args.camera_read_retries,
+                    self.args.camera_drain_frames,
+                    self.args.stale_frame_limit,
+                ):
                     if self.stop_event.is_set():
                         return
 
@@ -272,6 +279,8 @@ def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, An
             "modelLoaded": state.model_loaded,
             "model": args.model,
             "cameraUrl": args.camera_url,
+            "cameraExists": camera_source_exists(args.camera_url),
+            "cameraResolvedPath": resolve_camera_source_path(args.camera_url),
             "labels": state.labels,
             "frames": state.frames,
             "inferences": state.inferences,
@@ -316,26 +325,56 @@ def open_camera_control_session(args: argparse.Namespace) -> socket.socket | Non
         raise RuntimeError(f"Camera control wake failed: {error}") from error
 
 
-def read_camera_frames(source: str, timeout: float):
+def read_camera_frames(source: str, timeout: float, read_retries: int = 30, drain_frames: int = 4, stale_frame_limit: int = 36):
     if is_http_camera(source):
         yield from read_mjpeg_frames(source, timeout)
         return
 
     capture_source: int | str = int(source) if source.isdigit() else source
-    capture = cv2.VideoCapture(capture_source)
+    capture = cv2.VideoCapture(capture_source, cv2.CAP_V4L2)
+    failed_reads = 0
+    repeated_frames = 0
+    previous_signature: int | None = None
     try:
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc("M", "J", "P", "G"))
         if not capture.isOpened():
             raise RuntimeError(f"Could not open camera device: {source}")
         while True:
-            ok, frame = capture.read()
+            ok, frame = read_latest_camera_frame(capture, drain_frames)
             if not ok or frame is None:
-                raise RuntimeError(f"Camera device did not return a frame: {source}")
+                failed_reads += 1
+                if failed_reads > max(0, read_retries):
+                    raise RuntimeError(f"Camera device did not return a frame after {failed_reads} reads: {source}")
+                time.sleep(0.05)
+                continue
+            failed_reads = 0
+            signature = frame_signature(frame)
+            if stale_frame_limit > 0 and signature == previous_signature:
+                repeated_frames += 1
+                if repeated_frames >= stale_frame_limit:
+                    raise RuntimeError(f"Camera device returned {repeated_frames + 1} identical frames; reopening stale capture: {source}")
+            else:
+                repeated_frames = 0
+                previous_signature = signature
             yield frame
     finally:
         capture.release()
+
+
+def read_latest_camera_frame(capture, drain_frames: int):
+    if drain_frames <= 0:
+        return capture.read()
+    for _ in range(max(0, drain_frames)):
+        if not capture.grab():
+            break
+    return capture.retrieve()
+
+
+def frame_signature(frame: np.ndarray) -> int:
+    return zlib.crc32(np.ascontiguousarray(frame).data)
 
 
 def read_mjpeg_frames(url: str, timeout: float):
@@ -362,6 +401,21 @@ def read_mjpeg_frames(url: str, timeout: float):
 
 def is_http_camera(source: str) -> bool:
     return source.startswith("http://") or source.startswith("https://")
+
+
+def camera_source_exists(source: str) -> bool | None:
+    if not source or source.isdigit() or is_http_camera(source):
+        return None
+    return Path(source).exists()
+
+
+def resolve_camera_source_path(source: str) -> str:
+    if not source or source.isdigit() or is_http_camera(source):
+        return ""
+    try:
+        return str(Path(source).resolve(strict=True))
+    except OSError:
+        return ""
 
 
 def letterbox(frame: np.ndarray, size: int) -> tuple[np.ndarray, float, tuple[float, float]]:
@@ -581,6 +635,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-control-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_CAMERA_CONTROL_TIMEOUT", "2.5")))
     parser.add_argument("--camera-wake-command", default=os.getenv("DOGZILLA_YOLO_CAMERA_WAKE_COMMAND", WAKE_COMMAND))
     parser.add_argument("--camera-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_CAMERA_TIMEOUT", "8")))
+    parser.add_argument("--camera-read-retries", type=int, default=int(os.getenv("DOGZILLA_YOLO_CAMERA_READ_RETRIES", "30")))
+    parser.add_argument("--camera-drain-frames", type=int, default=int(os.getenv("DOGZILLA_YOLO_CAMERA_DRAIN_FRAMES", "4")))
+    parser.add_argument("--stale-frame-limit", type=int, default=int(os.getenv("DOGZILLA_YOLO_STALE_FRAME_LIMIT", "36")))
     parser.add_argument("--imgsz", type=int, default=int(os.getenv("DOGZILLA_YOLO_IMGSZ", "640")))
     parser.add_argument("--confidence", type=float, default=float(os.getenv("DOGZILLA_YOLO_CONF", "0.35")))
     parser.add_argument("--iou", type=float, default=float(os.getenv("DOGZILLA_YOLO_IOU", "0.45")))

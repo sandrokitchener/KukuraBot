@@ -14,8 +14,14 @@ from dogzilla_bridge.adapters import (
 )
 from dogzilla_bridge.commands import CommandValidationError, DogzillaCommandLimits, execute_canonical_plan
 from geometry_msgs.msg import Twist
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from std_msgs.msg import Bool, String, UInt16
+
+try:
+    from nav2_msgs.action import NavigateToPose
+except Exception:  # pragma: no cover - depends on Yahboom/Nav2 image packages
+    NavigateToPose = None
 
 
 DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
@@ -50,6 +56,7 @@ class DogzillaBridgeNode(Node):
         self.declare_parameter("action_topic", "/dogzilla/action")
         self.declare_parameter("stabilize_topic", "/dogzilla/stabilize")
         self.declare_parameter("state_topic", "/dogzilla/state")
+        self.declare_parameter("navigate_to_pose_action", "navigate_to_pose")
         self.declare_parameter("adapter_mode", "ros-publisher")
         self.declare_parameter("dogzilla_python_module", "")
         self.declare_parameter("dogzilla_python_factory", "")
@@ -74,12 +81,14 @@ class DogzillaBridgeNode(Node):
         action_topic = str(self.get_parameter("action_topic").value)
         stabilize_topic = str(self.get_parameter("stabilize_topic").value)
         state_topic = str(self.get_parameter("state_topic").value)
+        navigate_to_pose_action = str(self.get_parameter("navigate_to_pose_action").value)
         publish_state_hz = float(self.get_parameter("publish_state_hz").value)
 
         self.cmd_vel_publisher = self.create_publisher(Twist, cmd_vel_topic, 10)
         self.action_publisher = self.create_publisher(UInt16, action_topic, 10)
         self.stabilize_publisher = self.create_publisher(Bool, stabilize_topic, 10)
         self.state_publisher = self.create_publisher(String, state_topic, 10)
+        self.nav_action_client = ActionClient(self, NavigateToPose, navigate_to_pose_action) if NavigateToPose is not None else None
         self.adapter = self._create_adapter()
         self.create_subscription(String, command_plan_topic, self._handle_plan_message, 10)
         self.create_timer(1.0 / max(publish_state_hz, 0.1), self._publish_state_snapshot)
@@ -87,7 +96,7 @@ class DogzillaBridgeNode(Node):
         self.get_logger().info(
             "DOGZILLA bridge ready. "
             f"command_plan_topic={command_plan_topic} dry_run={self.dry_run} "
-            f"enabled={self.enabled} adapter={self.adapter.name}"
+            f"enabled={self.enabled} adapter={self.adapter.name} nav_action={navigate_to_pose_action}"
         )
 
     def _handle_plan_message(self, message: String) -> None:
@@ -160,6 +169,9 @@ class DogzillaBridgeNode(Node):
                 linear_x_full_scale_step=self.linear_x_full_scale_step,
                 linear_y_full_scale_step=self.linear_y_full_scale_step,
                 angular_z_full_scale_step=self.angular_z_full_scale_step,
+                navigate_to_pose_type=NavigateToPose,
+                nav_action_client=self.nav_action_client,
+                clock=self.get_clock(),
             )
 
         if self.adapter_mode == "yahboom-python":

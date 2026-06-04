@@ -16,18 +16,21 @@ from pathlib import Path
 from typing import Any
 
 
+BARK_FILES = [
+    "robot-bark-normal-092.wav",
+    "robot-bark-normal-097.wav",
+    "robot-bark-normal-103.wav",
+    "robot-bark-normal-108.wav",
+]
+
 DEFAULT_CUES = {
+    "bark": BARK_FILES,
     "thinking-start": [
         "robot-think-whimper-1.wav",
         "robot-think-whimper-2.wav",
         "robot-think-pant-1.wav",
     ],
-    "confirm": [
-        "robot-bark-normal-092.wav",
-        "robot-bark-normal-097.wav",
-        "robot-bark-normal-103.wav",
-        "robot-bark-normal-108.wav",
-    ],
+    "confirm": BARK_FILES,
 }
 
 
@@ -121,7 +124,7 @@ def play_cue(state: AudioState, cue: str) -> dict[str, Any]:
     if not sound_file.exists():
         return {"ok": False, "cue": cue, "error": f"Sound file missing: {sound_file}"}
 
-    if cue == "thinking-start":
+    if cue in ("thinking-start", "confirm", "bark"):
         stop_active(state)
 
     try:
@@ -166,6 +169,10 @@ def stop_active(state: AudioState) -> None:
     for process in list(state.active_processes):
         if process.poll() is None:
             process.terminate()
+            try:
+                process.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                process.kill()
     cleanup_processes(state)
 
 

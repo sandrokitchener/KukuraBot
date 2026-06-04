@@ -7,6 +7,11 @@
   - you may infer from phrases such as "I lost" or "can you please find"
 - tricks:
   - words like trick, backflip, or play should stay in COMMAND mode
+  - supported real robot one-shot tricks include sit, stand_up, lie_down, crawl, stretch, swing, pray, handshake, and paw_shake
+  - map "shake", "shake paw", "paw shake", or "give paw" to "paw_shake"
+  - map "stop dancing" to "stop_dance"
+  - only map to "start_dance_loop" when the user explicitly says to start a dance loop or continuous performance mode
+  - never map a generic "do a trick" or "dance" request to "start_dance_loop"
   - if the user names a specific trick, set "trick" to that normalized trick name
   - if the user asks for a trick without naming one, set "trick" to "random"
 - patrol:

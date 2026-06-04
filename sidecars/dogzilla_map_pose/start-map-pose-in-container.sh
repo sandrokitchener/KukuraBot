@@ -14,7 +14,18 @@ source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1091
 source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true
 
+missing_packages=()
 if ! ros2 pkg prefix cartographer_ros >/dev/null 2>&1; then
+  missing_packages+=(ros-humble-cartographer-ros ros-humble-cartographer-ros-msgs)
+fi
+if ! python3 - <<'PY' >/dev/null 2>&1
+from nav2_msgs.action import NavigateToPose  # noqa: F401
+PY
+then
+  missing_packages+=(ros-humble-nav2-msgs)
+fi
+
+if [ "${#missing_packages[@]}" -gt 0 ]; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y --no-install-recommends curl ca-certificates gnupg >/dev/null
@@ -22,7 +33,7 @@ if ! ros2 pkg prefix cartographer_ros >/dev/null 2>&1; then
   ubuntu_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME}}")"
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${ubuntu_codename} main" > /etc/apt/sources.list.d/ros2.list
   apt-get update
-  apt-get install -y --no-install-recommends ros-humble-cartographer-ros ros-humble-cartographer-ros-msgs
+  apt-get install -y --no-install-recommends "${missing_packages[@]}"
 fi
 
 pkill -f "[c]artographer_node.*robodoge_dogzilla_laser_only.lua" 2>/dev/null || true

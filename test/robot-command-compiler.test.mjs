@@ -6,9 +6,16 @@ import {
   compileRobotRuntimePreview,
   shouldAutoDispatchRobotRuntime,
 } from '../lib/robot-command-compiler.mjs'
+import { dogzillaDirectRuntime } from '../test-support/robot-http-fixtures.mjs'
+import {
+  dogzillaMotionProfile,
+  manualControlInput,
+  mapWaypoint,
+  runtimePreviewInput,
+} from '../test-support/robot-compiler-fixtures.mjs'
 
 test('compileRobotRuntimePreview maps move command to named waypoint goto plan', () => {
-  const preview = compileRobotRuntimePreview({
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       input: 'go to the living room',
       rawResponse: '{"command":"move","waypoint":"living_room"}',
@@ -17,315 +24,240 @@ test('compileRobotRuntimePreview maps move command to named waypoint goto plan',
         waypoint: 'living_room',
       },
     },
-    runtimeConfig: {
-      enabled: true,
-      dryRun: true,
-      robotId: 'dogzilla-local',
-      robotModel: 'dogzilla-s2',
-      selectedMotionProfile: 'default',
-      activeTarget: {
-        id: 'ros2_real',
-        kind: 'ros2-bridge',
-        label: 'ROS2 Real Robot',
-      },
+    waypoints: {
+      living_room: mapWaypoint({
+        x: 1.2,
+        y: -0.5,
+        yaw: 0.3,
+        physicalSpot: 'Center rug',
+      }),
     },
-    ros2Config: {
-      bridge: {
-        commandPlanTopic: '/dogzilla/command_plan',
-      },
-      topics: {
-        state: '/dogzilla/state',
-      },
-      transport: {
-        enabled: true,
-        dryRun: true,
-        dispatchOnChat: true,
-        baseUrl: 'http://127.0.0.1:8892',
-        commandsPath: '/commands',
-        feedbackPath: '/feedback',
-      },
-      feedback: {
-        pollMs: 2500,
-      },
-    },
-    waypointConfig: {
-      activeSet: 'home',
-      sets: {
-        home: {
-          waypoints: {
-            living_room: {
-              kind: 'map_pose',
-              frame: 'map',
-              x: 1.2,
-              y: -0.5,
-              yaw: 0.3,
-              arrivalToleranceMeters: 0.25,
-              verified: true,
-              physicalSpot: 'Center rug',
-            },
-          },
-        },
-      },
-    },
-    actionConfig: {
-      activeMap: 'default',
-      maps: {
-        default: {
-          tricks: {},
-        },
-      },
-    },
-    motionConfig: {
-      activeProfile: 'default',
-      profiles: {
-        default: {},
-      },
-    },
-  })
+  }))
 
   assert.equal(preview.status, 'ready')
   assert.equal(preview.action, 'dogzilla.navigate_named_target')
+  assert.equal(preview.robot_id, 'dogzilla-local')
+  assert.equal(preview.robot_name, 'Questing Beast')
   assert.equal(preview.canonicalPlan.kind, 'locomotion.goto')
   assert.equal(preview.canonicalPlan.params.waypoint, 'living_room')
+  assert.equal(preview.payload.robot_id, 'dogzilla-local')
+  assert.equal(preview.payload.robot_name, 'Questing Beast')
   assert.equal(preview.payload.planTopic, '/dogzilla/command_plan')
 })
 
 test('compileRobotRuntimePreview normalizes space-separated waypoint names', () => {
-  const preview = compileRobotRuntimePreview({
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
         command: 'move',
         waypoint: 'front door',
       },
     },
-    runtimeConfig: {
-      enabled: true,
-      dryRun: true,
-      activeTarget: {
-        id: 'ros2_real',
-        kind: 'ros2-bridge',
-        label: 'ROS2 Real Robot',
-      },
+    waypoints: {
+      front_door: mapWaypoint({
+        arrivalToleranceMeters: 0.35,
+        verified: false,
+      }),
     },
-    ros2Config: {
-      bridge: {},
-      topics: {},
-      transport: {},
-      feedback: {},
-    },
-    waypointConfig: {
-      activeSet: 'home',
-      sets: {
-        home: {
-          waypoints: {
-            front_door: {
-              kind: 'map_pose',
-              frame: 'map',
-              x: 0,
-              y: 0,
-              yaw: 0,
-              arrivalToleranceMeters: 0.35,
-              verified: false,
-            },
-          },
-        },
-      },
-    },
-    actionConfig: {
-      activeMap: 'default',
-      maps: {
-        default: {
-          tricks: {},
-        },
-      },
-    },
-    motionConfig: {
-      activeProfile: 'default',
-      profiles: {
-        default: {},
-      },
-    },
-  })
+  }))
 
   assert.equal(preview.status, 'ready')
   assert.equal(preview.resolutions.waypoint.normalizedName, 'front_door')
   assert.equal(preview.canonicalPlan.params.waypoint, 'front_door')
 })
 
+test('compileRobotRuntimePreview converts app_map waypoint through saved origin', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'kitchen',
+      },
+    },
+    waypoints: {
+      kitchen: mapWaypoint({
+        frame: 'app_map',
+        x: 1,
+        y: 0,
+        yaw: Math.PI / 2,
+      }),
+    },
+    mapOrigin: {
+      x: 10,
+      y: 20,
+      yaw: Math.PI / 2,
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.canonicalPlan.params.frame, 'map')
+  assert.equal(preview.canonicalPlan.params.sourceFrame, 'app_map')
+  assert.equal(preview.canonicalPlan.params.x, 10)
+  assert.equal(preview.canonicalPlan.params.y, 21)
+  assert.equal(preview.canonicalPlan.params.yaw, 3.14159)
+})
+
+test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'kitchen',
+      },
+    },
+    waypoints: {
+      kitchen: mapWaypoint({
+        frame: 'app_map',
+        x: 1,
+      }),
+    },
+  }))
+
+  assert.equal(preview.status, 'invalid')
+  assert.deepEqual(preview.missingRequired, ['waypoint.mapOrigin'])
+  assert.match(preview.warnings.at(-1), /no saved DOGZILLA map origin/)
+})
+
 test('compileRobotRuntimePreview rejects trick actions without verified numeric ids', () => {
-  const preview = compileRobotRuntimePreview({
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
         command: 'trick',
         trick: 'backflip',
       },
     },
-    runtimeConfig: {
-      enabled: true,
-      dryRun: true,
-      activeTarget: {
-        id: 'ros2_real',
-        kind: 'ros2-bridge',
-        label: 'ROS2 Real Robot',
+    tricks: {
+      backflip: {
+        actionId: 'proxy_backflip_v1',
+        verified: true,
       },
     },
-    ros2Config: {
-      bridge: {},
-      topics: {},
-      transport: {},
-      feedback: {},
-    },
-    waypointConfig: {
-      activeSet: 'home',
-      sets: {
-        home: {
-          waypoints: {},
-        },
-      },
-    },
-    actionConfig: {
-      activeMap: 'default',
-      maps: {
-        default: {
-          tricks: {
-            backflip: {
-              actionId: 'proxy_backflip_v1',
-              verified: true,
-            },
-          },
-        },
-      },
-    },
-    motionConfig: {
-      activeProfile: 'default',
-      profiles: {
-        default: {},
-      },
-    },
-  })
+  }))
 
   assert.equal(preview.status, 'unsupported')
   assert.match(preview.warnings[0], /does not have a verified numeric DOGZILLA action id/i)
 })
 
 test('compileRobotRuntimePreview maps sit trick to verified DOGZILLA action id', () => {
-  const preview = compileRobotRuntimePreview({
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
         command: 'trick',
         trick: 'sit',
       },
     },
-    runtimeConfig: {
-      enabled: true,
-      dryRun: false,
-      activeTarget: {
-        id: 'ros2_real',
-        kind: 'ros2-bridge',
-        label: 'ROS2 Real Robot',
+    tricks: {
+      sit: {
+        actionId: 12,
+        verified: true,
       },
     },
-    ros2Config: {
-      bridge: {},
-      topics: {},
-      transport: {},
-      feedback: {},
-    },
-    waypointConfig: {
-      activeSet: 'home',
-      sets: {
-        home: {
-          waypoints: {},
-        },
-      },
-    },
-    actionConfig: {
-      activeMap: 'default',
-      maps: {
-        default: {
-          tricks: {
-            sit: {
-              actionId: 12,
-              verified: true,
-            },
-          },
-        },
-      },
-    },
-    motionConfig: {
-      activeProfile: 'default',
-      profiles: {
-        default: {},
-      },
-    },
-  })
+  }))
 
   assert.equal(preview.status, 'ready')
   assert.equal(preview.canonicalPlan.kind, 'action.once')
   assert.equal(preview.canonicalPlan.params.actionId, 12)
 })
 
+test('compileRobotRuntimePreview normalizes paw shake trick to handshake action id', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'trick',
+        trick: 'paw shake',
+      },
+    },
+    runtimeConfig: dogzillaDirectRuntime({
+      enabled: true,
+      dryRun: false,
+    }),
+    tricks: {
+      paw_shake: {
+        actionId: 19,
+        verified: true,
+      },
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.canonicalPlan.kind, 'action.once')
+  assert.equal(preview.canonicalPlan.params.trick, 'paw_shake')
+  assert.equal(preview.canonicalPlan.params.actionId, 19)
+})
+
+test('compileRobotRuntimePreview refuses plain dance as an implicit performance loop', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      input: 'do a trick',
+      parsed: {
+        command: 'trick',
+        trick: 'dance',
+      },
+    },
+    runtimeConfig: dogzillaDirectRuntime({
+      enabled: true,
+      dryRun: false,
+    }),
+    tricks: {
+      dance: {
+        planKind: 'action.loop',
+        enabled: true,
+        verified: true,
+      },
+    },
+  }))
+
+  assert.equal(preview.status, 'unsupported')
+  assert.equal(preview.canonicalPlan, null)
+  assert.match(preview.warnings.join('\n'), /continuous DOGZILLA performance mode/i)
+})
+
+test('compileRobotRuntimePreview maps explicit dance loop request to performance loop', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      input: 'start dance loop',
+      parsed: {
+        command: 'trick',
+        trick: 'start_dance_loop',
+      },
+    },
+    runtimeConfig: dogzillaDirectRuntime({
+      enabled: true,
+      dryRun: false,
+    }),
+    tricks: {
+      start_dance_loop: {
+        planKind: 'action.loop',
+        enabled: true,
+        verified: true,
+      },
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.canonicalPlan.kind, 'action.loop')
+  assert.deepEqual(preview.canonicalPlan.params, {
+    trick: 'start_dance_loop',
+    enabled: true,
+    verified: true,
+  })
+})
+
 test('compileRobotManualControlPreview maps gamepad axes to DOGZILLA relative motion', () => {
-  const preview = compileRobotManualControlPreview({
+  const preview = compileRobotManualControlPreview(manualControlInput({
     control: {
       forward: 1,
       strafe: 0.5,
       turn: -0.75,
       source: 'gamepad',
     },
-    runtimeConfig: {
-      enabled: true,
-      dryRun: false,
-      robotId: 'dogzilla-local',
-      robotModel: 'dogzilla-s2',
-      selectedMotionProfile: 'default',
-      activeTarget: {
-        id: 'dogzilla_direct',
-        kind: 'dogzilla-direct',
-        label: 'DOGZILLA Direct Bridge',
-      },
-    },
-    ros2Config: {
-      bridge: {
-        commandPlanTopic: '/dogzilla/command_plan',
-      },
-      topics: {
-        state: '/dogzilla/state',
-      },
-      transport: {
-        enabled: true,
-        dryRun: false,
-        dispatchOnChat: true,
-        baseUrl: 'http://127.0.0.1:8893',
-        commandsPath: '/commands',
-      },
-      feedback: {},
-    },
-    motionConfig: {
-      activeProfile: 'default',
-      profiles: {
-        default: {
-          gaits: ['walk', 'trot'],
-          paceModes: ['slow', 'normal', 'high'],
-          limits: {
-            xStep: { min: -25, max: 25 },
-            yStep: { min: -18, max: 18 },
-            turnRate: { min: -100, max: 100 },
-          },
-          twistCalibration: {
-            deadband: 0.05,
-            linearXFullScaleStep: 25,
-            linearYFullScaleStep: 18,
-            angularZFullScaleStep: 100,
-          },
-        },
-      },
-    },
-  })
+  }))
 
   assert.equal(preview.status, 'ready')
   assert.equal(preview.command, 'manual')
   assert.equal(preview.action, 'dogzilla.manual_control')
+  assert.equal(preview.payload.robot_id, 'dogzilla-local')
+  assert.equal(preview.payload.robot_name, 'Questing Beast')
   assert.equal(preview.canonicalPlan.kind, 'locomotion.relative')
   assert.deepEqual(preview.canonicalPlan.params, {
     x_step: 25,
@@ -339,39 +271,22 @@ test('compileRobotManualControlPreview maps gamepad axes to DOGZILLA relative mo
 })
 
 test('compileRobotManualControlPreview deadbands neutral gamepad drift', () => {
-  const preview = compileRobotManualControlPreview({
+  const preview = compileRobotManualControlPreview(manualControlInput({
     control: {
       forward: 0.03,
       strafe: -0.04,
       turn: 0.049,
     },
-    runtimeConfig: {
-      activeTarget: {
-        id: 'dogzilla_direct',
-        kind: 'dogzilla-direct',
-        label: 'DOGZILLA Direct Bridge',
+    runtimeConfig: dogzillaDirectRuntime(),
+    motionProfile: dogzillaMotionProfile({
+      twistCalibration: {
+        deadband: 0.05,
+        linearXFullScaleStep: 25,
+        linearYFullScaleStep: 18,
+        angularZFullScaleStep: 100,
       },
-    },
-    ros2Config: {
-      bridge: {},
-      topics: {},
-      transport: {},
-      feedback: {},
-    },
-    motionConfig: {
-      activeProfile: 'default',
-      profiles: {
-        default: {
-          twistCalibration: {
-            deadband: 0.05,
-            linearXFullScaleStep: 25,
-            linearYFullScaleStep: 18,
-            angularZFullScaleStep: 100,
-          },
-        },
-      },
-    },
-  })
+    }),
+  }))
 
   assert.equal(preview.canonicalPlan.params.x_step, 0)
   assert.equal(preview.canonicalPlan.params.y_step, 0)

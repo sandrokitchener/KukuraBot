@@ -13,6 +13,9 @@ from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 LOG_FILE = Path(__file__).resolve().with_name("command_log.ndjson")
+ROBOT_ID_FILE = ROOT_DIR / "robot_id.txt"
+ROBOT_NAME_FILE = ROOT_DIR / "robot_name.txt"
+DEFAULT_ROBOT_NAME = "Questing Beast"
 DEFAULT_PLAN_TOPIC = os.environ.get("DOGZILLA_PLAN_TOPIC", "/dogzilla/command_plan")
 DEFAULT_STATE_TOPIC = os.environ.get("DOGZILLA_STATE_TOPIC", "/dogzilla/state")
 DEFAULT_NODE_NAME = os.environ.get("DOGZILLA_HTTP_BRIDGE_NODE_NAME", "dogzilla_http_bridge")
@@ -109,6 +112,7 @@ class Ros2PublisherRuntime:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {
+              **identity_payload(),
               "available": self.available,
               "planTopic": self.plan_topic,
               "stateTopic": self.state_topic,
@@ -219,6 +223,7 @@ class Ros2BridgeHandler(BaseHTTPRequestHandler):
                     "delivery": "published-to-plan-topic",
                     "planTopic": publish_result.get("topic"),
                     "publishedAt": publish_result.get("publishedAt"),
+                    **identity_payload(),
                 },
             )
             return
@@ -270,6 +275,7 @@ class Ros2BridgeHandler(BaseHTTPRequestHandler):
     def _health_payload(self) -> dict[str, Any]:
         runtime = self.server.runtime.snapshot()
         return {
+            **identity_payload(),
             "ok": runtime["available"],
             "mode": "http-to-ros2-plan-topic",
             "receivedCount": self.server.received_count,
@@ -280,6 +286,7 @@ class Ros2BridgeHandler(BaseHTTPRequestHandler):
     def _feedback_payload(self) -> dict[str, Any]:
         runtime = self.server.runtime.snapshot()
         return {
+            **identity_payload(),
             "status": "ok" if runtime["available"] else "degraded",
             "lastCommandId": self.server.recent_commands[0]["commandId"] if self.server.recent_commands else None,
             "recentCommands": list(self.server.recent_commands),
@@ -298,6 +305,24 @@ def append_log_record(record: dict[str, Any]) -> None:
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with LOG_FILE.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")
+
+
+def identity_payload() -> dict[str, str]:
+    robot_id = read_first_line(ROBOT_ID_FILE)
+    robot_name = read_first_line(ROBOT_NAME_FILE) or DEFAULT_ROBOT_NAME
+    return {
+        "robot_id": robot_id,
+        "robot_name": robot_name,
+        "robotId": robot_id,
+        "robotName": robot_name,
+    }
+
+
+def read_first_line(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (OSError, IndexError):
+        return ""
 
 
 def utc_now() -> str:

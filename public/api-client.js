@@ -1,7 +1,12 @@
 const API_BASE_STORAGE_KEY = 'robo-doge.apiBaseUrl'
+const ANDROID_TAILNET_DEFAULT_API_BASE_URL = 'http://100.89.71.113:3037'
 
 export function getApiBaseUrl() {
-  const override = readQueryApiBaseUrl() || readStoredApiBaseUrl() || readGlobalApiBaseUrl()
+  const override =
+    readQueryApiBaseUrl() ||
+    readStoredApiBaseUrl() ||
+    readGlobalApiBaseUrl() ||
+    readAndroidTailnetDefaultApiBaseUrl()
   return normalizeApiBaseUrl(override)
 }
 
@@ -49,12 +54,27 @@ function readGlobalApiBaseUrl() {
   return typeof window.ROBO_DOGE_API_BASE_URL === 'string' ? window.ROBO_DOGE_API_BASE_URL : ''
 }
 
+function readAndroidTailnetDefaultApiBaseUrl() {
+  if (!isAndroidAppShell()) {
+    return ''
+  }
+
+  return ANDROID_TAILNET_DEFAULT_API_BASE_URL
+}
+
 function readQueryApiBaseUrl() {
   try {
     return new URLSearchParams(window.location.search).get('apiBase') || ''
   } catch {
     return ''
   }
+}
+
+function isAndroidAppShell() {
+  const userAgent = typeof navigator === 'object' && typeof navigator.userAgent === 'string'
+    ? navigator.userAgent
+    : ''
+  return /Android/i.test(userAgent) && (/\bwv\b/i.test(userAgent) || !!window.__TAURI_INTERNALS__)
 }
 
 function normalizeApiBaseUrl(value) {

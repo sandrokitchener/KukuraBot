@@ -7,6 +7,7 @@ import {
   getDogzillaLidarDiagnostics,
   getDogzillaLidarHealth,
   getDogzillaLidarScan,
+  getDogzillaRobotPose,
 } from '../lib/dogzilla-lidar-client.mjs'
 
 test('getDogzillaLidarScan proxies point payloads from the configured bridge', async () => {
@@ -57,6 +58,48 @@ test('getDogzillaLidarHealth reports disabled config loudly', async () => {
   assert.match(result.detail, /not configured/)
 })
 
+test('getDogzillaRobotPose exposes map pose from configured bridge', async () => {
+  const server = createServer((request, response) => {
+    assert.equal(request.url, '/pose')
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      ok: true,
+      status: 'ok',
+      waypointSafe: true,
+      mapPose: {
+        x: 0.25,
+        y: -0.5,
+        theta: 1.57,
+        frame: 'map',
+        source: 'tf:map->base_link',
+      },
+    }))
+  })
+
+  await listen(server)
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const result = await getDogzillaRobotPose({
+      config: {
+        lidar: {
+          enabled: true,
+          poseUrl: `${baseUrl}/pose`,
+        },
+      },
+      timeoutMs: 500,
+    })
+
+    assert.equal(result.ok, true)
+    assert.equal(result.status, 'ok')
+    assert.equal(result.waypointSafe, true)
+    assert.equal(result.mapPose.frame, 'map')
+    assert.equal(result.destination, `${baseUrl}/pose`)
+  } finally {
+    await close(server)
+  }
+})
+
 test('getDogzillaLidarScan preserves no-scan diagnostics from the bridge', async () => {
   const server = createServer((request, response) => {
     response.writeHead(503, { 'content-type': 'application/json' })
@@ -70,7 +113,6 @@ test('getDogzillaLidarScan preserves no-scan diagnostics from the bridge', async
         path: '/dev/ttyAMA1',
         exists: true,
         realPath: '/dev/ttyAMA1',
-        byIdPaths: [],
         readable: true,
         writable: true,
       },

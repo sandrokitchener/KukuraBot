@@ -70,6 +70,32 @@ class DogzillaAdapterContractTests(unittest.TestCase):
         self.assertEqual(params["pitch"], -15.0)
         self.assertEqual(params["yaw"], 11.0)
 
+    def test_goto_sends_nav2_pose_goal_through_adapter(self):
+        adapter = RecordingDogzillaAdapter()
+        result = execute_canonical_plan(
+            {
+                "kind": "locomotion.goto",
+                "params": {
+                    "frame": "map",
+                    "x": "1.25",
+                    "y": -0.5,
+                    "yaw": 7.0,
+                    "waypoint": "living_room",
+                    "arrivalToleranceMeters": 0.3,
+                },
+            },
+            adapter,
+        )
+
+        self.assertEqual(result.status, "locomotion.goto")
+        params = adapter.calls[0]["params"]
+        self.assertEqual(params["frame"], "map")
+        self.assertEqual(params["x"], 1.25)
+        self.assertEqual(params["y"], -0.5)
+        self.assertAlmostEqual(params["yaw"], 7.0 - 6.283185307179586)
+        self.assertEqual(params["waypoint"], "living_room")
+        self.assertEqual(params["arrival_tolerance_meters"], 0.3)
+
     def test_yahboom_python_adapter_maps_documented_calls(self):
         controller = FakeDogzillaController()
         adapter = YahboomPythonDogzillaAdapter(controller)
@@ -85,12 +111,14 @@ class DogzillaAdapterContractTests(unittest.TestCase):
         self.assertIn(("move", ("x", -4)), controller.calls)
         self.assertIn(("move", ("y", 3)), controller.calls)
         self.assertIn(("turn", (-10,)), controller.calls)
+        self.assertIn(("perform", (0,)), controller.calls)
         self.assertIn(("action", (12,)), controller.calls)
         self.assertIn(("imu", (1,)), controller.calls)
         self.assertIn(("translation", ("x", 1)), controller.calls)
         self.assertIn(("translation", ("z", 95)), controller.calls)
         self.assertIn(("attitude", ("p", 10)), controller.calls)
-        self.assertEqual(action.calls[0]["operation"], "action")
+        self.assertEqual(action.calls[0]["operation"], "perform")
+        self.assertEqual(action.calls[1]["operation"], "action")
         self.assertEqual(stabilize.calls[0]["operation"], "imu")
         self.assertEqual(pose.calls[-1]["operation"], "attitude")
 
@@ -110,6 +138,9 @@ class FakeDogzillaController:
 
     def action(self, *args):
         self.calls.append(("action", args))
+
+    def perform(self, *args):
+        self.calls.append(("perform", args))
 
     def imu(self, *args):
         self.calls.append(("imu", args))

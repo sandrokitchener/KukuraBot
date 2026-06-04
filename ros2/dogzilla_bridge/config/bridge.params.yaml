@@ -9,6 +9,7 @@ dogzilla_bridge:
     action_topic: "/dogzilla/action"
     stabilize_topic: "/dogzilla/stabilize"
     state_topic: "/dogzilla/state"
+    navigate_to_pose_action: "navigate_to_pose"
     adapter_mode: "ros-publisher"
     dogzilla_python_module: ""
     dogzilla_python_factory: ""

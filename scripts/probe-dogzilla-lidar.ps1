@@ -75,10 +75,10 @@ if ($Host) {
   $remoteCommand = @"
 set -eu
 echo '== devices =='
-ls -l /dev/ttyAMA* /dev/ttyUSB* /dev/serial/by-id/* /dev/serial/by-path/* 2>/dev/null || true
+ls -l /dev/ttyAMA1 2>/dev/null || true
 echo
 echo '== lidar processes =='
-ps -ef | grep -Ei 'oradar|ydlidar|lidar|robodoge' | grep -v grep || true
+ps -ef | grep -Ei 'oradar|lidar|robodoge' | grep -v grep || true
 echo
 echo '== lidar log tail =='
 cd $remoteRootQuoted 2>/dev/null && tail -n 80 logs/lidar-bridge.log 2>/dev/null || true

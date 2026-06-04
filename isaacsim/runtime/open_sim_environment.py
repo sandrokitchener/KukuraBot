@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import omni.kit.app
@@ -10,7 +11,20 @@ from pxr import Semantics
 
 
 ROOT_DIR = Path(r"C:\Users\sandr\OneDrive\Documents\Robo-Doge")
-STAGE_PATH = ROOT_DIR / "isaacsim" / "sim_environment.usd"
+DEFAULT_STAGE_PATH = ROOT_DIR / "isaacsim" / "sim_environment.usd"
+
+
+def _resolve_stage_path():
+    raw_stage_path = os.environ.get("ROBO_DOGE_ISAAC_STAGE", "").strip()
+    if not raw_stage_path:
+        return DEFAULT_STAGE_PATH
+    stage_path = Path(raw_stage_path)
+    if not stage_path.is_absolute():
+        stage_path = ROOT_DIR / stage_path
+    return stage_path
+
+
+STAGE_PATH = _resolve_stage_path()
 
 
 def main():

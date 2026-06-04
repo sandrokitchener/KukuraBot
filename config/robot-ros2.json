@@ -1,7 +1,7 @@
 {
   "bridge": {
     "enabled": true,
-    "dryRun": true,
+    "dryRun": false,
     "packageName": "dogzilla_bridge",
     "nodeName": "dogzilla_bridge",
     "namespace": "/dogzilla",
@@ -11,13 +11,13 @@
   "transport": {
     "kind": "http",
     "enabled": true,
-    "dryRun": true,
+    "dryRun": false,
     "dispatchOnChat": true,
     "baseUrl": "http://10.0.4.32:8893",
     "healthPath": "/healthz",
     "commandsPath": "/commands",
     "feedbackPath": "/feedback",
-    "timeoutMs": 4000
+    "timeoutMs": 12000
   },
   "launch": {
     "managedByApp": false,
@@ -50,7 +50,8 @@
     "getState": "/dogzilla/get_state"
   },
   "actions": {
-    "navigateNamedTarget": "/dogzilla/navigate_named_target"
+    "navigateNamedTarget": "/dogzilla/navigate_named_target",
+    "navigateToPose": "navigate_to_pose"
   },
   "feedback": {
     "pollMs": 2500,
