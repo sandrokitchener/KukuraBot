@@ -3,10 +3,11 @@ import { readFile, stat } from 'node:fs/promises'
 import test from 'node:test'
 
 test('Android shell and web app share the connection center surface', async () => {
-  const [html, css, appJs, tauriConfigText] = await Promise.all([
+  const [html, css, appJs, serverJs, tauriConfigText] = await Promise.all([
     readFile('public/index.html', 'utf-8'),
     readFile('public/styles.css', 'utf-8'),
     readFile('public/app.js', 'utf-8'),
+    readFile('server.mjs', 'utf-8'),
     readFile('src-tauri/tauri.conf.json', 'utf-8'),
   ])
   const swipeBlocker = appJs.match(/function isSwipeBlockedTarget[\s\S]+?\n}/)?.[0] || ''
@@ -55,6 +56,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(html, /id="robot-camera-snapshot-button"/)
   assert.match(html, /id="robot-camera-snapshot-note"/)
   assert.match(html, /id="recon-snapshot-list"/)
+  assert.match(html, /id="robot-map-track"/)
   assert.doesNotMatch(html, /><>/)
   assert.doesNotMatch(html, />&lt;&gt;</)
   assert.doesNotMatch(html, />Scout</)
@@ -71,6 +73,19 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(appJs, /apiFetch\('\/api\/robot\/stop'/)
   assert.match(appJs, /apiFetch\('\/api\/recon\/snapshots'/)
   assert.match(appJs, /method: 'PATCH'/)
+  assert.match(appJs, /navigation-unavailable/)
+  assert.doesNotMatch(appJs, /setRobotPoseReadout\(robot\.telemetry\?\.pose/)
+  assert.match(appJs, /Waiting for verified map-frame localization/)
+  assert.match(appJs, /DOGZILLA direct bridge unreachable/)
+  assert.match(appJs, /Stale robot pose cleared/)
+  assert.match(appJs, /renderRobotPoseTrack\(snapshot\?\.poseTrack/)
+  assert.doesNotMatch(serverJs, /pose:\s*localPose/)
+  assert.doesNotMatch(serverJs, /local-odom-only/)
+  assert.match(serverJs, /bridgeOwnsActiveRobot/)
+  assert.match(serverJs, /removeDogzillaStreamRobots/)
+  assert.match(serverJs, /recordDogzillaMapPose/)
+  assert.match(serverJs, /telemetry\.waypointSafe !== true/)
+  assert.match(css, /\.robot-map-track-dot/)
   assert.match(appJs, /document\.addEventListener\('touchmove', handleMobileTouchMove, \{ passive: false \}\)/)
   assert.ok(swipeBlocker)
   assert.match(swipeBlocker, /\.recon-gallery-drawer/)
@@ -81,7 +96,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(piConfirmCue, /playDogzillaPiCue\('confirm'\)/)
   assert.match(piThinkingCue, /playDogzillaPiCue\('thinking-start'\)/)
   assert.match(lidarFailureFormatter, /serialDiagnostics/)
-  assert.match(lidarFailureFormatter, /byIdPaths/)
+  assert.match(lidarFailureFormatter, /realPath/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/connection'/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/audio\/cue'/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/preflight'/)

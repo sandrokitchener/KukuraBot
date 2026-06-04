@@ -34,7 +34,7 @@ test('shouldForceDogzillaDirectBridge follows active DOGZILLA Direct target', ()
 })
 
 test('forceDogzillaDirectBridgeOnStartup reuses healthy direct bridge', async () => {
-  let startCalls = 0
+  const actionCalls = []
   const result = await forceDogzillaDirectBridgeOnStartup({
     runtimeConfig: directRuntimeConfig(),
     ros2Config: directRos2Config(),
@@ -43,15 +43,16 @@ test('forceDogzillaDirectBridgeOnStartup reuses healthy direct bridge', async ()
       status: 'ok',
       destination: 'http://10.0.4.32:8893/healthz',
     }),
-    runDogzillaConnectionActionImpl: async () => {
-      startCalls += 1
-      return { status: 'ok' }
+    runDogzillaConnectionActionImpl: async (action) => {
+      actionCalls.push(action)
+      return { status: 'ok', action }
     },
   })
 
   assert.equal(result.status, 'ok')
   assert.equal(result.reusedBridge, true)
-  assert.equal(startCalls, 0)
+  assert.deepEqual(actionCalls, ['stop-vendor-app'])
+  assert.equal(result.vendorStopResult.action, 'stop-vendor-app')
 })
 
 test('forceDogzillaDirectBridgeOnStartup starts and waits for missing direct bridge', async () => {
@@ -75,10 +76,50 @@ test('forceDogzillaDirectBridgeOnStartup starts and waits for missing direct bri
 
   assert.equal(result.status, 'ok')
   assert.equal(result.reusedBridge, false)
-  assert.deepEqual(startActions, [{
-    action: 'start-direct',
-    options: { live: false },
-  }])
+  assert.deepEqual(startActions, [
+    {
+      action: 'stop-vendor-app',
+      options: undefined,
+    },
+    {
+      action: 'start-direct',
+      options: { live: false },
+    },
+  ])
+})
+
+test('forceDogzillaDirectBridgeOnStartup replaces healthy direct bridge when requested', async () => {
+  const healthSequence = [
+    { status: 'ok', destination: 'http://10.0.4.32:8893/healthz' },
+    { status: 'ok', destination: 'http://10.0.4.32:8893/healthz' },
+  ]
+  const startActions = []
+
+  const result = await forceDogzillaDirectBridgeOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    logger: quietLogger(),
+    replaceExisting: true,
+    sleepImpl: async () => {},
+    probeRobotSidecarHealthImpl: async () => healthSequence.shift() || healthSequence.at(-1),
+    runDogzillaConnectionActionImpl: async (action, options) => {
+      startActions.push({ action, options })
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reusedBridge, false)
+  assert.deepEqual(startActions, [
+    {
+      action: 'stop-vendor-app',
+      options: undefined,
+    },
+    {
+      action: 'start-direct',
+      options: { live: false },
+    },
+  ])
 })
 
 test('shouldStartDirectBridgeLive requires both runtime and transport live mode', () => {

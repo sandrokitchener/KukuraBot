@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   buildDogzillaActionPlan,
+  ensureDogzillaRobotIdentity,
   normalizeDogzillaConnectionConfig,
+  saveDogzillaRobotName,
 } from '../lib/dogzilla-connection-center.mjs'
 
 test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () => {
@@ -30,8 +32,11 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.audio.enabled, false)
   assert.equal(config.audio.cueUrl, 'http://192.168.8.88:8895/cue')
   assert.equal(config.lidar.enabled, false)
+  assert.equal(config.lidar.serialPort, '/dev/ttyAMA1')
   assert.equal(config.lidar.scanUrl, 'http://192.168.8.88:8896/scan')
+  assert.equal(config.lidar.poseUrl, 'http://192.168.8.88:8896/pose')
   assert.equal(config.lidar.proxyScanPath, '/api/dogzilla/lidar/scan')
+  assert.equal(config.lidar.proxyPosePath, '/api/dogzilla/pose')
 })
 
 test('normalizeDogzillaConnectionConfig routes camera view through YOLO when vision is enabled', () => {
@@ -130,5 +135,110 @@ test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services ind
   assert.equal(lidarPlan.args[lidarPlan.args.indexOf('-SshPort') + 1], '22')
   assert.ok(lidarPlan.args.includes('-Port'))
   assert.ok(lidarPlan.args.includes('8896'))
+  assert.ok(lidarPlan.args.includes('-SerialPort'))
+  assert.equal(lidarPlan.args[lidarPlan.args.indexOf('-SerialPort') + 1], '/dev/ttyAMA1')
   assert.ok(lidarPlan.args.includes('-Background'))
+})
+
+test('buildDogzillaActionPlan stops the vendor DOGZILLA app before direct control', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+  })
+  const plan = buildDogzillaActionPlan('stop-vendor-app', config)
+
+  assert.equal(plan.action, 'stop-vendor-app')
+  assert.equal(plan.background, false)
+  assert.ok(plan.args.some((arg) => arg.endsWith('stop-dogzilla-vendor-app-ssh.ps1')))
+  assert.ok(plan.args.includes('-SshPort'))
+  assert.equal(plan.args[plan.args.indexOf('-SshPort') + 1], '22')
+  assert.ok(plan.args.includes('-RemoteRoot'))
+  assert.equal(plan.args[plan.args.indexOf('-RemoteRoot') + 1], '/home/pi/robodoge')
+})
+
+test('ensureDogzillaRobotIdentity creates missing Pi identity files and saves runtime identity', async () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+  })
+  let remoteCommand = ''
+  let savedIdentity = null
+
+  const identity = await ensureDogzillaRobotIdentity({
+    config,
+    generatedRobotId: '11111111-1111-4111-8111-111111111111',
+    robotName: 'Questing Beast',
+    execFilePromiseImpl: async (_command, args) => {
+      remoteCommand = args[args.indexOf('-Command') + 1]
+      return {
+        exitCode: 0,
+        stdout:
+          'robot_id=11111111-1111-4111-8111-111111111111\n' +
+          'robot_name=Questing Beast\n' +
+          'robot_id_created=1\n' +
+          'robot_name_created=1',
+        stderr: '',
+      }
+    },
+    saveRobotRuntimeIdentityImpl: async (value) => {
+      savedIdentity = value
+    },
+  })
+
+  assert.equal(identity.status, 'ok')
+  assert.equal(identity.robot_id, '11111111-1111-4111-8111-111111111111')
+  assert.equal(identity.robot_name, 'Questing Beast')
+  assert.equal(identity.created, true)
+  assert.match(remoteCommand, /robot_id\.txt/)
+  assert.match(remoteCommand, /robot_name\.txt/)
+  assert.deepEqual(savedIdentity, {
+    robotId: '11111111-1111-4111-8111-111111111111',
+    robotName: 'Questing Beast',
+  })
+})
+
+test('saveDogzillaRobotName writes robot_name.txt and preserves robot_id.txt as source of truth', async () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+  })
+  let remoteCommand = ''
+  let savedIdentity = null
+
+  const identity = await saveDogzillaRobotName('Shop Scout', {
+    config,
+    generatedRobotId: '22222222-2222-4222-8222-222222222222',
+    execFilePromiseImpl: async (_command, args) => {
+      remoteCommand = args[args.indexOf('-Command') + 1]
+      return {
+        exitCode: 0,
+        stdout: 'robot_id=pi-existing-id\nrobot_name=Shop Scout',
+        stderr: '',
+      }
+    },
+    saveRobotRuntimeIdentityImpl: async (value) => {
+      savedIdentity = value
+    },
+  })
+
+  assert.equal(identity.robot_id, 'pi-existing-id')
+  assert.equal(identity.robot_name, 'Shop Scout')
+  assert.match(remoteCommand, /printf '%s\\n' 'Shop Scout' > '\/home\/pi\/robodoge\/robot_name\.txt'/)
+  assert.match(remoteCommand, /if \[ ! -s '\/home\/pi\/robodoge\/robot_id\.txt' \]/)
+  assert.deepEqual(savedIdentity, {
+    robotId: 'pi-existing-id',
+    robotName: 'Shop Scout',
+  })
 })

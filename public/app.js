@@ -62,11 +62,14 @@ const robotStateChip = document.querySelector('#robot-state-chip')
 const robotStateName = document.querySelector('#robot-state-name')
 const robotStateTask = document.querySelector('#robot-state-task')
 const robotStateSeq = document.querySelector('#robot-state-seq')
+const robotBatteryMeter = document.querySelector('#robot-battery-meter')
 const robotBatteryValue = document.querySelector('#robot-battery-value')
 const robotTelemetryMeta = document.querySelector('#robot-telemetry-meta')
+const robotMapTrack = document.querySelector('#robot-map-track')
 const robotMapDot = document.querySelector('#robot-map-dot')
 const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
+const robotPoseReadout = document.querySelector('#robot-pose-readout')
 const robotMapPanel = document.querySelector('.robot-map-panel')
 const robotCameraPanel = document.querySelector('#robot-camera-panel')
 const robotCameraFrame = document.querySelector('#robot-camera-frame')
@@ -93,6 +96,8 @@ const dogzillaUserInput = document.querySelector('#dogzilla-user-input')
 const dogzillaRemoteRootInput = document.querySelector('#dogzilla-remote-root-input')
 const saveDogzillaConnectionButton = document.querySelector('#save-dogzilla-connection-button')
 const connectionStatus = document.querySelector('#connection-status')
+const dogzillaRobotId = document.querySelector('#dogzilla-robot-id')
+const dogzillaRobotName = document.querySelector('#dogzilla-robot-name')
 const dogzillaDirectUrl = document.querySelector('#dogzilla-direct-url')
 const dogzillaRos2Url = document.querySelector('#dogzilla-ros2-url')
 const connectionOutput = document.querySelector('#connection-output')
@@ -104,6 +109,10 @@ const dogzillaPreflightChecks = document.querySelector('#dogzilla-preflight-chec
 const dogzillaPreflightOutput = document.querySelector('#dogzilla-preflight-output')
 const robotTabs = document.querySelectorAll('.robot-tab')
 const primaryRobotTab = document.querySelector('.robot-tab[data-robot-view="overview"]')
+const primaryRobotTabName = document.querySelector('#primary-robot-tab-name')
+const robotNameEditButton = document.querySelector('#robot-name-edit-button')
+const robotNameEditForm = document.querySelector('#robot-name-edit-form')
+const robotNameInput = document.querySelector('#robot-name-input')
 const form = document.querySelector('#chat-form')
 const input = document.querySelector('#user-input')
 const sendButton = document.querySelector('#send-button')
@@ -120,6 +129,7 @@ const MESSAGE_SELECTOR = '.message:not(.message-empty)'
 const COMMAND_CUE_URLS = [
   '/sounds/robot-bark-synthetic.wav',
 ]
+const ROBOT_MAP_RANGE_METERS = 3
 const THINKING_CUE_URLS = [
   '/sounds/robot-think-whimper-1.wav',
   '/sounds/robot-think-whimper-2.wav',
@@ -142,7 +152,7 @@ const DEFAULT_SPEECH_ACTIVE_PROFILE = {
 }
 const DEFAULT_ROBOT_RUNTIME = {
   robotId: 'dogzilla-local',
-  robotName: 'DOGZILLA',
+  robotName: 'Questing Beast',
   robotModel: 'dogzilla-s2',
   activeTarget: {
     id: 'isaacsim',
@@ -275,6 +285,9 @@ manualControlToggleButton.addEventListener('click', handleManualControlToggle)
 manualControlNeutralButton.addEventListener('click', handleManualControlNeutral)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 connectionToggle.addEventListener('click', handleConnectionToggle)
+robotNameEditButton.addEventListener('click', handleRobotNameEditStart)
+robotNameEditForm.addEventListener('submit', handleRobotNameSave)
+robotNameInput.addEventListener('keydown', handleRobotNameInputKeydown)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
@@ -503,7 +516,7 @@ async function handleChatSubmit(event) {
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
     const completionState =
-      payload.isaacDispatch?.status === 'error' || payload.robotDispatch?.status === 'error'
+      payload.isaacDispatch?.status === 'error' || isRobotDispatchFailure(payload.robotDispatch)
         ? 'error'
         : 'idle'
 
@@ -1389,9 +1402,10 @@ async function refreshRobotState() {
     robotStateName.textContent = 'State stream'
     robotStateTask.textContent = 'Unavailable'
     robotStateSeq.textContent = '-'
-    robotBatteryValue.textContent = '-'
+    renderBatteryMeter(Number.NaN)
     robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
+    clearRobotPoseTrack()
     setRobotMapMeta(formatError(error))
   }
 }
@@ -1555,6 +1569,66 @@ function handleRobotTabClick(event) {
   }
 }
 
+function handleRobotNameEditStart() {
+  const currentName = runtimeConfig.robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
+  robotNameInput.value = currentName
+  robotNameEditForm.hidden = false
+  robotNameInput.focus()
+  robotNameInput.select()
+}
+
+function handleRobotNameInputKeydown(event) {
+  if (event.key === 'Escape') {
+    robotNameEditForm.hidden = true
+    robotNameInput.value = runtimeConfig.robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
+    robotNameEditButton.focus()
+  }
+}
+
+async function handleRobotNameSave(event) {
+  event.preventDefault()
+
+  const nextName = robotNameInput.value.trim().replace(/\s+/g, ' ')
+  if (!nextName) {
+    setStatus('Robot name cannot be empty.', 'error')
+    return
+  }
+
+  robotNameInput.disabled = true
+  robotNameEditForm.querySelector('button').disabled = true
+  setStatus('Saving robot name...', 'busy')
+
+  try {
+    const response = await apiFetch('/api/dogzilla/identity', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ robot_name: nextName }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not save robot name.')
+    }
+
+    if (payload.connection) {
+      renderDogzillaConnection(payload.connection)
+    }
+
+    const configPayload = await fetchConfig()
+    applyPayload(configPayload)
+    robotNameEditForm.hidden = true
+    setStatus(`Robot renamed to ${runtimeConfig.robotRuntime.robotName || nextName}.`)
+  } catch (error) {
+    setStatus(formatError(error), 'error')
+    connectionStatus.textContent = formatError(error)
+  } finally {
+    robotNameInput.disabled = false
+    robotNameEditForm.querySelector('button').disabled = false
+  }
+}
+
 async function fetchConfig() {
   const response = await apiFetch('/api/config')
   const payload = await response.json()
@@ -1607,8 +1681,14 @@ async function handleDogzillaConnectionSave() {
     }
 
     renderDogzillaConnection(payload)
-    connectionStatus.textContent = 'Connection saved.'
-    setStatus('DOGZILLA connection saved.')
+    if (payload.identity?.status === 'error') {
+      const message = `Connection saved. Robot ID setup failed: ${payload.identity.error || 'unknown error'}`
+      connectionStatus.textContent = message
+      setStatus(message, 'error')
+    } else {
+      connectionStatus.textContent = 'Connection saved.'
+      setStatus('DOGZILLA connection saved.')
+    }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
     setStatus(formatError(error), 'error')
@@ -1734,15 +1814,22 @@ function renderDogzillaConnection(payload) {
   const config = payload.config || {}
   const ssh = config.ssh || {}
   const bridges = config.bridges || {}
+  const robotId = payload.robot_id || payload.identity?.robot_id || config.robot_id || runtimeConfig.robotRuntime.robotId || '-'
+  const robotName = payload.robot_name || payload.identity?.robot_name || config.robot_name || runtimeConfig.robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
 
   dogzillaHostInput.value = ssh.host || ''
   dogzillaUserInput.value = ssh.user || 'pi'
   dogzillaRemoteRootInput.value = config.remoteRoot || '/home/pi/robodoge'
+  dogzillaRobotId.textContent = robotId || '-'
+  dogzillaRobotName.textContent = robotName || DEFAULT_ROBOT_RUNTIME.robotName
   dogzillaDirectUrl.textContent = bridges.direct?.baseUrl || '-'
   dogzillaRos2Url.textContent = bridges.ros2?.baseUrl || '-'
   connectionChip.textContent = ssh.host ? ssh.host : 'No IP'
+  const identityStatus = payload.identity?.status === 'error'
+    ? ` Robot ID failed: ${payload.identity.error || 'unknown error'}`
+    : robotId && robotId !== '-' ? ` Robot ID ${robotId}.` : ''
   connectionStatus.textContent = ssh.host
-    ? `${ssh.user}@${ssh.host}:${ssh.port}. SSH config ${payload.sshConfigExists ? 'ready' : 'not written'}.`
+    ? `${ssh.user}@${ssh.host}:${ssh.port}. SSH config ${payload.sshConfigExists ? 'ready' : 'not written'}.${identityStatus}`
     : 'Set DOGZILLA IP.'
 }
 
@@ -1842,6 +1929,8 @@ function formatConnectionAction(action) {
       return 'Pi audio restart'
     case 'start-lidar':
       return 'lidar bridge start'
+    case 'stop-vendor-app':
+      return 'vendor DOGZILLA app stop'
     case 'stop-bridges':
       return 'bridge stop'
     default:
@@ -2009,8 +2098,14 @@ function applyRobotRuntimeConfig() {
   runtimeTargetName.textContent = activeTarget.label
   runtimeTargetSource.textContent = `Source: ${formatSource(activeTarget.source || robotRuntime.source)}`
   runtimeTargetChip.textContent = activeTarget.label
-  if (primaryRobotTab) {
-    primaryRobotTab.textContent = robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
+  const robotName = robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
+  if (primaryRobotTabName) {
+    primaryRobotTabName.textContent = robotName
+  } else if (primaryRobotTab) {
+    primaryRobotTab.textContent = robotName
+  }
+  if (robotNameInput) {
+    robotNameInput.value = robotName
   }
   robotRuntimeFile.textContent = robotRuntime.runtimeFile
   robotRos2File.textContent = robotRuntime.ros2ConfigFile
@@ -2142,10 +2237,12 @@ function renderRobotStateSnapshot(snapshot) {
     robotStateName.textContent = 'No robot'
     robotStateTask.textContent = 'Waiting'
     robotStateSeq.textContent = '-'
-    robotBatteryValue.textContent = '-'
+    renderBatteryMeter(Number.NaN)
     robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
-    setRobotMapMeta(`Stream: ${runtimeConfig.robotRuntime.stateStreamPath || DEFAULT_ROBOT_RUNTIME.stateStreamPath}`)
+    clearRobotPoseTrack()
+    setRobotPoseReadout(null)
+    setRobotMapMeta(formatNoRobotMapMessage(snapshot))
     return
   }
 
@@ -2160,6 +2257,7 @@ function renderRobotStateSnapshot(snapshot) {
   robotStateSeq.textContent = String(robot.seq)
   renderRobotTelemetry(robot)
 
+  renderRobotPoseTrack(snapshot?.poseTrack || [], robot)
   renderRobotMapDot(robot)
 }
 
@@ -2170,35 +2268,152 @@ function renderRobotStateInactive() {
   robotStateName.textContent = 'No robot'
   robotStateTask.textContent = 'Waiting'
   robotStateSeq.textContent = '-'
-  robotBatteryValue.textContent = '-'
+  renderBatteryMeter(Number.NaN)
   robotTelemetryMeta.textContent = ''
   robotMapDot.style.opacity = '0'
+  clearRobotPoseTrack()
+  setRobotPoseReadout(null)
   setRobotMapMeta('Real robot target required for live map.')
+}
+
+function formatNoRobotMapMessage(snapshot) {
+  const activeTarget = snapshot?.activeTarget || runtimeConfig.robotRuntime?.activeTarget
+  const bridgeState = snapshot?.bridgeState || {}
+  const poseState = snapshot?.poseState || {}
+  const streamPath = runtimeConfig.robotRuntime.stateStreamPath || DEFAULT_ROBOT_RUNTIME.stateStreamPath
+
+  if (activeTarget?.kind === 'dogzilla-direct') {
+    const bridgeError = typeof bridgeState.error === 'string' ? bridgeState.error.trim() : ''
+    const poseError = typeof poseState.error === 'string' ? poseState.error.trim() : ''
+
+    if (bridgeState.status === 'error' || bridgeError) {
+      return `DOGZILLA direct bridge unreachable.${bridgeError ? ` ${bridgeError}.` : ''} Stale robot pose cleared; waiting for fresh bridge state.`
+    }
+
+    if (poseState.status === 'error' || poseError) {
+      return `DOGZILLA pose bridge unreachable.${poseError ? ` ${poseError}.` : ''} Waiting for verified map-frame localization.`
+    }
+
+    return 'Waiting for fresh DOGZILLA direct bridge state.'
+  }
+
+  return `Stream: ${streamPath}`
 }
 
 function renderRobotMapDot(robot) {
   if (!robot.pose) {
     robotMapDot.style.opacity = '0'
-    const yaw = toFiniteNumber(robot.telemetry?.yaw)
-    const orientation = Number.isFinite(yaw) ? ` Heading ${yaw.toFixed(2)} deg.` : ''
-    setRobotMapMeta(`Map pose unavailable from Pi bridge.${orientation} Last update ${formatEventTimestamp(robot.receivedAt)}.`)
+    clearRobotPoseTrack()
+    setRobotPoseReadout(null)
+    setRobotMapMeta(formatPoseUnavailableMessage(robot))
     return
   }
 
-  const rangeMeters = 3
-  const xRatio = clamp(robot.pose.x / rangeMeters, -1, 1)
-  const yRatio = clamp(robot.pose.y / rangeMeters, -1, 1)
-  const xPercent = 50 + (xRatio * 50)
-  const yPercent = 50 - (yRatio * 50)
+  const position = poseToMapPosition(robot.pose)
+  if (!position) {
+    robotMapDot.style.opacity = '0'
+    clearRobotPoseTrack()
+    setRobotPoseReadout(null)
+    setRobotMapMeta(formatPoseUnavailableMessage(robot))
+    return
+  }
 
-  robotMapDot.style.left = `${xPercent}%`
-  robotMapDot.style.top = `${yPercent}%`
+  robotMapDot.style.left = `${position.xPercent}%`
+  robotMapDot.style.top = `${position.yPercent}%`
   robotMapDot.style.opacity = '1'
   robotMapDot.style.setProperty('--robot-heading', `${robot.pose.theta}rad`)
+  setRobotPoseReadout(robot.pose, robot.pose.frame || 'map')
   setRobotMapMeta(
     `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
     `Updated ${formatEventTimestamp(robot.receivedAt)}.`,
   )
+}
+
+function formatPoseUnavailableMessage(robot) {
+  const telemetry = robot?.telemetry || {}
+  const yaw = toFiniteNumber(telemetry.yaw)
+  const orientation = Number.isFinite(yaw) ? ` Heading ${yaw.toFixed(2)} deg.` : ''
+  const poseError = typeof telemetry.poseError === 'string' ? telemetry.poseError.trim() : ''
+  const topicText = typeof telemetry.poseTopicPublishers === 'string' && telemetry.poseTopicPublishers.trim()
+    ? ` Pose publishers ${telemetry.poseTopicPublishers.trim()}.`
+    : ''
+  const diagnostics = Array.isArray(telemetry.poseDiagnostics)
+    ? telemetry.poseDiagnostics.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  const diagnosticText = !poseError && diagnostics.length > 0 ? ` ${diagnostics.slice(0, 2).join(' ')}` : ''
+  const blocker = poseError ? ` ${poseError}` : diagnosticText
+  return `Map pose unavailable from Pi bridge. Waiting for verified map-frame localization.${blocker}${topicText}${orientation} Last update ${formatEventTimestamp(robot?.receivedAt)}.`
+}
+
+function renderRobotPoseTrack(track, robot) {
+  if (!robotMapTrack) {
+    return
+  }
+
+  if (!robot?.pose) {
+    clearRobotPoseTrack()
+    return
+  }
+
+  const samples = Array.isArray(track) ? track.slice(-40) : []
+  const dots = []
+  samples.forEach((pose, index) => {
+    if (pose?.frame !== 'map') {
+      return
+    }
+    const position = poseToMapPosition(pose)
+    if (!position) {
+      return
+    }
+    const dot = document.createElement('span')
+    const ageRatio = samples.length > 1 ? index / (samples.length - 1) : 1
+    dot.className = 'robot-map-track-dot'
+    dot.style.left = `${position.xPercent}%`
+    dot.style.top = `${position.yPercent}%`
+    dot.style.opacity = String(0.18 + ageRatio * 0.55)
+    dot.title = `map ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}`
+    dots.push(dot)
+  })
+
+  robotMapTrack.replaceChildren(...dots)
+}
+
+function clearRobotPoseTrack() {
+  robotMapTrack?.replaceChildren()
+}
+
+function poseToMapPosition(pose) {
+  const x = toFiniteNumber(pose?.x)
+  const y = toFiniteNumber(pose?.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null
+  }
+
+  const xRatio = clamp(x / ROBOT_MAP_RANGE_METERS, -1, 1)
+  const yRatio = clamp(y / ROBOT_MAP_RANGE_METERS, -1, 1)
+  return {
+    xPercent: 50 + (xRatio * 50),
+    yPercent: 50 - (yRatio * 50),
+  }
+}
+
+function setRobotPoseReadout(pose, fallbackFrame = '') {
+  if (!robotPoseReadout) {
+    return
+  }
+
+  const x = toFiniteNumber(pose?.x)
+  const y = toFiniteNumber(pose?.y)
+  const theta = toFiniteNumber(pose?.theta)
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(theta)) {
+    robotPoseReadout.textContent = 'pose -'
+    robotPoseReadout.title = 'No verified robot pose yet'
+    return
+  }
+
+  const frame = String(pose?.frame || fallbackFrame || 'pose').replace(/^\//, '')
+  robotPoseReadout.textContent = `${frame} ${x.toFixed(2)}, ${y.toFixed(2)}, ${theta.toFixed(2)}`
+  robotPoseReadout.title = `${frame} pose: x ${x.toFixed(3)} m, y ${y.toFixed(3)} m, theta ${theta.toFixed(3)} rad`
 }
 
 function renderLidarScan(scan) {
@@ -2315,8 +2530,6 @@ function formatLidarSerialDetail(payload) {
     : {}
   const baudText = payload?.baudrate ? ` @ ${payload.baudrate}` : ''
   const existsText = diagnostics.exists === false ? 'missing' : diagnostics.exists === true ? 'present' : ''
-  const byIdPaths = Array.isArray(diagnostics.byIdPaths) ? diagnostics.byIdPaths : []
-  const byIdName = byIdPaths.length ? byIdPaths[0].split('/').pop() : ''
   const accessText = diagnostics.readable === true && diagnostics.writable === true
     ? 'rw'
     : diagnostics.readable === true
@@ -2324,9 +2537,8 @@ function formatLidarSerialDetail(payload) {
       : diagnostics.exists === true
         ? 'no-access'
         : ''
-  const usb = diagnostics.usb && typeof diagnostics.usb === 'object' ? diagnostics.usb : {}
-  const usbId = usb.idVendor && usb.idProduct ? `${usb.idVendor}:${usb.idProduct}` : ''
-  const detail = [existsText, byIdName, usbId, accessText].filter(Boolean).join(', ')
+  const realPath = diagnostics.realPath && diagnostics.realPath !== serialPath ? diagnostics.realPath : ''
+  const detail = [existsText, realPath, accessText].filter(Boolean).join(', ')
 
   return ` Serial ${serialPath}${baudText}${detail ? ` (${detail})` : ''}.`
 }
@@ -2339,7 +2551,7 @@ function setRobotMapMeta(baseMessage) {
 function renderRobotTelemetry(robot) {
   const telemetry = robot.telemetry || {}
   const battery = toFiniteNumber(telemetry.battery)
-  robotBatteryValue.textContent = Number.isFinite(battery) ? formatBatteryValue(battery) : '-'
+  renderBatteryMeter(battery)
 
   const parts = []
   const roll = toFiniteNumber(telemetry.roll)
@@ -2352,11 +2564,57 @@ function renderRobotTelemetry(robot) {
   if (telemetry.source) {
     parts.push(String(telemetry.source))
   }
+  if (telemetry.batteryStatus && telemetry.batteryStatus !== 'ok') {
+    if (telemetry.batteryStatus === 'last-known') {
+      const readStatus = telemetry.batteryReadStatus && telemetry.batteryReadStatus !== 'ok'
+        ? `; ${String(telemetry.batteryReadStatus).replace(/-/g, ' ')}`
+        : ''
+      parts.push(`battery last known${readStatus}`)
+    } else {
+      parts.push(telemetry.batteryStatus === 'read-failed' ? 'battery read failed' : `battery ${telemetry.batteryStatus}`)
+    }
+  } else if (telemetry.batterySource) {
+    parts.push(`battery ${telemetry.batterySource}`)
+  }
+  if (telemetry.poseStatus) {
+    parts.push(`pose ${telemetry.poseStatus}`)
+  }
   if (telemetry.dryRun === true) {
     parts.push('dry-run')
   }
 
   robotTelemetryMeta.textContent = parts.join(' | ')
+}
+
+function renderBatteryMeter(value) {
+  if (!Number.isFinite(value)) {
+    robotBatteryValue.textContent = '-'
+    robotBatteryMeter.dataset.state = 'unknown'
+    robotBatteryMeter.style.setProperty('--battery-fill', '0%')
+    robotBatteryMeter.setAttribute('aria-label', 'Battery unavailable')
+    return
+  }
+
+  const label = formatBatteryValue(value)
+  robotBatteryValue.textContent = label
+  robotBatteryMeter.setAttribute('aria-label', `Battery ${label}`)
+
+  if (value < 0 || value > 100) {
+    robotBatteryMeter.dataset.state = 'voltage'
+    robotBatteryMeter.style.setProperty('--battery-fill', '55%')
+    return
+  }
+
+  const percent = Math.max(0, Math.min(100, Math.round(value)))
+  robotBatteryMeter.style.setProperty('--battery-fill', `${percent}%`)
+
+  if (percent <= 20) {
+    robotBatteryMeter.dataset.state = 'low'
+  } else if (percent <= 50) {
+    robotBatteryMeter.dataset.state = 'medium'
+  } else {
+    robotBatteryMeter.dataset.state = 'high'
+  }
 }
 
 function formatBatteryValue(value) {
@@ -2587,12 +2845,28 @@ function buildReconSnapshotItem(snapshot) {
   save.dataset.snapshotNoteSave = snapshot.id
   save.textContent = 'Save note'
 
-  body.append(title, meta, note, save)
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'recon-snapshot-delete'
+  remove.dataset.snapshotDelete = snapshot.id
+  remove.textContent = 'Delete'
+
+  const actions = document.createElement('div')
+  actions.className = 'recon-snapshot-actions'
+  actions.append(save, remove)
+
+  body.append(title, meta, note, actions)
   item.append(image, body)
   return item
 }
 
 async function handleReconSnapshotListClick(event) {
+  const deleteButton = event.target.closest?.('[data-snapshot-delete]')
+  if (deleteButton) {
+    await handleReconSnapshotDelete(deleteButton)
+    return
+  }
+
   const button = event.target.closest?.('[data-snapshot-note-save]')
   if (!button) {
     return
@@ -2628,6 +2902,40 @@ async function handleReconSnapshotListClick(event) {
   } finally {
     button.disabled = false
     button.textContent = 'Save note'
+  }
+}
+
+async function handleReconSnapshotDelete(button) {
+  const snapshotId = button.dataset.snapshotDelete
+  const snapshot = reconSnapshots.find((item) => item.id === snapshotId)
+  const label = snapshot ? `Inspection ${formatEventTimestamp(snapshot.capturedAt)}` : 'this snapshot'
+
+  if (!window.confirm(`Delete ${label}?`)) {
+    return
+  }
+
+  button.disabled = true
+  button.textContent = 'Deleting'
+  setReconGalleryStatus('Deleting inspection snapshot...')
+
+  try {
+    const response = await apiFetch(`/api/recon/snapshots/${encodeURIComponent(snapshotId)}`, {
+      method: 'DELETE',
+    })
+    const payload = await response.json()
+
+    if (!response.ok || payload.deleted !== true) {
+      throw new Error(payload.error || 'Could not delete inspection snapshot.')
+    }
+
+    reconSnapshots = reconSnapshots.filter((item) => item.id !== snapshotId)
+    renderReconSnapshots()
+    setReconGalleryStatus('Inspection snapshot deleted.')
+    setStatus('Recon snapshot deleted.')
+  } catch (error) {
+    setReconGalleryStatus(`Delete failed: ${formatError(error)}`, true)
+    button.disabled = false
+    button.textContent = 'Delete'
   }
 }
 
@@ -2671,6 +2979,11 @@ function formatReconSnapshotItemMeta(snapshot) {
 
   if (!snapshot.map?.pose && snapshot.map?.lidarStatus) {
     parts.push(`lidar ${snapshot.map.lidarStatus}`)
+  }
+
+  const lidarPointCount = toFiniteNumber(snapshot.lidarArtifacts?.csv?.pointCount ?? snapshot.map?.lidarPointCount)
+  if (Number.isFinite(lidarPointCount) && lidarPointCount > 0) {
+    parts.push(`${Math.round(lidarPointCount)} lidar pts`)
   }
 
   return parts.join(' | ')
@@ -2932,7 +3245,7 @@ function formatRobotSummary(robotRuntime, robotDispatch) {
     return 'Robot transport disabled.'
   }
 
-  if (robotDispatch?.status === 'error') {
+  if (isRobotDispatchFailure(robotDispatch)) {
     return `Robot dispatch failed: ${robotDispatch.error || `HTTP ${robotDispatch.responseStatus || 'unknown'}`}.`
   }
 
@@ -2949,6 +3262,10 @@ function formatRobotSummary(robotRuntime, robotDispatch) {
   }
 
   return ''
+}
+
+function isRobotDispatchFailure(robotDispatch) {
+  return ['error', 'navigation-unavailable', 'preempt-failed'].includes(robotDispatch?.status)
 }
 
 function formatRobotSitTestSummary(health, preview, dispatch) {

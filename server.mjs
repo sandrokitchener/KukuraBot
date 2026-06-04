@@ -1,14 +1,21 @@
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadAppConfig } from './lib/app-config.mjs'
+import {
+  createDogzillaBatteryStateTracker,
+  normalizeDogzillaBatterySample,
+} from './lib/dogzilla-battery-state.mjs'
 import { buildIsaacSimPreview } from './lib/isaacsim-command-compiler.mjs'
 import {
+  ensureDogzillaRobotIdentity,
   getDogzillaConnectionCenter,
   loadDogzillaConnectionConfig,
   runDogzillaConnectionAction,
   saveDogzillaConnectionConfig,
+  saveDogzillaRobotName,
 } from './lib/dogzilla-connection-center.mjs'
 import {
   getDogzillaAudioCueHealth,
@@ -17,6 +24,7 @@ import {
 import {
   getDogzillaLidarDiagnostics,
   getDogzillaLidarHealth,
+  getDogzillaRobotPose,
   getDogzillaLidarScan,
 } from './lib/dogzilla-lidar-client.mjs'
 import {
@@ -51,7 +59,9 @@ import {
   setActiveRobotTarget,
 } from './lib/robot-runtime-config.mjs'
 import {
+  deleteReconSnapshot,
   listReconSnapshots,
+  readReconSnapshotArtifact,
   readReconSnapshotImage,
   RECON_SNAPSHOT_API_PATH,
   saveReconSnapshot,
@@ -70,6 +80,7 @@ import {
   getSpeechSidecarHealth,
   transcribeSpeechInput,
 } from './lib/speech-sidecar-client.mjs'
+import { buildSystemHealthz } from './lib/system-healthz.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
@@ -89,7 +100,12 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '127.0.0.1'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const appConfig = await loadAppConfig()
+const APP_GENERATION_ID = randomUUID()
+const APP_STARTED_AT = new Date().toISOString()
 let robotBridgeStateSeq = 0
+const dogzillaBatteryStateTracker = createDogzillaBatteryStateTracker()
+const DOGZILLA_POSE_TRACK_LIMIT = 80
+const dogzillaPoseTrack = []
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -125,6 +141,16 @@ const server = createServer(async (request, response) => {
       return
     }
 
+    if (request.method === 'GET' && requestUrl.pathname === '/healthz') {
+      return sendJson(response, 200, await buildSystemHealthz({
+        generationId: APP_GENERATION_ID,
+        startedAt: APP_STARTED_AT,
+        uptimeSec: process.uptime(),
+        pid: process.pid,
+        buildRobotStateSnapshotImpl: buildCurrentRobotStateSnapshot,
+      }))
+    }
+
     if (request.method === 'GET' && requestUrl.pathname === '/api/config') {
       return sendJson(response, 200, await loadPublicConfig())
     }
@@ -135,8 +161,31 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/connection') {
       const body = await readJsonBody(request)
-      await saveDogzillaConnectionConfig(body || {})
-      return sendJson(response, 200, await getDogzillaConnectionCenter())
+      const config = await saveDogzillaConnectionConfig(body || {})
+      let identity = null
+
+      if (config.ssh.host) {
+        identity = await ensureDogzillaRobotIdentity({ config })
+      }
+
+      return sendJson(response, 200, await getDogzillaConnectionCenter({ identity }))
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/identity') {
+      const body = await readJsonBody(request)
+      const robotName = typeof body?.robot_name === 'string' ? body.robot_name : body?.robotName
+
+      try {
+        const identity = await saveDogzillaRobotName(robotName)
+        return sendJson(response, 200, {
+          identity,
+          connection: await getDogzillaConnectionCenter({ identity }),
+        })
+      } catch (error) {
+        return sendJson(response, 400, {
+          error: error instanceof Error ? error.message : 'Could not update robot name.',
+        })
+      }
     }
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/connection/action') {
@@ -174,6 +223,21 @@ const server = createServer(async (request, response) => {
       return sendJson(response, statusCode, result)
     }
 
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/pose') {
+      const result = await getDogzillaRobotPose()
+      const statusCode = result.status === 'disabled' ? 404 : 200
+      return sendJson(response, statusCode, result)
+    }
+
+    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/pose/track') {
+      return sendJson(response, 200, {
+        status: 'ok',
+        frame: 'map',
+        waypointSafeOnly: true,
+        poses: getDogzillaPoseTrack(),
+      })
+    }
+
     if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/diagnostics') {
       return sendJson(response, 200, await getDogzillaLidarDiagnostics())
     }
@@ -201,6 +265,11 @@ const server = createServer(async (request, response) => {
     const reconSnapshotImageId = matchReconSnapshotImagePath(requestUrl.pathname)
     if (request.method === 'GET' && reconSnapshotImageId) {
       return sendReconSnapshotImage(response, reconSnapshotImageId)
+    }
+
+    const reconSnapshotArtifact = matchReconSnapshotArtifactPath(requestUrl.pathname)
+    if (request.method === 'GET' && reconSnapshotArtifact) {
+      return sendReconSnapshotArtifact(response, reconSnapshotArtifact.id, reconSnapshotArtifact.artifact)
     }
 
     if (request.method === 'POST' && requestUrl.pathname === RECON_SNAPSHOT_API_PATH) {
@@ -231,6 +300,17 @@ const server = createServer(async (request, response) => {
         const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
         return sendJson(response, statusCode, {
           error: error instanceof Error ? error.message : 'Could not update recon snapshot.',
+        })
+      }
+    }
+
+    if (request.method === 'DELETE' && reconSnapshotId) {
+      try {
+        return sendJson(response, 200, await deleteReconSnapshot(reconSnapshotId))
+      } catch (error) {
+        const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
+        return sendJson(response, statusCode, {
+          error: error instanceof Error ? error.message : 'Could not delete recon snapshot.',
         })
       }
     }
@@ -530,21 +610,44 @@ async function buildCurrentRobotStateSnapshot() {
   const robotRuntimeConfig = await loadRobotRuntimeConfig()
   const robotRos2Config = await loadRobotRos2Config()
   const streamSnapshot = getRobotStateSnapshot()
-  const bridgeState = await fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config)
-  const bridgeRobot = buildRobotStateFromBridge(bridgeState, robotRuntimeConfig)
-  const robots = bridgeRobot
-    ? [bridgeRobot, ...streamSnapshot.robots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
+  const [bridgeState, poseState] = await Promise.all([
+    fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config),
+    getDogzillaRobotPose({ timeoutMs: 1200 }),
+  ])
+  const bridgeRobot = buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState)
+  const bridgeOwnsActiveRobot = robotRuntimeConfig.activeTarget?.kind === 'dogzilla-direct'
+  const streamRobots = bridgeOwnsActiveRobot && !bridgeRobot
+    ? removeDogzillaStreamRobots(streamSnapshot.robots, robotRuntimeConfig)
     : streamSnapshot.robots
+  const activeRobot = bridgeOwnsActiveRobot ? bridgeRobot : bridgeRobot || streamSnapshot.activeRobot
+  const status = bridgeRobot
+    ? 'ok'
+    : bridgeOwnsActiveRobot && bridgeState?.attempted
+      ? 'error'
+      : streamSnapshot.status
+  recordDogzillaMapPose(bridgeRobot)
+  const robots = bridgeRobot
+    ? [bridgeRobot, ...streamRobots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
+    : streamRobots
 
   return {
     ...streamSnapshot,
-    status: bridgeRobot ? 'ok' : streamSnapshot.status,
-    activeRobot: bridgeRobot || streamSnapshot.activeRobot,
+    status,
+    activeRobot,
     robots,
     streamPath: ROBOT_STATE_STREAM_PATH,
     activeTarget: robotRuntimeConfig.activeTarget,
     bridgeState,
+    poseState,
+    poseTrack: bridgeRobot?.pose ? getDogzillaPoseTrack() : [],
   }
+}
+
+function removeDogzillaStreamRobots(robots, robotRuntimeConfig) {
+  const staleBridgeUuid = normalizeString(robotRuntimeConfig.robotId) || 'dogzilla-local'
+  return Array.isArray(robots)
+    ? robots.filter((robot) => normalizeString(robot?.uuid) !== staleBridgeUuid)
+    : []
 }
 
 async function captureReconSnapshot(body) {
@@ -602,6 +705,7 @@ function buildReconMapContext(robotState, lidarScan) {
   return {
     status: robotState?.activeRobot?.pose ? 'pose' : 'pending-pose',
     pose: robotState?.activeRobot?.pose ?? null,
+    poseTrack: Array.isArray(robotState?.poseTrack) ? robotState.poseTrack : [],
     activeTarget: robotState?.activeTarget ?? null,
     lidarStatus: lidarScan?.status || 'unknown',
     lidarPointCount: Array.isArray(lidarScan?.points) ? lidarScan.points.length : 0,
@@ -625,9 +729,33 @@ async function sendReconSnapshotImage(response, id) {
   }
 }
 
+async function sendReconSnapshotArtifact(response, id, artifact) {
+  try {
+    const result = await readReconSnapshotArtifact(id, artifact)
+    response.writeHead(200, {
+      'content-type': result.contentType,
+      'cache-control': 'private, max-age=60',
+    })
+    response.end(result.buffer)
+  } catch (error) {
+    const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
+    return sendJson(response, statusCode, {
+      error: error instanceof Error ? error.message : 'Recon snapshot artifact unavailable.',
+    })
+  }
+}
+
 function matchReconSnapshotImagePath(pathname) {
   const match = /^\/api\/recon\/snapshots\/([^/]+)\/image$/.exec(pathname)
   return match ? decodeURIComponent(match[1]) : ''
+}
+
+function matchReconSnapshotArtifactPath(pathname) {
+  const match = /^\/api\/recon\/snapshots\/([^/]+)\/lidar\.(json|csv)$/.exec(pathname)
+  return match ? {
+    id: decodeURIComponent(match[1]),
+    artifact: match[2],
+  } : null
 }
 
 function matchReconSnapshotPath(pathname) {
@@ -640,7 +768,34 @@ function parsePositiveInteger(value, fallback) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
 }
 
-function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig) {
+function recordDogzillaMapPose(robot) {
+  const pose = robot?.pose
+  const telemetry = robot?.telemetry || {}
+  if (!pose || pose.frame !== 'map' || telemetry.waypointSafe !== true) {
+    return
+  }
+
+  dogzillaPoseTrack.push({
+    x: pose.x,
+    y: pose.y,
+    theta: pose.theta,
+    frame: 'map',
+    source: pose.source || telemetry.poseSource || '',
+    receivedAt: robot.receivedAt,
+    timestamp: robot.timestamp,
+    seq: robot.seq,
+  })
+
+  while (dogzillaPoseTrack.length > DOGZILLA_POSE_TRACK_LIMIT) {
+    dogzillaPoseTrack.shift()
+  }
+}
+
+function getDogzillaPoseTrack() {
+  return dogzillaPoseTrack.map((pose) => ({ ...pose }))
+}
+
+function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState = null) {
   if (bridgeState?.status !== 'ok' || !bridgeState.state || typeof bridgeState.state !== 'object') {
     return null
   }
@@ -650,22 +805,35 @@ function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig) {
   const yaw = normalizeFiniteNumber(state.yaw)
   const roll = normalizeFiniteNumber(state.roll)
   const pitch = normalizeFiniteNumber(state.pitch)
-  const battery = normalizeFiniteNumber(state.battery)
+  const batterySample = normalizeDogzillaBatterySample(state.battery)
+  const batteryState = dogzillaBatteryStateTracker.resolve(batterySample, timestamp)
+  const mapPose = normalizePoseFromBridge(poseState?.mapPose)
+  const poseDiagnostics = Array.isArray(poseState?.diagnostics)
+    ? poseState.diagnostics.map((item) => normalizeString(item)).filter(Boolean)
+    : []
+  const poseTopicPublishers = summarizePoseTopicPublishers(poseState?.rosGraph)
 
   robotBridgeStateSeq += 1
 
   return {
     type: 'robot.state',
-    uuid: robotRuntimeConfig.robotId || 'dogzilla-local',
-    name: robotRuntimeConfig.robotName || 'DOGZILLA',
-    pose: null,
+    uuid: normalizeString(state.robot_id || state.robotId) || robotRuntimeConfig.robotId || 'dogzilla-local',
+    name: normalizeString(state.robot_name || state.robotName) || robotRuntimeConfig.robotName || 'Questing Beast',
+    pose: mapPose,
     task: 'IDLE',
     timestamp,
     seq: robotBridgeStateSeq,
     receivedAt: new Date().toISOString(),
     sequenceStatus: robotBridgeStateSeq === 1 ? 'first' : 'ok',
     telemetry: {
-      battery,
+      battery: batteryState.value,
+      batteryRaw: batterySample.raw,
+      batteryStatus: batteryState.status,
+      batteryReadStatus: batterySample.status,
+      batteryReadError: normalizeString(state.readErrors?.battery),
+      batteryLastKnownAt: batteryState.lastKnownAt,
+      batteryUnit: batteryState.unit,
+      batterySource: 'DOGZILLALib.read_battery',
       roll,
       pitch,
       yaw,
@@ -673,9 +841,45 @@ function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig) {
       motors: Array.isArray(state.motors) ? state.motors : [],
       dryRun: state.dryRun === true,
       source: state.delivery || 'bridge',
-      poseSource: 'unavailable',
-      mapSource: 'pending-docker-ros2',
+      poseStatus: mapPose ? 'map' : normalizeString(poseState?.status) || 'pending-map',
+      poseFrame: mapPose?.frame || '',
+      poseSource: mapPose?.source || normalizeString(poseState?.source) || 'unavailable',
+      poseError: mapPose ? '' : normalizeString(poseState?.error),
+      poseDiagnostics,
+      poseTopicPublishers,
+      waypointSafe: mapPose?.frame === 'map' && poseState?.waypointSafe === true,
+      mapSource: mapPose ? 'yahboom-ros2-map-tf' : 'pending-yahboom-ros2-localization',
     },
+  }
+}
+
+function summarizePoseTopicPublishers(rosGraph) {
+  const topics = rosGraph?.topics && typeof rosGraph.topics === 'object' ? rosGraph.topics : {}
+  return ['/tf', '/tf_static', '/odom']
+    .map((topic) => `${topic}:${Number(topics[topic]?.publisherCount ?? 0)}`)
+    .join(', ')
+}
+
+function normalizePoseFromBridge(value) {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const pose = {
+    x: normalizeFiniteNumber(value.x),
+    y: normalizeFiniteNumber(value.y),
+    theta: normalizeFiniteNumber(value.theta),
+  }
+
+  if (!Number.isFinite(pose.x) || !Number.isFinite(pose.y) || !Number.isFinite(pose.theta)) {
+    return null
+  }
+
+  return {
+    ...pose,
+    frame: normalizeFrameId(value.frame),
+    childFrame: normalizeFrameId(value.childFrame),
+    source: normalizeString(value.source),
   }
 }
 
@@ -697,6 +901,14 @@ function normalizeIsoTimestamp(value) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : ''
 }
 
+function normalizeString(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeFrameId(value) {
+  return normalizeString(value).replace(/^\/+/, '')
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
@@ -707,7 +919,7 @@ function sendJson(response, statusCode, payload) {
 function applyCorsHeaders(request, response) {
   const allowedOrigin = process.env.APP_CORS_ORIGIN || '*'
   response.setHeader('access-control-allow-origin', allowedOrigin)
-  response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS')
+  response.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS')
   response.setHeader(
     'access-control-allow-headers',
     request.headers['access-control-request-headers'] || 'content-type',

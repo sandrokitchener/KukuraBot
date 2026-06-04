@@ -52,6 +52,25 @@ $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
 $envPrefix = 'export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"; export DOGZILLA_EXPECTED_ROS_DOMAIN_ID="${DOGZILLA_EXPECTED_ROS_DOMAIN_ID:-16}";'
 
 if ($Bridge -eq "direct") {
+  $stopVendorArgs = @{
+    User = $User
+    SshPort = $SshPort
+    Alias = $Alias
+    KeyPath = $KeyPath
+    RemoteRoot = $RemoteRoot
+  }
+  if ($PiIp) {
+    $stopVendorArgs.PiIp = $PiIp
+  }
+  if ($NoHostKeyScan) {
+    $stopVendorArgs.NoHostKeyScan = $true
+  }
+
+  & (Join-Path $PSScriptRoot "stop-dogzilla-vendor-app-ssh.ps1") @stopVendorArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "DOGZILLA vendor app stop failed."
+  }
+
   $port = if ($BridgePort -gt 0) { $BridgePort } else { 8893 }
   $liveFlag = if ($Live) { " --live" } else { "" }
   $serverCommand = "$envPrefix python3 sidecars/dogzilla_lib_bridge/server.py --host 0.0.0.0 --port $port$liveFlag"
@@ -68,12 +87,13 @@ if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
   $stopCommand = @"
 python3 - <<'PY'
-import os, signal, subprocess
+import os, signal, subprocess, time
 target = '$processPath'
 try:
     rows = subprocess.check_output(['pgrep', '-af', target], text=True).splitlines()
 except subprocess.CalledProcessError:
     rows = []
+stopped = []
 for row in rows:
     pid = int(row.split()[0])
     if pid in (os.getpid(), os.getppid()):
@@ -84,7 +104,16 @@ for row in rows:
         continue
     if comm.startswith('python'):
         os.kill(pid, signal.SIGTERM)
+        stopped.append(pid)
         print(f'stopped {target} {pid}')
+time.sleep(0.8)
+for pid in stopped:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        continue
+    os.kill(pid, signal.SIGKILL)
+    print(f'force-stopped {target} {pid}')
 PY
 "@
   $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand.Trim()
