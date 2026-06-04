@@ -140,6 +140,32 @@ test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services ind
   assert.ok(lidarPlan.args.includes('-Background'))
 })
 
+test('buildDogzillaActionPlan starts map pose localization through the lidar container', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+    lidar: {
+      enabled: true,
+      port: 8896,
+    },
+  })
+  const plan = buildDogzillaActionPlan('start-map-pose', config)
+
+  assert.equal(plan.action, 'start-map-pose')
+  assert.equal(plan.background, false)
+  assert.ok(plan.args.some((arg) => arg.endsWith('start-dogzilla-map-pose-ssh.ps1')))
+  assert.ok(plan.args.includes('-SshPort'))
+  assert.equal(plan.args[plan.args.indexOf('-SshPort') + 1], '22')
+  assert.ok(plan.args.includes('-RemoteRoot'))
+  assert.equal(plan.args[plan.args.indexOf('-RemoteRoot') + 1], '/home/pi/robodoge')
+  assert.ok(plan.args.includes('-PosePort'))
+  assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '8896')
+})
+
 test('buildDogzillaActionPlan stops the vendor DOGZILLA app before direct control', () => {
   const config = normalizeDogzillaConnectionConfig({
     ssh: {
