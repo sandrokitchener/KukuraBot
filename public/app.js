@@ -2,6 +2,9 @@ import { createSpeechInputController } from './speech-input.js'
 import { createCommandCuePlayer } from './command-cue.js'
 import { splitRecentChatHistory } from './chat-history.js'
 import { apiFetch, getApiBaseUrl, setApiBaseUrl, toApiUrl } from './api-client.js'
+import { createDogzillaAudioController } from './dogzilla-audio.js'
+import { createManualControlController } from './manual-control.js'
+import { createRobotMapRenderer } from './robot-map.js'
 
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
@@ -132,7 +135,6 @@ const MESSAGE_SELECTOR = '.message:not(.message-empty)'
 const COMMAND_CUE_URLS = [
   '/sounds/robot-bark-synthetic.wav',
 ]
-const ROBOT_MAP_RANGE_METERS = 3
 const THINKING_CUE_URLS = [
   '/sounds/robot-think-whimper-1.wav',
   '/sounds/robot-think-whimper-2.wav',
@@ -180,36 +182,16 @@ const DEFAULT_ROBOT_RUNTIME = {
   selectionLocked: false,
   source: 'runtime',
 }
-const MANUAL_CONTROL_DEADBAND = 0.08
-const MANUAL_CONTROL_SEND_INTERVAL_MS = 180
-const MANUAL_CONTROL_REPEAT_MS = 700
-const MANUAL_CONTROL_ERROR_RETRY_MS = 1200
-const MANUAL_CONTROL_CHANGE_EPSILON = 0.035
 const DOGZILLA_CAMERA_LOAD_TIMEOUT_MS = 8000
-const DOGZILLA_AUDIO_VOLUME_KEY = 'robodoge.dogzillaAudioVolume'
-const DEFAULT_DOGZILLA_AUDIO_VOLUME = 0.75
 
 let thinkingState = null
 let robotFeedbackTimerId = null
 let robotStateTimerId = null
 let robotLidarTimerId = null
 let robotCameraLoadTimerId = null
-let manualControlFrameId = null
 let activeThinkingCue = null
 let thinkingCueToken = 0
-let robotMapBaseMeta = ''
-let robotLidarSummary = ''
 let reconSnapshots = []
-const manualControlState = {
-  enabled: false,
-  pending: false,
-  gamepadIndex: null,
-  lastVector: null,
-  lastSentAt: 0,
-  lastOutputAt: 0,
-  zeroSent: true,
-  errorRetryAt: 0,
-}
 const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS, {
   gain: 0.28,
   playbackRate: 1,
@@ -278,6 +260,49 @@ const isaacCompletionState = {
   initialized: false,
   lastEventId: null,
 }
+const dogzillaAudio = createDogzillaAudioController({
+  input: dogzillaAudioVolumeInput,
+  value: dogzillaAudioVolumeValue,
+  apiFetch,
+  getRuntimeConfig: () => runtimeConfig,
+  isAndroidAppShell,
+})
+const manualControl = createManualControlController({
+  elements: {
+    panel: manualControlPanel,
+    chip: manualControlChip,
+    toggleButton: manualControlToggleButton,
+    neutralButton: manualControlNeutralButton,
+    status: manualControlStatus,
+    padName: manualControlPadName,
+    forwardValue: manualControlForwardValue,
+    strafeValue: manualControlStrafeValue,
+    turnValue: manualControlTurnValue,
+    forwardMeter: manualControlForwardMeter,
+    strafeMeter: manualControlStrafeMeter,
+    turnMeter: manualControlTurnMeter,
+  },
+  apiFetch,
+  toApiUrl,
+  getRuntimeConfig: () => runtimeConfig,
+  isRealRobotTargetActive,
+  formatError,
+  setStatus,
+  runtimeFeedbackOutput,
+})
+const robotMap = createRobotMapRenderer({
+  elements: {
+    dot: robotMapDot,
+    lidarScan: robotLidarScan,
+    meta: robotMapMeta,
+    poseReadout: robotPoseReadout,
+    track: robotMapTrack,
+    waypoints: robotMapWaypoints,
+  },
+  defaultRobotRuntime: DEFAULT_ROBOT_RUNTIME,
+  getRuntimeConfig: () => runtimeConfig,
+  formatEventTimestamp,
+})
 
 initAndroidAppShell()
 boot()
@@ -288,8 +313,8 @@ saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
 testRobotSitButton.addEventListener('click', handleRobotSitTest)
 emergencyStopButton.addEventListener('click', handleEmergencyStop)
-manualControlToggleButton.addEventListener('click', handleManualControlToggle)
-manualControlNeutralButton.addEventListener('click', handleManualControlNeutral)
+manualControlToggleButton.addEventListener('click', manualControl.handleToggle)
+manualControlNeutralButton.addEventListener('click', manualControl.handleNeutral)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 connectionToggle.addEventListener('click', handleConnectionToggle)
 robotNameEditButton.addEventListener('click', handleRobotNameEditStart)
@@ -298,7 +323,7 @@ robotNameInput.addEventListener('keydown', handleRobotNameInputKeydown)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
-dogzillaAudioVolumeInput?.addEventListener('input', handleDogzillaAudioVolumeInput)
+dogzillaAudioVolumeInput?.addEventListener('input', dogzillaAudio.handleVolumeInput)
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
 reconGalleryToggle.addEventListener('click', handleReconGalleryToggle)
 reconGalleryClose.addEventListener('click', closeReconGallery)
@@ -314,8 +339,8 @@ for (const tab of robotTabs) {
 
 robotCameraFrame.addEventListener('error', handleDogzillaCameraFrameError)
 robotCameraFrame.addEventListener('load', handleDogzillaCameraFrameLoad)
-window.addEventListener('gamepadconnected', handleGamepadConnected)
-window.addEventListener('gamepaddisconnected', handleGamepadDisconnected)
+window.addEventListener('gamepadconnected', manualControl.handleGamepadConnected)
+window.addEventListener('gamepaddisconnected', manualControl.handleGamepadDisconnected)
 
 function initAndroidAppShell() {
   if (!isAndroidAppShell()) {
@@ -446,7 +471,7 @@ function findTouchById(touchList, id) {
 
 async function boot() {
   applyBackendControls()
-  applyDogzillaAudioVolumeControl()
+  dogzillaAudio.applyVolumeControl()
 
   try {
     const payload = await fetchConfig()
@@ -744,8 +769,8 @@ async function handleRobotTargetSave() {
   saveRobotTargetButton.disabled = true
   robotTargetSelect.disabled = true
   robotTargetStatus.textContent = 'Saving runtime target...'
-  if (manualControlState.enabled) {
-    disableManualControl({ sendNeutral: true })
+  if (manualControl.isEnabled()) {
+    manualControl.disable({ sendNeutral: true })
   }
 
   try {
@@ -865,378 +890,6 @@ async function handleEmergencyStop() {
   } finally {
     emergencyStopButton.disabled = false
   }
-}
-
-function handleManualControlToggle() {
-  if (manualControlState.enabled) {
-    disableManualControl({ sendNeutral: true })
-    return
-  }
-
-  enableManualControl()
-}
-
-function handleManualControlNeutral() {
-  sendManualNeutral('manual-neutral').catch((error) => {
-    setManualControlStatus(formatError(error), true)
-  })
-}
-
-function handleGamepadConnected(event) {
-  manualControlState.gamepadIndex = event.gamepad.index
-  renderManualControlPad(event.gamepad)
-  setManualControlStatus(`${formatGamepadName(event.gamepad)} connected.`)
-}
-
-function handleGamepadDisconnected(event) {
-  if (manualControlState.gamepadIndex !== event.gamepad.index) {
-    return
-  }
-
-  manualControlState.gamepadIndex = null
-  renderManualControlVector(createNeutralManualVector())
-  setManualControlStatus('Gamepad disconnected.')
-  if (manualControlState.enabled) {
-    sendManualNeutral('gamepad-disconnected').catch((error) => {
-      setManualControlStatus(formatError(error), true)
-    })
-  }
-}
-
-function enableManualControl() {
-  if (!isGamepadSupported()) {
-    setManualControlStatus('Gamepad API unavailable in this browser.', true)
-    applyManualControlState()
-    return
-  }
-
-  if (!isRealRobotTargetActive()) {
-    setManualControlStatus('Switch to DOGZILLA Direct or ROS2 Real Robot first.', true)
-    applyManualControlState()
-    return
-  }
-
-  const gamepad = findManualGamepad()
-  manualControlState.enabled = true
-  manualControlState.pending = false
-  manualControlState.lastVector = null
-  manualControlState.lastSentAt = 0
-  manualControlState.zeroSent = true
-  manualControlState.errorRetryAt = 0
-  manualControlState.gamepadIndex = gamepad?.index ?? manualControlState.gamepadIndex
-  renderManualControlPad(gamepad)
-  renderManualControlVector(createNeutralManualVector())
-  setManualControlStatus(gamepad ? `Manual control using ${formatGamepadName(gamepad)}.` : 'Manual control waiting for gamepad.')
-  applyManualControlState()
-  scheduleManualControlFrame()
-}
-
-function disableManualControl({ sendNeutral = false } = {}) {
-  manualControlState.enabled = false
-  applyManualControlState()
-
-  if (manualControlFrameId) {
-    window.cancelAnimationFrame(manualControlFrameId)
-    manualControlFrameId = null
-  }
-
-  renderManualControlVector(createNeutralManualVector())
-  setManualControlStatus('Manual control off.')
-
-  if (sendNeutral && isRealRobotTargetActive()) {
-    sendManualNeutral('manual-off').catch((error) => {
-      setManualControlStatus(formatError(error), true)
-    })
-  }
-}
-
-function scheduleManualControlFrame() {
-  if (!manualControlState.enabled || manualControlFrameId) {
-    return
-  }
-
-  manualControlFrameId = window.requestAnimationFrame(tickManualControl)
-}
-
-function tickManualControl() {
-  manualControlFrameId = null
-
-  if (!manualControlState.enabled) {
-    return
-  }
-
-  if (!isRealRobotTargetActive()) {
-    disableManualControl({ sendNeutral: true })
-    setManualControlStatus('Manual control stopped because the active target changed.', true)
-    return
-  }
-
-  const gamepad = findManualGamepad()
-
-  if (!gamepad) {
-    renderManualControlPad(null)
-    renderManualControlVector(createNeutralManualVector())
-    if (!manualControlState.zeroSent) {
-      sendManualNeutral('gamepad-missing').catch((error) => {
-        setManualControlStatus(formatError(error), true)
-      })
-    } else {
-      setManualControlStatus('Press a button on a connected gamepad.')
-    }
-    scheduleManualControlFrame()
-    return
-  }
-
-  manualControlState.gamepadIndex = gamepad.index
-  const vector = readManualGamepadVector(gamepad)
-  renderManualControlPad(gamepad)
-  renderManualControlVector(vector)
-
-  if (shouldSendManualControlVector(vector)) {
-    sendManualControlVector(vector, gamepad).catch((error) => {
-      manualControlState.errorRetryAt = Date.now() + MANUAL_CONTROL_ERROR_RETRY_MS
-      setManualControlStatus(formatError(error), true)
-    })
-  } else if (!manualControlState.pending) {
-    setManualControlStatus(`Manual control active: ${formatManualVector(vector)}.`)
-  }
-
-  scheduleManualControlFrame()
-}
-
-function shouldSendManualControlVector(vector) {
-  const now = Date.now()
-  const moving = hasManualVectorInput(vector)
-
-  if (manualControlState.pending || now < manualControlState.errorRetryAt) {
-    return false
-  }
-
-  if (!moving) {
-    return !manualControlState.zeroSent
-  }
-
-  if (now - manualControlState.lastSentAt < MANUAL_CONTROL_SEND_INTERVAL_MS) {
-    return false
-  }
-
-  return (
-    hasManualVectorChanged(vector, manualControlState.lastVector) ||
-    now - manualControlState.lastSentAt >= MANUAL_CONTROL_REPEAT_MS
-  )
-}
-
-function hasManualVectorChanged(nextVector, previousVector) {
-  if (!previousVector) {
-    return true
-  }
-
-  return (
-    Math.abs(nextVector.forward - previousVector.forward) >= MANUAL_CONTROL_CHANGE_EPSILON ||
-    Math.abs(nextVector.strafe - previousVector.strafe) >= MANUAL_CONTROL_CHANGE_EPSILON ||
-    Math.abs(nextVector.turn - previousVector.turn) >= MANUAL_CONTROL_CHANGE_EPSILON
-  )
-}
-
-function hasManualVectorInput(vector) {
-  return !!(
-    Math.abs(vector.forward) > 0 ||
-    Math.abs(vector.strafe) > 0 ||
-    Math.abs(vector.turn) > 0
-  )
-}
-
-async function sendManualNeutral(source) {
-  if (!isRealRobotTargetActive()) {
-    setManualControlStatus('Real robot target required for manual neutral.', true)
-    return
-  }
-
-  await sendManualControlVector(createNeutralManualVector(), null, { source, force: true })
-}
-
-async function sendManualControlVector(vector, gamepad, options = {}) {
-  if (manualControlState.pending && !options.force) {
-    return
-  }
-
-  manualControlState.pending = true
-  applyManualControlState()
-
-  const source = options.source || 'gamepad'
-  try {
-    const response = await apiFetch('/api/robot/manual-control', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        forward: vector.forward,
-        strafe: vector.strafe,
-        turn: vector.turn,
-        source,
-        gamepadId: gamepad?.id || '',
-        gamepadIndex: gamepad?.index ?? manualControlState.gamepadIndex,
-        gait: 'walk',
-        pace: 'normal',
-      }),
-    })
-    const payload = await response.json()
-
-    manualControlState.lastVector = { ...vector }
-    manualControlState.lastSentAt = Date.now()
-    manualControlState.zeroSent = !hasManualVectorInput(vector)
-
-    if (!response.ok || payload.dispatch?.status === 'error') {
-      throw new Error(payload.dispatch?.error || payload.error || 'Manual control failed.')
-    }
-
-    const summary = formatManualControlSummary(payload)
-    setManualControlStatus(summary)
-    setStatus(summary, payload.dispatch?.status === 'error' ? 'error' : 'idle')
-
-    if (Date.now() - manualControlState.lastOutputAt > 1000 || manualControlState.zeroSent) {
-      runtimeFeedbackOutput.textContent = JSON.stringify({
-        manualControl: payload,
-      }, null, 2)
-      manualControlState.lastOutputAt = Date.now()
-    }
-
-    return payload
-  } finally {
-    manualControlState.pending = false
-    applyManualControlState()
-  }
-}
-
-function findManualGamepad() {
-  if (!isGamepadSupported()) {
-    return null
-  }
-
-  const gamepads = navigator.getGamepads()
-  const preferred = Number.isInteger(manualControlState.gamepadIndex)
-    ? gamepads[manualControlState.gamepadIndex]
-    : null
-
-  if (preferred?.connected) {
-    return preferred
-  }
-
-  return Array.from(gamepads).find((gamepad) => gamepad?.connected) || null
-}
-
-function readManualGamepadVector(gamepad) {
-  const axes = gamepad?.axes || []
-  const leftX = normalizeManualAxis(axes[0])
-  const leftY = normalizeManualAxis(axes[1])
-  const rightX = normalizeManualAxis(axes[2] ?? axes[3])
-
-  return {
-    forward: normalizeManualAxis(-leftY),
-    strafe: normalizeManualAxis(-leftX),
-    turn: normalizeManualAxis(-rightX),
-  }
-}
-
-function normalizeManualAxis(value) {
-  const numeric = clamp(Number(value) || 0, -1, 1)
-  return Math.abs(numeric) <= MANUAL_CONTROL_DEADBAND ? 0 : Number(numeric.toFixed(3))
-}
-
-function createNeutralManualVector() {
-  return {
-    forward: 0,
-    strafe: 0,
-    turn: 0,
-  }
-}
-
-function applyManualControlState() {
-  const supported = isGamepadSupported()
-  const realTarget = isRealRobotTargetActive()
-
-  manualControlPanel.dataset.state = manualControlState.enabled ? 'active' : supported && realTarget ? 'ready' : 'disabled'
-  manualControlChip.textContent = manualControlState.enabled ? 'Gamepad' : 'Off'
-  manualControlToggleButton.textContent = manualControlState.enabled ? 'Disable gamepad' : 'Enable gamepad'
-  manualControlToggleButton.disabled = !supported || !realTarget
-  manualControlNeutralButton.disabled = !realTarget || manualControlState.pending
-
-  if (!supported) {
-    manualControlStatus.textContent = 'Gamepad API unavailable in this browser.'
-    return
-  }
-
-  if (!realTarget) {
-    manualControlStatus.textContent = 'Real robot target required.'
-    return
-  }
-
-  const currentStatus = manualControlStatus.textContent
-  if (
-    !manualControlState.enabled &&
-    !manualControlState.pending &&
-    (!currentStatus || currentStatus === 'Real robot target required.' || currentStatus === 'Gamepad idle.')
-  ) {
-    manualControlStatus.textContent = 'Gamepad idle.'
-  }
-}
-
-function renderManualControlPad(gamepad) {
-  manualControlPadName.textContent = gamepad ? formatGamepadName(gamepad) : 'No gamepad'
-}
-
-function renderManualControlVector(vector) {
-  manualControlForwardValue.textContent = formatManualAxis(vector.forward)
-  manualControlStrafeValue.textContent = formatManualAxis(vector.strafe)
-  manualControlTurnValue.textContent = formatManualAxis(vector.turn)
-  setManualMeter(manualControlForwardMeter, vector.forward)
-  setManualMeter(manualControlStrafeMeter, vector.strafe)
-  setManualMeter(manualControlTurnMeter, vector.turn)
-}
-
-function setManualMeter(meter, value) {
-  meter.style.setProperty('--manual-meter-value', `${50 + clamp(value, -1, 1) * 50}%`)
-  meter.dataset.direction = value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral'
-}
-
-function setManualControlStatus(message, isError = false) {
-  if (isError) {
-    manualControlPanel.dataset.state = 'error'
-  } else if (manualControlPanel.dataset.state === 'error') {
-    manualControlPanel.dataset.state = manualControlState.enabled ? 'active' : 'ready'
-  }
-  manualControlStatus.textContent = message
-}
-
-function formatManualControlSummary(payload) {
-  const dispatchStatus = payload.dispatch?.status || 'unknown'
-  const plan = payload.preview?.canonicalPlan?.params || {}
-  const mode = runtimeConfig.robotRuntime.dryRun || dispatchStatus === 'dry-run' ? 'dry-run' : dispatchStatus
-
-  return `Manual ${mode}: x ${formatStep(plan.x_step)}, y ${formatStep(plan.y_step)}, turn ${formatStep(plan.turn_rate)}.`
-}
-
-function formatManualVector(vector) {
-  return `x ${formatManualAxis(vector.forward)}, y ${formatManualAxis(vector.strafe)}, turn ${formatManualAxis(vector.turn)}`
-}
-
-function formatManualAxis(value) {
-  return value.toFixed(2)
-}
-
-function formatStep(value) {
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric.toFixed(1) : '0.0'
-}
-
-function formatGamepadName(gamepad) {
-  const rawName = String(gamepad?.id || '').trim()
-  return rawName ? rawName.replace(/\s+\(.*?\)/g, '').slice(0, 42) : 'Gamepad'
-}
-
-function isGamepadSupported() {
-  return typeof navigator.getGamepads === 'function'
 }
 
 async function handleDogzillaBackendSave() {
@@ -1365,18 +1018,18 @@ function startRobotLidarPolling() {
     robotLidarTimerId = null
   }
 
-  clearLidarScan()
+  robotMap.clearLidarScan()
 
   if (!isRealRobotTargetActive()) {
-    robotLidarSummary = ''
-    setRobotMapMeta(robotMapBaseMeta || 'Real robot target required for live map.')
+    robotMap.setLidarSummary('')
+    robotMap.setMeta(robotMap.getBaseMeta() || 'Real robot target required for live map.')
     return
   }
 
   const lidar = runtimeConfig.dogzilla?.lidar
   if (!lidar?.enabled) {
-    robotLidarSummary = 'Lidar: bridge disabled.'
-    setRobotMapMeta(robotMapBaseMeta)
+    robotMap.setLidarSummary('Lidar: bridge disabled.')
+    robotMap.setMeta(robotMap.getBaseMeta())
     return
   }
 
@@ -1410,10 +1063,10 @@ async function refreshRobotState() {
     robotStateSeq.textContent = '-'
     renderBatteryMeter(Number.NaN)
     robotTelemetryMeta.textContent = ''
-    robotMapDot.style.opacity = '0'
-    renderRobotMapWaypoints()
-    clearRobotPoseTrack()
-    setRobotMapMeta(formatError(error))
+    robotMap.hideDot()
+    robotMap.renderWaypoints()
+    robotMap.clearPoseTrack()
+    robotMap.setMeta(formatError(error))
   }
 }
 
@@ -1426,19 +1079,16 @@ async function refreshDogzillaLidarScan() {
     const payload = await response.json()
 
     if (!response.ok || payload.ok !== true) {
-      clearLidarScan()
-      robotLidarSummary = formatLidarFailureSummary(payload)
-      setRobotMapMeta(robotMapBaseMeta)
+      robotMap.clearLidarScan()
+      robotMap.setLidarSummary(robotMap.formatLidarFailureSummary(payload))
       return
     }
 
-    renderLidarScan(payload)
-    robotLidarSummary = formatLidarSummary(payload)
-    setRobotMapMeta(robotMapBaseMeta)
+    robotMap.renderLidarScan(payload)
+    robotMap.setLidarSummary(robotMap.formatLidarSummary(payload))
   } catch (error) {
-    clearLidarScan()
-    robotLidarSummary = `Lidar: ${formatError(error)}`
-    setRobotMapMeta(robotMapBaseMeta)
+    robotMap.clearLidarScan()
+    robotMap.setLidarSummary(`Lidar: ${formatError(error)}`)
   }
 }
 
@@ -1993,41 +1643,6 @@ function formatServiceName(id) {
   }
 }
 
-function handleDogzillaAudioVolumeInput() {
-  const volume = getDogzillaAudioCueVolume()
-  try {
-    window.localStorage?.setItem(DOGZILLA_AUDIO_VOLUME_KEY, String(volume))
-  } catch {}
-  applyDogzillaAudioVolumeControl(volume)
-}
-
-function applyDogzillaAudioVolumeControl(volume = loadDogzillaAudioCueVolume()) {
-  const clamped = clamp(Number(volume), 0, 1)
-  if (dogzillaAudioVolumeInput) {
-    dogzillaAudioVolumeInput.value = String(Math.round(clamped * 100))
-  }
-  if (dogzillaAudioVolumeValue) {
-    dogzillaAudioVolumeValue.textContent = `${Math.round(clamped * 100)}%`
-  }
-}
-
-function getDogzillaAudioCueVolume() {
-  if (dogzillaAudioVolumeInput) {
-    return clamp(Number(dogzillaAudioVolumeInput.value) / 100, 0, 1)
-  }
-  return loadDogzillaAudioCueVolume()
-}
-
-function loadDogzillaAudioCueVolume() {
-  try {
-    const saved = Number(window.localStorage?.getItem(DOGZILLA_AUDIO_VOLUME_KEY))
-    if (Number.isFinite(saved)) {
-      return clamp(saved, 0, 1)
-    }
-  } catch {}
-  return DEFAULT_DOGZILLA_AUDIO_VOLUME
-}
-
 function applyBackendControls() {
   const apiBaseUrl = getApiBaseUrl()
   dogzillaBackendUrlInput.value = apiBaseUrl
@@ -2066,7 +1681,7 @@ function applyPayload(payload) {
   applyModelConfig(payload)
   applySpeechConfig()
   applyRobotRuntimeConfig()
-  renderRobotMapWaypoints()
+  robotMap.renderWaypoints()
   applyDogzillaCameraConfig()
   startDogzillaCameraViewer()
 }
@@ -2282,10 +1897,10 @@ function renderRobotStateSnapshot(snapshot) {
     robotStateSeq.textContent = '-'
     renderBatteryMeter(Number.NaN)
     robotTelemetryMeta.textContent = ''
-    robotMapDot.style.opacity = '0'
-    clearRobotPoseTrack()
-    setRobotPoseReadout(null)
-    setRobotMapMeta(formatNoRobotMapMessage(snapshot))
+    robotMap.hideDot()
+    robotMap.clearPoseTrack()
+    robotMap.setPoseReadout(null)
+    robotMap.setMeta(formatNoRobotMapMessage(snapshot))
     return
   }
 
@@ -2300,9 +1915,9 @@ function renderRobotStateSnapshot(snapshot) {
   robotStateSeq.textContent = String(robot.seq)
   renderRobotTelemetry(robot)
 
-  renderRobotMapWaypoints(robot)
-  renderRobotPoseTrack(snapshot?.poseTrack || [], robot)
-  renderRobotMapDot(robot)
+  robotMap.renderWaypoints(robot)
+  robotMap.renderPoseTrack(snapshot?.poseTrack || [], robot)
+  robotMap.renderDot(robot)
 }
 
 function renderRobotStateInactive() {
@@ -2314,11 +1929,11 @@ function renderRobotStateInactive() {
   robotStateSeq.textContent = '-'
   renderBatteryMeter(Number.NaN)
   robotTelemetryMeta.textContent = ''
-  robotMapDot.style.opacity = '0'
-  renderRobotMapWaypoints()
-  clearRobotPoseTrack()
-  setRobotPoseReadout(null)
-  setRobotMapMeta('Real robot target required for live map.')
+  robotMap.hideDot()
+  robotMap.renderWaypoints()
+  robotMap.clearPoseTrack()
+  robotMap.setPoseReadout(null)
+  robotMap.setMeta('Real robot target required for live map.')
 }
 
 function formatNoRobotMapMessage(snapshot) {
@@ -2343,336 +1958,6 @@ function formatNoRobotMapMessage(snapshot) {
   }
 
   return `Stream: ${streamPath}`
-}
-
-function renderRobotMapDot(robot) {
-  if (!robot.pose) {
-    robotMapDot.style.opacity = '0'
-    clearRobotPoseTrack()
-    setRobotPoseReadout(null)
-    setRobotMapMeta(formatPoseUnavailableMessage(robot))
-    return
-  }
-
-  const position = poseToMapPosition(robot.pose, getRobotMapRangeMeters(robot))
-  if (!position) {
-    robotMapDot.style.opacity = '0'
-    clearRobotPoseTrack()
-    setRobotPoseReadout(null)
-    setRobotMapMeta(formatPoseUnavailableMessage(robot))
-    return
-  }
-
-  robotMapDot.style.left = `${position.xPercent}%`
-  robotMapDot.style.top = `${position.yPercent}%`
-  robotMapDot.style.opacity = '1'
-  robotMapDot.style.setProperty('--robot-heading', `${robot.pose.theta}rad`)
-  setRobotPoseReadout(robot.pose, robot.pose.frame || 'map')
-  setRobotMapMeta(
-    `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
-    `Updated ${formatEventTimestamp(robot.receivedAt)}.`,
-  )
-}
-
-function renderRobotMapWaypoints(robot = null) {
-  if (!robotMapWaypoints) {
-    return
-  }
-
-  const rangeMeters = getRobotMapRangeMeters(robot)
-  const waypoints = getRenderableRobotMapWaypoints()
-  const markers = []
-
-  waypoints.forEach((waypoint) => {
-    const position = poseToMapPosition(waypoint, rangeMeters)
-    if (!position) {
-      return
-    }
-
-    const marker = document.createElement('span')
-    marker.className = 'robot-map-waypoint'
-    marker.dataset.waypointId = waypoint.id
-    marker.dataset.verified = waypoint.verified ? 'true' : 'false'
-    marker.style.left = `${position.xPercent}%`
-    marker.style.top = `${position.yPercent}%`
-    marker.style.setProperty('--waypoint-heading', `${waypoint.yaw || 0}rad`)
-    marker.title = `${waypoint.label}: x ${waypoint.x.toFixed(2)}m, y ${waypoint.y.toFixed(2)}m`
-
-    const label = document.createElement('span')
-    label.className = 'robot-map-waypoint-label'
-    label.textContent = waypoint.label
-    marker.append(label)
-    markers.push(marker)
-  })
-
-  robotMapWaypoints.replaceChildren(...markers)
-}
-
-function getRenderableRobotMapWaypoints() {
-  const waypoints = Array.isArray(runtimeConfig.robotRuntime?.waypoints)
-    ? runtimeConfig.robotRuntime.waypoints
-    : []
-
-  return waypoints
-    .map(normalizeRobotMapWaypoint)
-    .filter((waypoint) => waypoint && waypoint.frame === 'map' && waypoint.verified)
-}
-
-function normalizeRobotMapWaypoint(waypoint) {
-  const x = toFiniteNumber(waypoint?.x)
-  const y = toFiniteNumber(waypoint?.y)
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return null
-  }
-
-  return {
-    id: String(waypoint.id || '').trim(),
-    label: String(waypoint.label || waypoint.id || 'Waypoint').trim(),
-    frame: String(waypoint.frame || 'map').trim(),
-    x,
-    y,
-    yaw: toFiniteNumber(waypoint.yaw ?? waypoint.theta) || 0,
-    verified: waypoint.verified === true,
-  }
-}
-
-function formatPoseUnavailableMessage(robot) {
-  const telemetry = robot?.telemetry || {}
-  const yaw = toFiniteNumber(telemetry.yaw)
-  const orientation = Number.isFinite(yaw) ? ` Heading ${yaw.toFixed(2)} deg.` : ''
-  const poseError = typeof telemetry.poseError === 'string' ? telemetry.poseError.trim() : ''
-  const topicText = typeof telemetry.poseTopicPublishers === 'string' && telemetry.poseTopicPublishers.trim()
-    ? ` Pose publishers ${telemetry.poseTopicPublishers.trim()}.`
-    : ''
-  const diagnostics = Array.isArray(telemetry.poseDiagnostics)
-    ? telemetry.poseDiagnostics.map((item) => String(item || '').trim()).filter(Boolean)
-    : []
-  const diagnosticText = !poseError && diagnostics.length > 0 ? ` ${diagnostics.slice(0, 2).join(' ')}` : ''
-  const blocker = poseError ? ` ${poseError}` : diagnosticText
-  return `Map pose unavailable from Pi bridge. Waiting for verified map-frame localization.${blocker}${topicText}${orientation} Last update ${formatEventTimestamp(robot?.receivedAt)}.`
-}
-
-function renderRobotPoseTrack(track, robot) {
-  if (!robotMapTrack) {
-    return
-  }
-
-  if (!robot?.pose) {
-    clearRobotPoseTrack()
-    return
-  }
-
-  const samples = Array.isArray(track) ? track.slice(-40) : []
-  const dots = []
-  samples.forEach((pose, index) => {
-    if (pose?.frame !== 'map') {
-      return
-    }
-    const position = poseToMapPosition(pose, getRobotMapRangeMeters(robot))
-    if (!position) {
-      return
-    }
-    const dot = document.createElement('span')
-    const ageRatio = samples.length > 1 ? index / (samples.length - 1) : 1
-    dot.className = 'robot-map-track-dot'
-    dot.style.left = `${position.xPercent}%`
-    dot.style.top = `${position.yPercent}%`
-    dot.style.opacity = String(0.18 + ageRatio * 0.55)
-    dot.title = `map ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}`
-    dots.push(dot)
-  })
-
-  robotMapTrack.replaceChildren(...dots)
-}
-
-function clearRobotPoseTrack() {
-  robotMapTrack?.replaceChildren()
-}
-
-function poseToMapPosition(pose, rangeMeters = getRobotMapRangeMeters()) {
-  const x = toFiniteNumber(pose?.x)
-  const y = toFiniteNumber(pose?.y)
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return null
-  }
-
-  const mapRange = Math.max(ROBOT_MAP_RANGE_METERS, toFiniteNumber(rangeMeters) || ROBOT_MAP_RANGE_METERS)
-  const xRatio = clamp(x / mapRange, -1, 1)
-  const yRatio = clamp(y / mapRange, -1, 1)
-  return {
-    xPercent: 50 + (xRatio * 50),
-    yPercent: 50 - (yRatio * 50),
-  }
-}
-
-function getRobotMapRangeMeters(robot = null) {
-  const extents = [ROBOT_MAP_RANGE_METERS]
-  const robotPose = robot?.pose
-  const robotX = toFiniteNumber(robotPose?.x)
-  const robotY = toFiniteNumber(robotPose?.y)
-  if (Number.isFinite(robotX)) {
-    extents.push(Math.abs(robotX))
-  }
-  if (Number.isFinite(robotY)) {
-    extents.push(Math.abs(robotY))
-  }
-
-  getRenderableRobotMapWaypoints().forEach((waypoint) => {
-    extents.push(Math.abs(waypoint.x), Math.abs(waypoint.y))
-  })
-
-  return Math.ceil((Math.max(...extents) + 0.5) * 2) / 2
-}
-
-function setRobotPoseReadout(pose, fallbackFrame = '') {
-  if (!robotPoseReadout) {
-    return
-  }
-
-  const x = toFiniteNumber(pose?.x)
-  const y = toFiniteNumber(pose?.y)
-  const theta = toFiniteNumber(pose?.theta)
-  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(theta)) {
-    robotPoseReadout.textContent = 'pose -'
-    robotPoseReadout.title = 'No verified robot pose yet'
-    return
-  }
-
-  const frame = String(pose?.frame || fallbackFrame || 'pose').replace(/^\//, '')
-  robotPoseReadout.textContent = `${frame} ${x.toFixed(2)}, ${y.toFixed(2)}, ${theta.toFixed(2)}`
-  robotPoseReadout.title = `${frame} pose: x ${x.toFixed(3)} m, y ${y.toFixed(3)} m, theta ${theta.toFixed(3)} rad`
-}
-
-function renderLidarScan(scan) {
-  if (!robotLidarScan) {
-    return
-  }
-
-  const rect = robotLidarScan.getBoundingClientRect()
-  const width = Math.max(1, Math.round(rect.width || robotLidarScan.width))
-  const height = Math.max(1, Math.round(rect.height || robotLidarScan.height))
-  if (robotLidarScan.width !== width || robotLidarScan.height !== height) {
-    robotLidarScan.width = width
-    robotLidarScan.height = height
-  }
-
-  const context = robotLidarScan.getContext('2d')
-  if (!context) {
-    return
-  }
-
-  context.clearRect(0, 0, width, height)
-  const points = Array.isArray(scan.points) ? scan.points : []
-  if (!points.length) {
-    return
-  }
-
-  const radius = Math.min(width, height) * 0.42
-  const centerX = width / 2
-  const centerY = height / 2
-  const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
-  const displayRange = clamp(Math.max(1.5, maxSeen), 1.5, 6)
-  const scale = radius / displayRange
-
-  context.save()
-  context.lineWidth = 1
-  context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
-  for (const ring of [0.25, 0.5, 0.75, 1]) {
-    context.beginPath()
-    context.arc(centerX, centerY, radius * ring, 0, Math.PI * 2)
-    context.stroke()
-  }
-
-  context.fillStyle = 'rgba(0, 123, 132, 0.78)'
-  for (const point of points) {
-    const x = toFiniteNumber(point.x)
-    const y = toFiniteNumber(point.y)
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      continue
-    }
-    const px = centerX + x * scale
-    const py = centerY - y * scale
-    if (px < 0 || px > width || py < 0 || py > height) {
-      continue
-    }
-    context.beginPath()
-    context.arc(px, py, 2.2, 0, Math.PI * 2)
-    context.fill()
-  }
-
-  context.fillStyle = 'rgba(255, 114, 79, 0.95)'
-  context.beginPath()
-  context.arc(centerX, centerY, 4, 0, Math.PI * 2)
-  context.fill()
-  context.restore()
-}
-
-function clearLidarScan() {
-  if (!robotLidarScan) {
-    return
-  }
-
-  const context = robotLidarScan.getContext('2d')
-  context?.clearRect(0, 0, robotLidarScan.width, robotLidarScan.height)
-}
-
-function formatLidarSummary(scan) {
-  const stats = scan.stats || {}
-  const minRange = toFiniteNumber(stats.minRange)
-  const points = Array.isArray(scan.points) ? scan.points.length : 0
-  const rangeCount = Number.isFinite(Number(scan.rangeCount)) ? Number(scan.rangeCount) : 0
-  const nearFront = Number.isFinite(Number(stats.nearFront)) ? Number(stats.nearFront) : 0
-  const nearLeft = Number.isFinite(Number(stats.nearLeft)) ? Number(stats.nearLeft) : 0
-  const nearRight = Number.isFinite(Number(stats.nearRight)) ? Number(stats.nearRight) : 0
-  const minText = Number.isFinite(minRange) ? `min ${minRange.toFixed(2)}m` : 'min n/a'
-  return `Lidar: ${points}/${rangeCount} pts, ${minText}, near F/L/R ${nearFront}/${nearLeft}/${nearRight}.`
-}
-
-function formatLidarFailureSummary(payload) {
-  const statusText = payload?.status ? String(payload.status) : 'unavailable'
-  const errorText = payload?.error ? String(payload.error) : 'scan unavailable'
-  const driverText = payload?.driver ? ` Driver ${payload.driver}.` : ''
-  const serialText = formatLidarSerialDetail(payload)
-  const rosGraph = payload?.rosGraph && typeof payload.rosGraph === 'object' ? payload.rosGraph : {}
-  const publisherCount = Number.isFinite(Number(rosGraph.publisherCount)) ? Number(rosGraph.publisherCount) : 0
-  const frameCount = Number.isFinite(Number(payload?.frames)) ? Number(payload.frames) : 0
-  const graphText = publisherCount > 0
-    ? ` ROS publishers ${publisherCount}, frames ${frameCount}.`
-    : ''
-  const driverTail = Array.isArray(payload?.driverLog) && payload.driverLog.length
-    ? ` Driver: ${payload.driverLog[payload.driverLog.length - 1]}.`
-    : ''
-
-  return `Lidar ${statusText}: ${errorText}${driverText}${serialText}${graphText}${driverTail}`
-}
-
-function formatLidarSerialDetail(payload) {
-  const serialPath = payload?.serialPort || payload?.serialDiagnostics?.path
-  if (!serialPath) {
-    return ''
-  }
-
-  const diagnostics = payload?.serialDiagnostics && typeof payload.serialDiagnostics === 'object'
-    ? payload.serialDiagnostics
-    : {}
-  const baudText = payload?.baudrate ? ` @ ${payload.baudrate}` : ''
-  const existsText = diagnostics.exists === false ? 'missing' : diagnostics.exists === true ? 'present' : ''
-  const accessText = diagnostics.readable === true && diagnostics.writable === true
-    ? 'rw'
-    : diagnostics.readable === true
-      ? 'read-only'
-      : diagnostics.exists === true
-        ? 'no-access'
-        : ''
-  const realPath = diagnostics.realPath && diagnostics.realPath !== serialPath ? diagnostics.realPath : ''
-  const detail = [existsText, realPath, accessText].filter(Boolean).join(', ')
-
-  return ` Serial ${serialPath}${baudText}${detail ? ` (${detail})` : ''}.`
-}
-
-function setRobotMapMeta(baseMessage) {
-  robotMapBaseMeta = baseMessage || ''
-  robotMapMeta.textContent = [robotMapBaseMeta, robotLidarSummary].filter(Boolean).join(' ')
 }
 
 function renderRobotTelemetry(robot) {
@@ -3195,7 +2480,7 @@ function applyRobotTargetSelectionState() {
   emergencyStopStatus.textContent = isRealRobotTargetActive()
     ? 'Ready.'
     : 'Switch to a real robot target before stop can reach DOGZILLA.'
-  applyManualControlState()
+  manualControl.applyState()
 }
 
 function formatSource(source) {
@@ -3714,12 +2999,12 @@ function startThinkingFeedback(messageNode) {
 }
 
 async function playRobotConfirmCue() {
-  if (shouldUseDogzillaPiAudio()) {
-    await playDogzillaPiCue('confirm')
+  if (dogzillaAudio.shouldUsePiAudio()) {
+    await dogzillaAudio.playPiCue('confirm')
     return null
   }
 
-  if (shouldSuppressLocalRobotAudio()) {
+  if (dogzillaAudio.shouldSuppressLocalAudio()) {
     return null
   }
 
@@ -3727,12 +3012,12 @@ async function playRobotConfirmCue() {
 }
 
 async function playRobotThinkingCue() {
-  if (shouldUseDogzillaPiAudio()) {
-    await playDogzillaPiCue('thinking-start')
+  if (dogzillaAudio.shouldUsePiAudio()) {
+    await dogzillaAudio.playPiCue('thinking-start')
     return null
   }
 
-  if (shouldSuppressLocalRobotAudio()) {
+  if (dogzillaAudio.shouldSuppressLocalAudio()) {
     return null
   }
 
@@ -3755,8 +3040,8 @@ function finishThinkingFeedback(messageNode, { text, meta, error = false }) {
 
 function stopThinkingCue() {
   thinkingCueToken += 1
-  if (shouldUseDogzillaPiAudio()) {
-    playDogzillaPiCue('thinking-stop').catch(() => {})
+  if (dogzillaAudio.shouldUsePiAudio()) {
+    dogzillaAudio.playPiCue('thinking-stop').catch(() => {})
   }
 
   if (activeThinkingCue) {
@@ -3766,37 +3051,6 @@ function stopThinkingCue() {
   }
 
   thinkingCuePlayer.stopAll()
-}
-
-function shouldUseDogzillaPiAudio() {
-  return runtimeConfig.dogzilla?.audio?.enabled === true
-}
-
-function shouldSuppressLocalRobotAudio() {
-  return isAndroidAppShell()
-}
-
-async function playDogzillaPiCue(cue) {
-  const audioConfig = runtimeConfig.dogzilla?.audio
-  if (!audioConfig?.enabled) {
-    throw new Error('DOGZILLA Pi audio cues are not enabled.')
-  }
-
-  const response = await apiFetch('/api/dogzilla/audio/cue', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      cue,
-      volume: getDogzillaAudioCueVolume(),
-    }),
-  })
-  const payload = await response.json()
-  if (!response.ok || payload.ok !== true) {
-    throw new Error(payload.error || 'DOGZILLA Pi audio cue failed.')
-  }
-  return payload
 }
 
 function setStatus(message, state = 'idle', elapsedMs = null) {
@@ -3876,23 +3130,7 @@ function applyAppConfig() {
 window.addEventListener('beforeunload', () => {
   speechController?.dispose?.()
   speechController?.stop()
-  if (manualControlState.enabled && isRealRobotTargetActive()) {
-    navigator.sendBeacon?.(
-      toApiUrl('/api/robot/manual-control'),
-      new Blob([JSON.stringify({
-        forward: 0,
-        strafe: 0,
-        turn: 0,
-        source: 'page-unload',
-        gait: 'walk',
-        pace: 'normal',
-      })], { type: 'application/json' }),
-    )
-  }
-
-  if (manualControlFrameId) {
-    window.cancelAnimationFrame(manualControlFrameId)
-  }
+  manualControl.dispose()
 
   if (robotFeedbackTimerId) {
     window.clearInterval(robotFeedbackTimerId)

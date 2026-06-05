@@ -8,82 +8,33 @@ import {
   createDogzillaBatteryStateTracker,
   normalizeDogzillaBatterySample,
 } from './lib/dogzilla-battery-state.mjs'
-import { buildIsaacSimPreview } from './lib/isaacsim-command-compiler.mjs'
 import {
-  ensureDogzillaRobotIdentity,
-  getDogzillaConnectionCenter,
   loadDogzillaConnectionConfig,
-  runDogzillaConnectionAction,
-  saveDogzillaConnectionConfig,
-  saveDogzillaRobotName,
 } from './lib/dogzilla-connection-center.mjs'
-import {
-  getDogzillaAudioCueHealth,
-  sendDogzillaAudioCue,
-} from './lib/dogzilla-audio-cue-client.mjs'
-import {
-  getDogzillaLidarDiagnostics,
-  getDogzillaLidarHealth,
-  getDogzillaRobotPose,
-  getDogzillaLidarScan,
-} from './lib/dogzilla-lidar-client.mjs'
-import {
-  loadDogzillaMapOrigin,
-  saveDogzillaMapOriginFromPose,
-} from './lib/dogzilla-map-frame.mjs'
+import { getDogzillaRobotPose, getDogzillaLidarScan } from './lib/dogzilla-lidar-client.mjs'
 import {
   DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH,
-  DOGZILLA_CAMERA_STATUS_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
   getDogzillaCameraSnapshot,
-  getDogzillaCameraStatus,
-  proxyDogzillaCameraStream,
-  sendDogzillaCameraSnapshot,
 } from './lib/dogzilla-camera-proxy.mjs'
-import { runDogzillaPreflight } from './lib/dogzilla-preflight.mjs'
-import {
-  dispatchIsaacSimCommand,
-  getIsaacRuntimeFeedback,
-  getIsaacSidecarHealth,
-} from './lib/isaacsim-sidecar-client.mjs'
-import { loadPublicConfig, processModelResult, processUserInput } from './lib/app-service.mjs'
+import { tryHandleDogzillaRoute } from './lib/http-dogzilla-routes.mjs'
+import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
+import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
 import { warmModel } from './lib/model-client.mjs'
-import { resolveActiveModelProfile, setActiveModelProfile } from './lib/model-profile-config.mjs'
-import { buildRobotManualControlPreview, buildRobotRuntimePreview } from './lib/robot-command-compiler.mjs'
-import {
-  dispatchRobotEmergencyStop,
-  dispatchRobotCommand,
-  fetchRobotBridgeState,
-  getRobotRuntimeFeedback,
-  getRobotSidecarHealth,
-} from './lib/robot-sidecar-client.mjs'
+import { resolveActiveModelProfile } from './lib/model-profile-config.mjs'
+import { fetchRobotBridgeState } from './lib/robot-sidecar-client.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,
-  setActiveRobotTarget,
 } from './lib/robot-runtime-config.mjs'
 import {
-  deleteReconSnapshot,
-  listReconSnapshots,
-  readReconSnapshotArtifact,
-  readReconSnapshotImage,
-  RECON_SNAPSHOT_API_PATH,
   saveReconSnapshot,
-  updateReconSnapshotNote,
 } from './lib/recon-snapshot-store.mjs'
 import {
   getRobotStateSnapshot,
   handleRobotStateStreamUpgrade,
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
-import {
-  resolveActiveSpeechProfile,
-  saveSpeechRuntimeConfig,
-} from './lib/speech-profile-config.mjs'
-import {
-  getSpeechSidecarHealth,
-  transcribeSpeechInput,
-} from './lib/speech-sidecar-client.mjs'
 import { buildSystemHealthz } from './lib/system-healthz.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -155,380 +106,34 @@ const server = createServer(async (request, response) => {
       }))
     }
 
-    if (request.method === 'GET' && requestUrl.pathname === '/api/config') {
-      return sendJson(response, 200, await loadPublicConfig())
+    const routeContext = {
+      request,
+      requestUrl,
+      response,
+      readJsonBody,
+      sendJson,
     }
 
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/connection') {
-      return sendJson(response, 200, await getDogzillaConnectionCenter())
+    if ((await tryHandleDogzillaRoute({
+      ...routeContext,
+      getDogzillaPoseTrack,
+    })) !== false) {
+      return
     }
 
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/connection') {
-      const body = await readJsonBody(request)
-      const config = await saveDogzillaConnectionConfig(body || {})
-      let identity = null
-
-      if (config.ssh.host) {
-        identity = await ensureDogzillaRobotIdentity({ config })
-      }
-
-      return sendJson(response, 200, await getDogzillaConnectionCenter({ identity }))
+    if ((await tryHandleReconRoute({
+      ...routeContext,
+      captureReconSnapshot,
+    })) !== false) {
+      return
     }
 
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/identity') {
-      const body = await readJsonBody(request)
-      const robotName = typeof body?.robot_name === 'string' ? body.robot_name : body?.robotName
-
-      try {
-        const identity = await saveDogzillaRobotName(robotName)
-        return sendJson(response, 200, {
-          identity,
-          connection: await getDogzillaConnectionCenter({ identity }),
-        })
-      } catch (error) {
-        return sendJson(response, 400, {
-          error: error instanceof Error ? error.message : 'Could not update robot name.',
-        })
-      }
+    if ((await tryHandleRuntimeRoute({
+      ...routeContext,
+      buildCurrentRobotStateSnapshot,
+    })) !== false) {
+      return
     }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/connection/action') {
-      const body = await readJsonBody(request)
-      const action = typeof body?.action === 'string' ? body.action.trim() : ''
-      const result = await runDogzillaConnectionAction(action, {
-        live: body?.live === true,
-      })
-      const statusCode = result.status === 'error' ? 400 : 200
-      return sendJson(response, statusCode, result)
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/preflight') {
-      return sendJson(response, 200, await runDogzillaPreflight())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/audio/health') {
-      return sendJson(response, 200, await getDogzillaAudioCueHealth())
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/audio/cue') {
-      const body = await readJsonBody(request)
-      const result = await sendDogzillaAudioCue(body?.cue, { volume: body?.volume })
-      const statusCode = result.ok ? 200 : result.status === 'invalid' ? 400 : 502
-      return sendJson(response, statusCode, result)
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/health') {
-      return sendJson(response, 200, await getDogzillaLidarHealth())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/scan') {
-      const result = await getDogzillaLidarScan()
-      const statusCode = result.ok ? 200 : result.status === 'disabled' ? 404 : 502
-      return sendJson(response, statusCode, result)
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/pose') {
-      const result = await getDogzillaRobotPose()
-      const statusCode = result.status === 'disabled' ? 404 : 200
-      return sendJson(response, statusCode, result)
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/map-origin') {
-      const origin = await loadDogzillaMapOrigin()
-      return sendJson(response, 200, {
-        ok: true,
-        configured: !!origin,
-        origin,
-      })
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/map-origin/capture') {
-      const body = await readJsonBody(request)
-      const pose = await getDogzillaRobotPose()
-      if (pose.status === 'disabled' || pose.ok === false) {
-        return sendJson(response, 502, {
-          ok: false,
-          error: pose.error || 'DOGZILLA map pose unavailable',
-          pose,
-        })
-      }
-
-      const origin = await saveDogzillaMapOriginFromPose(pose, {
-        label: body?.label || 'home_origin',
-      })
-      return sendJson(response, 200, {
-        ok: true,
-        origin,
-      })
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/pose/track') {
-      return sendJson(response, 200, {
-        status: 'ok',
-        frame: 'map',
-        waypointSafeOnly: true,
-        poses: getDogzillaPoseTrack(),
-      })
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/dogzilla/lidar/diagnostics') {
-      return sendJson(response, 200, await getDogzillaLidarDiagnostics())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STATUS_PATH) {
-      return sendJson(response, 200, await getDogzillaCameraStatus())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH) {
-      return sendDogzillaCameraSnapshot(response)
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === DOGZILLA_CAMERA_STREAM_PROXY_PATH) {
-      return proxyDogzillaCameraStream(response)
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === RECON_SNAPSHOT_API_PATH) {
-      const limit = parsePositiveInteger(requestUrl.searchParams.get('limit'), 24)
-      return sendJson(response, 200, {
-        status: 'ok',
-        snapshots: await listReconSnapshots({ limit }),
-      })
-    }
-
-    const reconSnapshotImageId = matchReconSnapshotImagePath(requestUrl.pathname)
-    if (request.method === 'GET' && reconSnapshotImageId) {
-      return sendReconSnapshotImage(response, reconSnapshotImageId)
-    }
-
-    const reconSnapshotArtifact = matchReconSnapshotArtifactPath(requestUrl.pathname)
-    if (request.method === 'GET' && reconSnapshotArtifact) {
-      return sendReconSnapshotArtifact(response, reconSnapshotArtifact.id, reconSnapshotArtifact.artifact)
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === RECON_SNAPSHOT_API_PATH) {
-      const body = await readJsonBody(request)
-      const result = await captureReconSnapshot(body || {})
-
-      if (!result.ok) {
-        return sendJson(response, result.statusCode || 502, {
-          status: 'error',
-          error: result.error || 'Recon snapshot failed.',
-          robotState: result.robotState,
-          lidarScan: result.lidarScan,
-        })
-      }
-
-      return sendJson(response, 201, result.snapshot)
-    }
-
-    const reconSnapshotId = matchReconSnapshotPath(requestUrl.pathname)
-    if (request.method === 'PATCH' && reconSnapshotId) {
-      const body = await readJsonBody(request)
-      try {
-        return sendJson(response, 200, await updateReconSnapshotNote(reconSnapshotId, {
-          note: body?.note,
-          tags: body?.tags,
-        }))
-      } catch (error) {
-        const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
-        return sendJson(response, statusCode, {
-          error: error instanceof Error ? error.message : 'Could not update recon snapshot.',
-        })
-      }
-    }
-
-    if (request.method === 'DELETE' && reconSnapshotId) {
-      try {
-        return sendJson(response, 200, await deleteReconSnapshot(reconSnapshotId))
-      } catch (error) {
-        const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
-        return sendJson(response, statusCode, {
-          error: error instanceof Error ? error.message : 'Could not delete recon snapshot.',
-        })
-      }
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/chat') {
-      const body = await readJsonBody(request)
-      return sendJson(response, 200, await processUserInput(body?.input))
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/chat/result') {
-      const body = await readJsonBody(request)
-      return sendJson(response, 200, await processModelResult({
-        input: body?.input,
-        rawResponse: body?.rawResponse,
-      }))
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/settings/profile') {
-      const body = await readJsonBody(request)
-      const profileId = typeof body?.profileId === 'string' ? body.profileId.trim() : ''
-
-      if (!profileId) {
-        return sendJson(response, 400, { error: 'Select a profile first.' })
-      }
-
-      try {
-        await setActiveModelProfile(profileId)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Could not update profile.'
-        const statusCode = /locked/i.test(message) ? 409 : 400
-        return sendJson(response, statusCode, { error: message })
-      }
-
-      return sendJson(response, 200, await loadPublicConfig())
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/settings/speech-profile') {
-      const body = await readJsonBody(request)
-      const profileId = typeof body?.profileId === 'string' ? body.profileId.trim() : ''
-
-      if (!profileId) {
-        return sendJson(response, 400, { error: 'Select a speech profile first.' })
-      }
-
-      try {
-        const speechConfig = await resolveActiveSpeechProfile()
-        const profileExists = speechConfig.availableProfiles.some((profile) => profile.id === profileId)
-
-        if (!profileExists) {
-          return sendJson(response, 400, { error: `Unknown speech profile "${profileId}".` })
-        }
-
-        if (speechConfig.selectionLocked) {
-          return sendJson(response, 409, { error: 'Speech profile locked by APP_SPEECH_PROFILE.' })
-        }
-
-        await saveSpeechRuntimeConfig({ activeProfile: profileId })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Could not update speech profile.'
-        const statusCode = /locked/i.test(message) ? 409 : 400
-        return sendJson(response, statusCode, { error: message })
-      }
-
-      return sendJson(response, 200, await loadPublicConfig())
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/settings/robot-target') {
-      const body = await readJsonBody(request)
-      const targetId = typeof body?.targetId === 'string' ? body.targetId.trim() : ''
-
-      if (!targetId) {
-        return sendJson(response, 400, { error: 'Select a robot target first.' })
-      }
-
-      try {
-        const runtimeConfig = await loadRobotRuntimeConfig()
-
-        if (runtimeConfig.selectionLocked) {
-          return sendJson(response, 409, { error: 'Robot target locked by ROBOT_RUNTIME_TARGET.' })
-        }
-
-        await setActiveRobotTarget(targetId)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Could not update robot target.'
-        return sendJson(response, 400, { error: message })
-      }
-
-      return sendJson(response, 200, await loadPublicConfig())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/isaac/health') {
-      return sendJson(response, 200, await getIsaacSidecarHealth())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/isaac/feedback') {
-      return sendJson(response, 200, await getIsaacRuntimeFeedback())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/robot/health') {
-      return sendJson(response, 200, await getRobotSidecarHealth())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/robot/feedback') {
-      return sendJson(response, 200, await getRobotRuntimeFeedback())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/robot/state') {
-      return sendJson(response, 200, await buildCurrentRobotStateSnapshot())
-    }
-
-    if (request.method === 'GET' && requestUrl.pathname === '/api/speech/health') {
-      return sendJson(response, 200, await getSpeechSidecarHealth())
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/speech/transcribe') {
-      const body = await readJsonBody(request)
-      const speechConfig = await resolveActiveSpeechProfile()
-      const activeSpeechProfile = speechConfig.activeProfile
-
-      if (activeSpeechProfile.provider !== 'parakeet-sidecar') {
-        return sendJson(response, 400, {
-          error: `Active speech profile "${activeSpeechProfile.label}" does not use server transcription.`,
-        })
-      }
-
-      const result = await transcribeSpeechInput({
-        audioBase64: typeof body?.audioBase64 === 'string' ? body.audioBase64.trim() : '',
-        mimeType: typeof body?.mimeType === 'string' ? body.mimeType.trim() : 'audio/wav',
-        sampleRate: Number.isFinite(body?.sampleRate) ? body.sampleRate : 16000,
-        timestamps: activeSpeechProfile.timestamps ?? true,
-        modelId: activeSpeechProfile.sidecarModelId || activeSpeechProfile.modelId,
-        language: activeSpeechProfile.language,
-        task: activeSpeechProfile.task,
-        device: activeSpeechProfile.device,
-      })
-
-      const statusCode = result.status === 'ok' ? 200 : result.status === 'invalid-audio' ? 400 : 502
-      return sendJson(response, statusCode, result)
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/isaac/dispatch') {
-      const body = await readJsonBody(request)
-      const preview =
-        body?.preview && typeof body.preview === 'object'
-          ? body.preview
-          : await buildIsaacSimPreview({
-            input: body?.input,
-            rawResponse: body?.rawResponse,
-            parsed: body?.parsed,
-          })
-      const dispatch = await dispatchIsaacSimCommand(preview)
-      const statusCode = dispatch.status === 'error' ? 502 : 200
-      return sendJson(response, statusCode, { preview, dispatch })
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/robot/dispatch') {
-      const body = await readJsonBody(request)
-      const preview =
-        body?.preview && typeof body.preview === 'object'
-          ? body.preview
-          : await buildRobotRuntimePreview({
-            input: body?.input,
-            rawResponse: body?.rawResponse,
-            parsed: body?.parsed,
-          })
-      const dispatch = await dispatchRobotCommand(preview)
-      const statusCode = dispatch.status === 'error' ? 502 : 200
-      return sendJson(response, statusCode, { preview, dispatch })
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/robot/manual-control') {
-      const body = await readJsonBody(request)
-      const preview = await buildRobotManualControlPreview(body || {})
-      const dispatch = await dispatchRobotCommand(preview)
-      const statusCode = dispatch.status === 'error' ? 502 : 200
-      return sendJson(response, statusCode, { preview, dispatch })
-    }
-
-    if (request.method === 'POST' && requestUrl.pathname === '/api/robot/stop') {
-      await readJsonBody(request)
-      const dispatch = await dispatchRobotEmergencyStop()
-      const statusCode = dispatch.status === 'error' ? 502 : 200
-      return sendJson(response, statusCode, { action: 'stop', dispatch })
-    }
-
     if (request.method === 'GET') {
       return serveStaticRequest(requestUrl.pathname, response)
     }
@@ -744,61 +349,6 @@ function buildReconMapContext(robotState, lidarScan) {
     lidarPointCount: Array.isArray(lidarScan?.points) ? lidarScan.points.length : 0,
     source: 'robot-state-plus-lidar',
   }
-}
-
-async function sendReconSnapshotImage(response, id) {
-  try {
-    const image = await readReconSnapshotImage(id)
-    response.writeHead(200, {
-      'content-type': image.contentType,
-      'cache-control': 'private, max-age=60',
-    })
-    response.end(image.buffer)
-  } catch (error) {
-    const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
-    return sendJson(response, statusCode, {
-      error: error instanceof Error ? error.message : 'Recon snapshot image unavailable.',
-    })
-  }
-}
-
-async function sendReconSnapshotArtifact(response, id, artifact) {
-  try {
-    const result = await readReconSnapshotArtifact(id, artifact)
-    response.writeHead(200, {
-      'content-type': result.contentType,
-      'cache-control': 'private, max-age=60',
-    })
-    response.end(result.buffer)
-  } catch (error) {
-    const statusCode = error?.code === 'ENOENT' ? 404 : error?.code === 'EINVAL' ? 400 : 500
-    return sendJson(response, statusCode, {
-      error: error instanceof Error ? error.message : 'Recon snapshot artifact unavailable.',
-    })
-  }
-}
-
-function matchReconSnapshotImagePath(pathname) {
-  const match = /^\/api\/recon\/snapshots\/([^/]+)\/image$/.exec(pathname)
-  return match ? decodeURIComponent(match[1]) : ''
-}
-
-function matchReconSnapshotArtifactPath(pathname) {
-  const match = /^\/api\/recon\/snapshots\/([^/]+)\/lidar\.(json|csv)$/.exec(pathname)
-  return match ? {
-    id: decodeURIComponent(match[1]),
-    artifact: match[2],
-  } : null
-}
-
-function matchReconSnapshotPath(pathname) {
-  const match = /^\/api\/recon\/snapshots\/([^/]+)$/.exec(pathname)
-  return match ? decodeURIComponent(match[1]) : ''
-}
-
-function parsePositiveInteger(value, fallback) {
-  const numeric = Number.parseInt(String(value ?? ''), 10)
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
 }
 
 function recordDogzillaMapPose(robot) {

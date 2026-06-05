@@ -1,0 +1,557 @@
+/* Robo-Doge CSS chunk 5: 05-responsive.css */
+
+.parsed-log .response-head {
+  margin-bottom: 8px;
+}
+
+.output-box {
+  min-height: 112px;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.meta-card {
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  padding: 2px 10px 8px;
+}
+
+.settings-panel,
+.runtime-panel {
+  padding: 14px 0 0;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+@media (max-width: 980px) {
+  .shell {
+    width: min(100% - 20px, 760px);
+    height: auto;
+    min-height: calc(100vh - 20px);
+    margin-block: 10px;
+  }
+
+  .console-layout {
+    height: auto;
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .robot-column {
+    grid-column: 2;
+    min-height: 0;
+    grid-template-rows: auto auto auto minmax(320px, auto) auto;
+  }
+
+  .command-zone,
+  .control-rail {
+    min-height: 0;
+  }
+
+  .command-zone {
+    grid-template-rows: auto auto auto auto auto;
+  }
+
+  textarea {
+    height: auto;
+  }
+
+  .robot-map,
+  .robot-camera-frame-wrap {
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+}
+
+@media (max-width: 680px) {
+  .shell {
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    margin: 0;
+    border-radius: 0;
+    padding: 10px;
+  }
+
+  .console-layout {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .control-rail {
+    min-height: 0;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    grid-template-rows: auto;
+    justify-content: start;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .rail-spacer {
+    display: none;
+  }
+
+  .rail-company-logo {
+    width: 42px;
+  }
+
+  .robot-column {
+    grid-column: auto;
+    grid-template-rows: auto auto auto minmax(320px, auto) auto;
+  }
+
+  .command-zone,
+  .intro-head,
+  .intro-copy,
+  .brand-title,
+  .lede,
+  .chat-form,
+  .speech-panel,
+  .output-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .command-zone {
+    overflow-x: hidden;
+  }
+
+  .intro-head {
+    align-items: center;
+  }
+
+  .mascot-chip {
+    display: none;
+  }
+
+  .brand-title-logo {
+    width: min(100%, 360px);
+    max-height: 50px;
+  }
+
+  .lede {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .app-header {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .app-header-actions {
+    margin-left: 0;
+  }
+
+  .app-header-brand span,
+  .app-action-label {
+    display: none;
+  }
+
+  .settings-toggle,
+  .connection-toggle {
+    width: 38px;
+    padding-inline: 0;
+  }
+
+  .settings-toggle {
+    flex: 0 0 38px;
+  }
+
+  .connection-toggle {
+    flex: 0 0 38px;
+  }
+
+  .settings-drawer,
+  .connection-drawer,
+  .recon-gallery-drawer {
+    top: 66px;
+    right: 10px;
+    width: calc(100vw - 20px);
+  }
+
+  .meta-grid,
+  .robot-identity-grid,
+  .settings-row,
+  .connection-grid,
+  .connection-url-grid,
+  .bridge-action-grid,
+  .preflight-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .dogzilla-audio-volume {
+    grid-template-columns: 1fr 46px;
+  }
+
+  .dogzilla-audio-volume label {
+    grid-column: 1 / -1;
+  }
+
+  .preflight-check {
+    grid-template-columns: 1fr;
+  }
+
+  .robot-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .robot-tab {
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+  }
+
+  .robot-tab:last-child {
+    border-right: 0;
+  }
+
+  .robot-camera-panel .robot-map-head {
+    flex-wrap: wrap;
+  }
+
+  .robot-camera-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .recon-snapshot-item {
+    grid-template-columns: 1fr;
+  }
+
+  .recon-snapshot-list {
+    max-height: calc(100vh - 390px);
+  }
+}
+
+@media (min-width: 1500px) {
+  .shell {
+    width: calc(100% - 32px);
+  }
+
+  .console-layout {
+    grid-template-columns: 58px minmax(560px, 1.05fr) minmax(560px, 0.95fr);
+  }
+
+  .brand-title-logo {
+    width: min(100%, 560px);
+    max-height: 84px;
+  }
+}
+
+html.android-app body {
+  background: var(--page);
+  overscroll-behavior-x: none;
+  overflow-x: hidden;
+}
+
+html.android-app .shell {
+  width: 100vw;
+  max-width: 100vw;
+  height: auto;
+  min-height: 100vh;
+  margin: 0;
+  padding: 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--shell);
+  box-shadow: none;
+  overflow-x: hidden;
+}
+
+html.android-app .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  background: var(--shell);
+  justify-content: flex-start;
+}
+
+html.android-app .app-header-actions {
+  margin-left: 0;
+}
+
+html.android-app .app-header-brand span,
+html.android-app .app-action-label {
+  display: none;
+}
+
+html.android-app .settings-toggle,
+html.android-app .connection-toggle {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 38px;
+  height: 34px;
+  padding-inline: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+html.android-app .connection-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #050505;
+  color: #f7f1e8;
+}
+
+html.android-app .settings-toggle {
+  border: 1px solid rgba(255, 123, 86, 0.24);
+  background: var(--accent);
+  color: #fffaf4;
+}
+
+html.android-app .console-layout {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: calc(100vh - 28px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  touch-action: pan-y;
+}
+
+html.android-app .control-rail {
+  display: none;
+}
+
+html.android-app .command-zone,
+html.android-app .manual-control-panel,
+html.android-app .robot-state-panel,
+html.android-app .robot-map-panel,
+html.android-app .robot-camera-panel,
+html.android-app .output-panel,
+html.android-app .settings-panel,
+html.android-app .connection-panel,
+html.android-app .runtime-panel,
+html.android-app .meta-card,
+html.android-app .robot-identity-grid > div,
+html.android-app .speech-preview,
+html.android-app .runtime-preview,
+html.android-app .message-bubble,
+html.android-app .output-box,
+html.android-app .status {
+  border-color: var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.android-app .command-zone {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  padding: 4px 2px 0;
+  background: transparent;
+  border-right: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, auto) auto;
+  gap: 10px;
+}
+
+html.android-app textarea {
+  height: auto;
+}
+
+html.android-app .robot-column {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, auto) minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+html.android-app .eyebrow {
+  color: var(--ink-faint);
+}
+
+html.android-app .intro-head {
+  align-items: center;
+}
+
+html.android-app .mascot-chip {
+  display: none;
+}
+
+html.android-app h1::after {
+  content: none;
+  display: none;
+}
+
+html.android-app .lede {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+html.android-app h1 {
+  font-size: 1.45rem;
+}
+
+html.android-app .brand-title-logo {
+  width: min(70vw, 390px);
+  min-width: 0;
+  max-height: 48px;
+}
+
+html.android-app textarea,
+html.android-app input,
+html.android-app select {
+  border-color: var(--line);
+  border-radius: 6px;
+  background: #f3eee6;
+}
+
+html.android-app textarea:focus,
+html.android-app input:focus,
+html.android-app select:focus {
+  border-color: rgba(255, 123, 86, 0.72);
+  box-shadow: 0 0 0 3px rgba(255, 123, 86, 0.14);
+}
+
+html.android-app button {
+  border-color: transparent;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fffaf4;
+  box-shadow: none;
+}
+
+html.android-app .robot-tab.is-active {
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+
+html.android-app button:disabled {
+  background: var(--panel-2);
+  color: var(--ink-faint);
+}
+
+html.android-app .connection-backend-row {
+  grid-template-columns: 1fr;
+}
+
+html.android-app .status-dot,
+html.android-app .status[data-state='busy'] .status-dot,
+html.android-app .status[data-state='error'] .status-dot,
+html.android-app .robot-map-dot {
+  box-shadow: none;
+}
+
+html.android-app .speech-chip,
+html.android-app .runtime-chip,
+html.android-app .robot-state-chip {
+  border-color: transparent;
+  border-radius: 999px;
+  background: #fff0e7;
+  color: var(--accent);
+}
+
+html.android-app .robot-tabs {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+html.android-app .robot-tab {
+  background: transparent;
+  border-color: var(--line);
+}
+
+html.android-app .robot-map {
+  width: 100%;
+  border-color: var(--line);
+  border-radius: 6px;
+  background: #ebe3d8;
+}
+
+html.android-app .robot-camera-frame-wrap {
+  width: 100%;
+  border-color: var(--line);
+  border-radius: 6px;
+}
+
+html.android-app .recon-snapshot-empty,
+html.android-app .recon-snapshot-item {
+  background: #f3eee6;
+}
+
+html.android-app .robot-map::after {
+  background:
+    linear-gradient(90deg, transparent calc(50% - 0.5px), rgba(255, 123, 86, 0.28) 50%, transparent calc(50% + 0.5px)),
+    linear-gradient(0deg, transparent calc(50% - 0.5px), rgba(255, 123, 86, 0.28) 50%, transparent calc(50% + 0.5px));
+  opacity: 1;
+}
+
+html.android-app[data-mobile-view='chat'] .speech-panel,
+html.android-app[data-mobile-view='chat'] .robot-tabs,
+html.android-app[data-mobile-view='chat'] .manual-control-panel,
+html.android-app[data-mobile-view='chat'] .robot-state-panel,
+html.android-app[data-mobile-view='chat'] .robot-map-panel,
+html.android-app[data-mobile-view='chat'] .robot-camera-panel,
+html.android-app[data-mobile-view='audio'] .chat-form,
+html.android-app[data-mobile-view='audio'] .robot-tabs,
+html.android-app[data-mobile-view='audio'] .manual-control-panel,
+html.android-app[data-mobile-view='audio'] .robot-state-panel,
+html.android-app[data-mobile-view='audio'] .robot-map-panel,
+html.android-app[data-mobile-view='audio'] .robot-camera-panel,
+html.android-app[data-mobile-view='robot'] .chat-form,
+html.android-app[data-mobile-view='robot'] .speech-panel,
+html.android-app[data-mobile-view='robot'] .output-panel {
+  display: none;
+}
+
+html.android-app[data-mobile-view='chat'] .output-panel,
+html.android-app[data-mobile-view='audio'] .output-panel {
+  min-height: 42vh;
+}
+
+html.android-app[data-mobile-view='robot'] .robot-column {
+  grid-template-rows: auto minmax(112px, auto) minmax(112px, auto) minmax(280px, 1fr);
+}
+
+html.android-app[data-mobile-view='chat'] .robot-column,
+html.android-app[data-mobile-view='audio'] .robot-column {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+html.android-app[data-mobile-view='chat'] .output-scroll,
+html.android-app[data-mobile-view='audio'] .output-scroll {
+  max-height: 46vh;
+}
+
+html.android-app[data-mobile-view='robot'] .robot-map-panel {
+  min-height: 330px;
+}
+
+html.android-app .settings-drawer,
+html.android-app .connection-drawer,
+html.android-app .recon-gallery-drawer {
+  top: 62px;
+  right: 14px;
+  width: calc(100vw - 28px);
+  max-height: calc(100vh - 80px);
+  z-index: 30;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 18px 42px rgba(35, 28, 22, 0.22);
+}

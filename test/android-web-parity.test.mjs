@@ -1,22 +1,26 @@
 import assert from 'node:assert/strict'
-import { readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import test from 'node:test'
 
 test('Android shell and web app share the connection center surface', async () => {
-  const [html, css, appJs, serverJs, tauriConfigText] = await Promise.all([
+  const [html, css, appJs, dogzillaAudioJs, manualControlJs, robotMapJs, serverJs, tauriConfigText] = await Promise.all([
     readFile('public/index.html', 'utf-8'),
-    readFile('public/styles.css', 'utf-8'),
+    readCssBundle(),
     readFile('public/app.js', 'utf-8'),
+    readFile('public/dogzilla-audio.js', 'utf-8'),
+    readFile('public/manual-control.js', 'utf-8'),
+    readFile('public/robot-map.js', 'utf-8'),
     readFile('server.mjs', 'utf-8'),
     readFile('src-tauri/tauri.conf.json', 'utf-8'),
   ])
+  const browserJs = [appJs, dogzillaAudioJs, manualControlJs, robotMapJs].join('\n')
   const swipeBlocker = appJs.match(/function isSwipeBlockedTarget[\s\S]+?\n}/)?.[0] || ''
   const commandCueHandler = appJs.match(/function playCommandCueIfNeeded[\s\S]+?\n}/)?.[0] || ''
   const piConfirmCue = appJs.match(/async function playRobotConfirmCue[\s\S]+?\n}/)?.[0] || ''
   const piThinkingCue = appJs.match(/async function playRobotThinkingCue[\s\S]+?\n}/)?.[0] || ''
-  const dogzillaPiCue = appJs.match(/async function playDogzillaPiCue[\s\S]+?function setStatus/)?.[0] || ''
-  const suppressLocalAudio = appJs.match(/function shouldSuppressLocalRobotAudio[\s\S]+?\n}/)?.[0] || ''
-  const lidarFailureFormatter = appJs.match(/function formatLidarFailureSummary[\s\S]+?function setRobotMapMeta/)?.[0] || ''
+  const dogzillaPiCue = dogzillaAudioJs.match(/async function playPiCue[\s\S]+?\n  }/)?.[0] || ''
+  const suppressLocalAudio = dogzillaAudioJs.match(/function shouldSuppressLocalAudio[\s\S]+?\n  }/)?.[0] || ''
+  const lidarFailureFormatter = robotMapJs.match(/export function formatLidarFailureSummary[\s\S]+?export function toFiniteNumber/)?.[0] || ''
   const assistantMetaFormatter = appJs.match(/function buildAssistantMeta[\s\S]+?function buildCompletionStatus/)?.[0] || ''
   const completionStatusFormatter = appJs.match(/function buildCompletionStatus[\s\S]+?function formatParsedOutput/)?.[0] || ''
   const parsedOutputFormatter = appJs.match(/function formatParsedOutput[\s\S]+?function formatActiveRuntimeSummary/)?.[0] || ''
@@ -75,20 +79,20 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(appJs, /handleDogzillaBackendSave/)
   assert.match(appJs, /handleDogzillaPreflight/)
   assert.match(appJs, /handleEmergencyStop/)
-  assert.match(appJs, /handleManualControlToggle/)
+  assert.match(appJs, /manualControl\.handleToggle/)
   assert.match(appJs, /handleReconSnapshot/)
   assert.match(appJs, /handleReconGalleryToggle/)
   assert.match(appJs, /handleReconSnapshotListClick/)
-  assert.match(appJs, /apiFetch\('\/api\/robot\/manual-control'/)
+  assert.match(browserJs, /apiFetch\('\/api\/robot\/manual-control'/)
   assert.match(appJs, /apiFetch\('\/api\/robot\/stop'/)
   assert.match(appJs, /apiFetch\('\/api\/recon\/snapshots'/)
   assert.match(appJs, /method: 'PATCH'/)
   assert.match(appJs, /navigation-unavailable/)
   assert.doesNotMatch(appJs, /setRobotPoseReadout\(robot\.telemetry\?\.pose/)
-  assert.match(appJs, /Waiting for verified map-frame localization/)
-  assert.match(appJs, /DOGZILLA direct bridge unreachable/)
+  assert.match(browserJs, /Waiting for verified map-frame localization/)
+  assert.match(browserJs, /DOGZILLA direct bridge unreachable/)
   assert.match(appJs, /Stale robot pose cleared/)
-  assert.match(appJs, /renderRobotPoseTrack\(snapshot\?\.poseTrack/)
+  assert.match(appJs, /robotMap\.renderPoseTrack\(snapshot\?\.poseTrack/)
   assert.ok(assistantMetaFormatter)
   assert.ok(completionStatusFormatter)
   assert.ok(parsedOutputFormatter)
@@ -112,8 +116,8 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(css, /\.robot-map-track-dot/)
   assert.match(css, /\.robot-map-waypoint/)
   assert.doesNotMatch(css, /floorplan\.png/)
-  assert.match(appJs, /renderRobotMapWaypoints/)
-  assert.match(appJs, /getRobotMapRangeMeters/)
+  assert.match(appJs, /robotMap\.renderWaypoints/)
+  assert.match(robotMapJs, /getRobotMapRangeMeters/)
   assert.match(appJs, /document\.addEventListener\('touchmove', handleMobileTouchMove, \{ passive: false \}\)/)
   assert.ok(swipeBlocker)
   assert.match(swipeBlocker, /\.recon-gallery-drawer/)
@@ -121,19 +125,19 @@ test('Android shell and web app share the connection center surface', async () =
   assert.ok(commandCueHandler)
   assert.match(commandCueHandler, /playRobotConfirmCue/)
   assert.doesNotMatch(commandCueHandler, /commandCuePlayer\.play/)
-  assert.match(piConfirmCue, /playDogzillaPiCue\('confirm'\)/)
-  assert.match(piConfirmCue, /shouldSuppressLocalRobotAudio\(\)/)
+  assert.match(piConfirmCue, /dogzillaAudio\.playPiCue\('confirm'\)/)
+  assert.match(piConfirmCue, /dogzillaAudio\.shouldSuppressLocalAudio\(\)/)
   assert.match(piConfirmCue, /return commandCuePlayer\.play\(\)/)
-  assert.match(piThinkingCue, /playDogzillaPiCue\('thinking-start'\)/)
-  assert.match(piThinkingCue, /shouldSuppressLocalRobotAudio\(\)/)
+  assert.match(piThinkingCue, /dogzillaAudio\.playPiCue\('thinking-start'\)/)
+  assert.match(piThinkingCue, /dogzillaAudio\.shouldSuppressLocalAudio\(\)/)
   assert.match(piThinkingCue, /return thinkingCuePlayer\.play\(\)/)
-  assert.match(suppressLocalAudio, /isAndroidAppShell\(\)/)
-  assert.match(dogzillaPiCue, /volume: getDogzillaAudioCueVolume\(\)/)
-  assert.match(appJs, /DOGZILLA_AUDIO_VOLUME_KEY/)
+  assert.match(suppressLocalAudio, /isAndroidAppShell/)
+  assert.match(dogzillaPiCue, /volume: getVolume\(\)/)
+  assert.match(dogzillaAudioJs, /DOGZILLA_AUDIO_VOLUME_KEY/)
   assert.match(lidarFailureFormatter, /serialDiagnostics/)
   assert.match(lidarFailureFormatter, /realPath/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/connection'/)
-  assert.match(appJs, /apiFetch\('\/api\/dogzilla\/audio\/cue'/)
+  assert.match(dogzillaAudioJs, /apiFetch\('\/api\/dogzilla\/audio\/cue'/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/preflight'/)
   assert.match(css, /html\.android-app \.connection-toggle/)
   assert.match(css, /html\.android-app \.connection-drawer/)
@@ -148,3 +152,17 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(css, /html\.android-app \.console-layout[\s\S]+touch-action: pan-y/)
   assert.match(css, /html\.android-app \.connection-backend-row/)
 })
+
+async function readCssBundle() {
+  const [mainCss, chunkNames] = await Promise.all([
+    readFile('public/styles.css', 'utf-8'),
+    readdir('public/styles'),
+  ])
+  const chunks = await Promise.all(
+    chunkNames
+      .filter((name) => name.endsWith('.css'))
+      .sort()
+      .map((name) => readFile(`public/styles/${name}`, 'utf-8')),
+  )
+  return [mainCss, ...chunks].join('\n')
+}

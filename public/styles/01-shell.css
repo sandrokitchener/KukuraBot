@@ -1,0 +1,526 @@
+/* Robo-Doge CSS chunk 1: 01-shell.css */
+
+:root {
+  color-scheme: light;
+  --page: #3f3e3b;
+  --shell: #f6f3ee;
+  --shell-2: #ebe6dd;
+  --panel: #fbf8f2;
+  --panel-2: #f0ebe2;
+  --panel-3: #e7dfd4;
+  --line: rgba(54, 48, 42, 0.12);
+  --line-strong: rgba(54, 48, 42, 0.2);
+  --ink: #282522;
+  --ink-soft: #6d665e;
+  --ink-faint: #9b9288;
+  --accent: #ff7b56;
+  --accent-2: #f3a23b;
+  --accent-3: #37322e;
+  --danger: #d94f45;
+  --warning: #c58b28;
+  --map-dot: #ff724f;
+  --shadow: rgba(33, 28, 24, 0.28);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--page);
+  color: var(--ink);
+  font-family: "Noto Sans Mono", "Segoe UI", monospace;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.shell {
+  position: relative;
+  width: min(1600px, calc(100% - 32px));
+  height: calc(100vh - 16px);
+  min-height: 760px;
+  margin: 8px auto;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: var(--shell);
+  box-shadow: 0 18px 48px rgba(33, 28, 24, 0.2);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.app-header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-header-brand,
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-header-brand {
+  color: var(--ink-faint);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.app-header-brand img {
+  width: 34px;
+  height: 24px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.app-header-actions {
+  justify-content: end;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.console-layout {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 58px minmax(420px, 1.12fr) minmax(390px, 0.88fr);
+  gap: clamp(14px, 1.2vw, 22px);
+  align-items: stretch;
+}
+
+.control-rail {
+  min-height: 0;
+  padding: 8px 6px;
+  border-right: 1px solid var(--line);
+  background: #34312e;
+  border-radius: 6px;
+  display: grid;
+  grid-template-rows: auto repeat(5, 42px) 1fr auto auto;
+  gap: 10px;
+  justify-items: center;
+  align-items: center;
+}
+
+.rail-brand,
+.rail-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+}
+
+.rail-brand {
+  background: var(--panel);
+  color: var(--accent-3);
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(54, 48, 42, 0.12);
+}
+
+.rail-brand img {
+  width: 28px;
+  height: 22px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.rail-icon {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5ded4;
+  font-size: 0.86rem;
+}
+
+.rail-icon-button {
+  padding: 0;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.rail-icon.is-active {
+  border-color: rgba(255, 123, 86, 0.8);
+  background: var(--accent);
+  color: #fffaf4;
+  box-shadow: 0 9px 20px rgba(255, 123, 86, 0.22);
+}
+
+.rail-icon-accent {
+  border-color: rgba(255, 123, 86, 0.55);
+  background: rgba(255, 123, 86, 0.18);
+  color: #ffb399;
+}
+
+.camera-rail-icon {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+}
+
+.camera-rail-icon::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: -5px;
+  width: 8px;
+  height: 4px;
+  border: 2px solid currentColor;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+}
+
+.camera-rail-icon span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.rail-spacer {
+  width: 1px;
+  height: 100%;
+}
+
+.rail-company-logo {
+  width: 44px;
+  max-height: 20px;
+  object-fit: contain;
+  opacity: 0.28;
+  filter: invert(1) grayscale(1);
+  pointer-events: none;
+}
+
+.command-zone,
+.manual-control-panel,
+.robot-state-panel,
+.robot-map-panel,
+.robot-camera-panel,
+.output-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.connection-drawer,
+.settings-drawer,
+.recon-gallery-drawer {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.connection-panel,
+.settings-panel,
+.runtime-panel {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.command-zone {
+  min-height: 0;
+  padding: 18px 22px 18px 6px;
+  border-right: 1px solid var(--line);
+  display: grid;
+  grid-template-rows: auto auto minmax(210px, 1fr) auto minmax(150px, 0.68fr);
+  gap: clamp(10px, 1vh, 16px);
+}
+
+.robot-column {
+  display: grid;
+  grid-template-rows: auto minmax(118px, auto) minmax(116px, auto) minmax(250px, 1fr) minmax(180px, 0.72fr);
+  gap: clamp(10px, 1vh, 16px);
+  min-height: 0;
+}
+
+.robot-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 42px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.robot-tab-shell {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  border-right: 1px solid var(--line);
+}
+
+.robot-tab-shell .robot-tab {
+  border-right: 0;
+}
+
+.robot-tab-shell .robot-tab span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.robot-tab {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 10px 8px;
+  font-size: 0.86rem;
+  letter-spacing: 0;
+  box-shadow: none;
+}
+
+.robot-tab:last-child {
+  border-right: 0;
+}
+
+.robot-tab.is-active {
+  color: var(--ink);
+  background: transparent;
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+
+.robot-name-edit-button,
+.robot-name-edit-form button {
+  width: 34px;
+  min-width: 34px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  box-shadow: none;
+  font-size: 1rem;
+}
+
+.robot-name-edit-button:hover:not(:disabled),
+.robot-name-edit-form button:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(255, 123, 86, 0.08);
+}
+
+.robot-name-edit-form {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  background: var(--panel);
+}
+
+.robot-name-edit-form[hidden] {
+  display: none;
+}
+
+.robot-name-edit-form input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 700;
+  text-align: center;
+}
+
+.robot-name-edit-form input:focus {
+  outline: 2px solid rgba(255, 123, 86, 0.35);
+  outline-offset: -2px;
+}
+
+.robot-state-panel {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.manual-control-panel {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  gap: 9px;
+}
+
+.robot-map-panel {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 238px;
+}
+
+.robot-camera-panel {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 238px;
+}
+
+.output-panel {
+  min-height: 116px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.output-scroll {
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
+}
+
+.settings-toggle {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  width: auto;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 123, 86, 0.24);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fffaf4;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.connection-toggle {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  width: auto;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: #050505;
+  color: #f7f1e8;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.app-action-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.router-icon {
+  position: relative;
+  left: auto;
+  top: auto;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 18px;
+  transform: none;
+}
+
+.router-icon::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  height: 12px;
+  border-radius: 4px;
+  background: #f7f1e8;
+  box-shadow: inset 0 -3px 0 rgba(54, 48, 42, 0.18);
+}
+
+.router-icon::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(247, 241, 232, 0.72);
+}
+
+.router-antenna {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 11px;
+  border-radius: 99px;
+  background: #f7f1e8;
+  transform-origin: bottom center;
+}
+
+.router-antenna-left {
+  left: 4px;
+  transform: rotate(-28deg);
+}
+
+.router-antenna-right {
+  right: 4px;
+  transform: rotate(28deg);
+}
+
+.router-led {
+  position: absolute;
+  z-index: 1;
+  bottom: 6px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #72d66b;
+}
