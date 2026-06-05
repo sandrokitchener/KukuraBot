@@ -323,6 +323,53 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(snapshot["clientAvailable"])
         self.assertFalse(snapshot["serverAvailable"])
 
+    def test_nav2_client_retries_docker_backend_after_container_boots(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        client.action_name = "navigate_to_pose"
+        client.wait_timeout = 2.0
+        client.goal_response_timeout = 3.0
+        client.host_import_error = "No module named 'rclpy'"
+        client.import_error = "No module named 'rclpy'; docker:No such container: robodoge-lidar-bridge"
+        client.docker_import_error = "No such container: robodoge-lidar-bridge"
+        client.server_error = None
+        client.client_available = False
+        client.server_available = False
+        client._last_status_check = 0.0
+        client.backend = "host-rclpy"
+        client.available = False
+        client.docker_container = "robodoge-lidar-bridge"
+        calls = []
+
+        def fake_run_docker_python(script, *, timeout):
+            calls.append({"script": script, "timeout": timeout})
+            return dogzilla_lib_bridge.subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="ok\n",
+                stderr="",
+            )
+
+        def fake_run_docker_shell(command, *, timeout):
+            return dogzilla_lib_bridge.subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="/navigate_to_pose\n",
+                stderr="",
+            )
+
+        client._run_docker_python = fake_run_docker_python
+        client._run_docker_shell = fake_run_docker_shell
+
+        snapshot = client.snapshot()
+
+        self.assertTrue(snapshot["available"])
+        self.assertTrue(snapshot["clientAvailable"])
+        self.assertTrue(snapshot["serverAvailable"])
+        self.assertEqual(snapshot["backend"], "docker-rclpy")
+        self.assertIsNone(snapshot["dockerImportError"])
+        self.assertIsNone(snapshot["importError"])
+        self.assertEqual(calls[0]["timeout"], 6)
+
     def test_nav2_client_sends_goal_through_docker_backend(self):
         client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
         client.action_name = "navigate_to_pose"

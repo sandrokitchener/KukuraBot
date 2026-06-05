@@ -1624,16 +1624,6 @@ select {
   background: #fee9e4;
 }
 
-.robot-map::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: url("/assets/floorplan.png") center / cover no-repeat;
-  filter: sepia(0.25) saturate(0.65) contrast(0.95);
-  opacity: 0.38;
-}
-
 .robot-map::after {
   content: "";
   position: absolute;
@@ -1681,6 +1671,68 @@ select {
   inset: 0;
   z-index: 3;
   pointer-events: none;
+}
+
+.robot-map-waypoints {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.robot-map-waypoint {
+  --waypoint-heading: 0rad;
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #fffaf4;
+  border-radius: 50%;
+  background: #007b84;
+  box-shadow: 0 0 0 3px rgba(0, 123, 132, 0.18);
+  opacity: 0.92;
+  transform: translate(-50%, -50%) rotate(var(--waypoint-heading));
+}
+
+.robot-map-waypoint::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-bottom: 6px solid #007b84;
+  transform: translateX(-50%);
+}
+
+.robot-map-waypoint[data-verified='false'] {
+  background: #7f7568;
+  box-shadow: 0 0 0 3px rgba(127, 117, 104, 0.16);
+  opacity: 0.45;
+}
+
+.robot-map-waypoint[data-verified='false']::after {
+  border-bottom-color: #7f7568;
+}
+
+.robot-map-waypoint-label {
+  position: absolute;
+  left: 50%;
+  top: 17px;
+  max-width: 96px;
+  padding: 2px 5px;
+  border: 1px solid rgba(48, 43, 37, 0.18);
+  border-radius: 4px;
+  background: rgba(255, 250, 244, 0.88);
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: translateX(-50%) rotate(calc(-1 * var(--waypoint-heading)));
 }
 
 .robot-map-track-dot {

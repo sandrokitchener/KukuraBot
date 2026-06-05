@@ -958,6 +958,10 @@ class Nav2NavigateClient:
             return
 
         if not self.client_available or self._action_client is None:
+            if self.host_import_error and DEFAULT_NAV2_DOCKER_ENABLED:
+                self._try_enable_docker_backend()
+                if self.backend == "docker-rclpy":
+                    return
             self.server_available = False
             self.available = False
             return

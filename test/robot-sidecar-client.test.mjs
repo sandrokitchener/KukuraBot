@@ -235,6 +235,92 @@ test('sendRobotCommand allows direct waypoint goto when map-pose navigation fall
   )
 })
 
+test('sendRobotCommand gives waypoint movement a long response timeout', async () => {
+  const requests = []
+  const originalTimeout = AbortSignal.timeout
+
+  AbortSignal.timeout = (timeoutMs) => {
+    requests.push(timeoutMs)
+    return originalTimeout(timeoutMs)
+  }
+
+  try {
+    await withMockedFetch(
+      async (url) => {
+        if (String(url).endsWith('/healthz')) {
+          return jsonResponse(nav2HealthBody({
+            nav2: {
+              available: false,
+            },
+            runtime: {
+              navigation: {
+                available: true,
+                primary: 'map-pose-closed-loop',
+              },
+            },
+          }))
+        }
+
+        return jsonResponse({ accepted: true }, { status: 202 })
+      },
+      async () => {
+        await sendRobotCommand(
+          waypointGotoPreview(),
+          dogzillaDirectRuntime(),
+          dogzillaTransportConfig({ timeoutMs: 12000 }),
+        )
+      },
+    )
+  } finally {
+    AbortSignal.timeout = originalTimeout
+  }
+
+  assert.deepEqual(requests, [12000, 12000, 180000])
+})
+
+test('sendRobotCommand uses waypoint timeoutSec when provided', async () => {
+  const requests = []
+  const originalTimeout = AbortSignal.timeout
+
+  AbortSignal.timeout = (timeoutMs) => {
+    requests.push(timeoutMs)
+    return originalTimeout(timeoutMs)
+  }
+
+  try {
+    await withMockedFetch(
+      async (url) => {
+        if (String(url).endsWith('/healthz')) {
+          return jsonResponse(nav2HealthBody({
+            nav2: {
+              available: false,
+            },
+            runtime: {
+              navigation: {
+                available: true,
+                primary: 'map-pose-closed-loop',
+              },
+            },
+          }))
+        }
+
+        return jsonResponse({ accepted: true }, { status: 202 })
+      },
+      async () => {
+        await sendRobotCommand(
+          waypointGotoPreview({ params: { timeoutSec: 45 } }),
+          dogzillaDirectRuntime(),
+          dogzillaTransportConfig({ timeoutMs: 12000 }),
+        )
+      },
+    )
+  } finally {
+    AbortSignal.timeout = originalTimeout
+  }
+
+  assert.deepEqual(requests, [12000, 12000, 45000])
+})
+
 test('sendRobotCommand blocks new command when preempt stop fails', async () => {
   const requests = []
 

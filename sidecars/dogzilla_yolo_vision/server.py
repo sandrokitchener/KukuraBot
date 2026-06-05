@@ -326,6 +326,7 @@ def open_camera_control_session(args: argparse.Namespace) -> socket.socket | Non
 
 
 def read_camera_frames(source: str, timeout: float, read_retries: int = 30, drain_frames: int = 4, stale_frame_limit: int = 36):
+    source = resolve_camera_source(source)
     if is_http_camera(source):
         yield from read_mjpeg_frames(source, timeout)
         return
@@ -404,18 +405,32 @@ def is_http_camera(source: str) -> bool:
 
 
 def camera_source_exists(source: str) -> bool | None:
+    source = resolve_camera_source(source)
     if not source or source.isdigit() or is_http_camera(source):
         return None
     return Path(source).exists()
 
 
 def resolve_camera_source_path(source: str) -> str:
+    source = resolve_camera_source(source)
     if not source or source.isdigit() or is_http_camera(source):
         return ""
     try:
         return str(Path(source).resolve(strict=True))
     except OSError:
         return ""
+
+
+def resolve_camera_source(source: str) -> str:
+    if source != "auto":
+        return source
+
+    for pattern in ("/dev/v4l/by-id/*video-index0", "/dev/video0", "/dev/video1", "/dev/video2", "/dev/video3"):
+        for candidate in sorted(Path("/").glob(pattern.lstrip("/"))):
+            if candidate.exists():
+                return str(candidate)
+
+    return "/dev/video0"
 
 
 def letterbox(frame: np.ndarray, size: int) -> tuple[np.ndarray, float, tuple[float, float]]:

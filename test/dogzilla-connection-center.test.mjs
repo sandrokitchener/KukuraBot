@@ -226,10 +226,48 @@ test('ensureDogzillaRobotIdentity creates missing Pi identity files and saves ru
   assert.equal(identity.created, true)
   assert.match(remoteCommand, /robot_id\.txt/)
   assert.match(remoteCommand, /robot_name\.txt/)
+  assert.match(remoteCommand, /umask 077; mkdir -p/)
   assert.deepEqual(savedIdentity, {
     robotId: '11111111-1111-4111-8111-111111111111',
     robotName: 'Questing Beast',
   })
+})
+
+test('buildDogzillaSshCommandPlan passes shell fragments as one PowerShell argument', async () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+  })
+  let capturedArgs = []
+
+  await ensureDogzillaRobotIdentity({
+    config,
+    generatedRobotId: '11111111-1111-4111-8111-111111111111',
+    robotName: 'Questing Beast',
+    execFilePromiseImpl: async (_command, args) => {
+      capturedArgs = args
+      return {
+        exitCode: 0,
+        stdout:
+          'robot_id=11111111-1111-4111-8111-111111111111\n' +
+          'robot_name=Questing Beast\n' +
+          'robot_id_created=0\n' +
+          'robot_name_created=0',
+        stderr: '',
+      }
+    },
+    saveRobotRuntimeIdentityImpl: async () => {},
+  })
+
+  const commandIndex = capturedArgs.indexOf('-Command')
+  assert.notEqual(commandIndex, -1)
+  assert.equal(typeof capturedArgs[commandIndex + 1], 'string')
+  assert.match(capturedArgs[commandIndex + 1], /robot_id_created=0; if \[ ! -s/)
+  assert.equal(capturedArgs.filter((arg) => arg === ';').length, 0)
 })
 
 test('saveDogzillaRobotName writes robot_name.txt and preserves robot_id.txt as source of truth', async () => {

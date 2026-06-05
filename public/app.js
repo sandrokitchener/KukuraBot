@@ -66,6 +66,7 @@ const robotBatteryMeter = document.querySelector('#robot-battery-meter')
 const robotBatteryValue = document.querySelector('#robot-battery-value')
 const robotTelemetryMeta = document.querySelector('#robot-telemetry-meta')
 const robotMapTrack = document.querySelector('#robot-map-track')
+const robotMapWaypoints = document.querySelector('#robot-map-waypoints')
 const robotMapDot = document.querySelector('#robot-map-dot')
 const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
@@ -172,6 +173,8 @@ const DEFAULT_ROBOT_RUNTIME = {
   statePollMs: 125,
   stateSnapshotPath: '/api/robot/state',
   stateStreamPath: '/api/robot/state/stream',
+  waypointSet: 'home',
+  waypoints: [],
   selectionLocked: false,
   source: 'runtime',
 }
@@ -1402,6 +1405,7 @@ async function refreshRobotState() {
     renderBatteryMeter(Number.NaN)
     robotTelemetryMeta.textContent = ''
     robotMapDot.style.opacity = '0'
+    renderRobotMapWaypoints()
     clearRobotPoseTrack()
     setRobotMapMeta(formatError(error))
   }
@@ -2021,6 +2025,7 @@ function applyPayload(payload) {
   applyModelConfig(payload)
   applySpeechConfig()
   applyRobotRuntimeConfig()
+  renderRobotMapWaypoints()
   applyDogzillaCameraConfig()
   startDogzillaCameraViewer()
 }
@@ -2254,6 +2259,7 @@ function renderRobotStateSnapshot(snapshot) {
   robotStateSeq.textContent = String(robot.seq)
   renderRobotTelemetry(robot)
 
+  renderRobotMapWaypoints(robot)
   renderRobotPoseTrack(snapshot?.poseTrack || [], robot)
   renderRobotMapDot(robot)
 }
@@ -2268,6 +2274,7 @@ function renderRobotStateInactive() {
   renderBatteryMeter(Number.NaN)
   robotTelemetryMeta.textContent = ''
   robotMapDot.style.opacity = '0'
+  renderRobotMapWaypoints()
   clearRobotPoseTrack()
   setRobotPoseReadout(null)
   setRobotMapMeta('Real robot target required for live map.')
@@ -2306,7 +2313,7 @@ function renderRobotMapDot(robot) {
     return
   }
 
-  const position = poseToMapPosition(robot.pose)
+  const position = poseToMapPosition(robot.pose, getRobotMapRangeMeters(robot))
   if (!position) {
     robotMapDot.style.opacity = '0'
     clearRobotPoseTrack()
@@ -2324,6 +2331,68 @@ function renderRobotMapDot(robot) {
     `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
     `Updated ${formatEventTimestamp(robot.receivedAt)}.`,
   )
+}
+
+function renderRobotMapWaypoints(robot = null) {
+  if (!robotMapWaypoints) {
+    return
+  }
+
+  const rangeMeters = getRobotMapRangeMeters(robot)
+  const waypoints = getRenderableRobotMapWaypoints()
+  const markers = []
+
+  waypoints.forEach((waypoint) => {
+    const position = poseToMapPosition(waypoint, rangeMeters)
+    if (!position) {
+      return
+    }
+
+    const marker = document.createElement('span')
+    marker.className = 'robot-map-waypoint'
+    marker.dataset.waypointId = waypoint.id
+    marker.dataset.verified = waypoint.verified ? 'true' : 'false'
+    marker.style.left = `${position.xPercent}%`
+    marker.style.top = `${position.yPercent}%`
+    marker.style.setProperty('--waypoint-heading', `${waypoint.yaw || 0}rad`)
+    marker.title = `${waypoint.label}: x ${waypoint.x.toFixed(2)}m, y ${waypoint.y.toFixed(2)}m`
+
+    const label = document.createElement('span')
+    label.className = 'robot-map-waypoint-label'
+    label.textContent = waypoint.label
+    marker.append(label)
+    markers.push(marker)
+  })
+
+  robotMapWaypoints.replaceChildren(...markers)
+}
+
+function getRenderableRobotMapWaypoints() {
+  const waypoints = Array.isArray(runtimeConfig.robotRuntime?.waypoints)
+    ? runtimeConfig.robotRuntime.waypoints
+    : []
+
+  return waypoints
+    .map(normalizeRobotMapWaypoint)
+    .filter((waypoint) => waypoint && waypoint.frame === 'map' && waypoint.verified)
+}
+
+function normalizeRobotMapWaypoint(waypoint) {
+  const x = toFiniteNumber(waypoint?.x)
+  const y = toFiniteNumber(waypoint?.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null
+  }
+
+  return {
+    id: String(waypoint.id || '').trim(),
+    label: String(waypoint.label || waypoint.id || 'Waypoint').trim(),
+    frame: String(waypoint.frame || 'map').trim(),
+    x,
+    y,
+    yaw: toFiniteNumber(waypoint.yaw ?? waypoint.theta) || 0,
+    verified: waypoint.verified === true,
+  }
 }
 
 function formatPoseUnavailableMessage(robot) {
@@ -2358,7 +2427,7 @@ function renderRobotPoseTrack(track, robot) {
     if (pose?.frame !== 'map') {
       return
     }
-    const position = poseToMapPosition(pose)
+    const position = poseToMapPosition(pose, getRobotMapRangeMeters(robot))
     if (!position) {
       return
     }
@@ -2379,19 +2448,39 @@ function clearRobotPoseTrack() {
   robotMapTrack?.replaceChildren()
 }
 
-function poseToMapPosition(pose) {
+function poseToMapPosition(pose, rangeMeters = getRobotMapRangeMeters()) {
   const x = toFiniteNumber(pose?.x)
   const y = toFiniteNumber(pose?.y)
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     return null
   }
 
-  const xRatio = clamp(x / ROBOT_MAP_RANGE_METERS, -1, 1)
-  const yRatio = clamp(y / ROBOT_MAP_RANGE_METERS, -1, 1)
+  const mapRange = Math.max(ROBOT_MAP_RANGE_METERS, toFiniteNumber(rangeMeters) || ROBOT_MAP_RANGE_METERS)
+  const xRatio = clamp(x / mapRange, -1, 1)
+  const yRatio = clamp(y / mapRange, -1, 1)
   return {
     xPercent: 50 + (xRatio * 50),
     yPercent: 50 - (yRatio * 50),
   }
+}
+
+function getRobotMapRangeMeters(robot = null) {
+  const extents = [ROBOT_MAP_RANGE_METERS]
+  const robotPose = robot?.pose
+  const robotX = toFiniteNumber(robotPose?.x)
+  const robotY = toFiniteNumber(robotPose?.y)
+  if (Number.isFinite(robotX)) {
+    extents.push(Math.abs(robotX))
+  }
+  if (Number.isFinite(robotY)) {
+    extents.push(Math.abs(robotY))
+  }
+
+  getRenderableRobotMapWaypoints().forEach((waypoint) => {
+    extents.push(Math.abs(waypoint.x), Math.abs(waypoint.y))
+  })
+
+  return Math.ceil((Math.max(...extents) + 0.5) * 2) / 2
 }
 
 function setRobotPoseReadout(pose, fallbackFrame = '') {
@@ -3589,12 +3678,20 @@ async function playRobotConfirmCue() {
     return null
   }
 
+  if (shouldSuppressLocalRobotAudio()) {
+    return null
+  }
+
   return commandCuePlayer.play()
 }
 
 async function playRobotThinkingCue() {
   if (shouldUseDogzillaPiAudio()) {
     await playDogzillaPiCue('thinking-start')
+    return null
+  }
+
+  if (shouldSuppressLocalRobotAudio()) {
     return null
   }
 
@@ -3632,6 +3729,10 @@ function stopThinkingCue() {
 
 function shouldUseDogzillaPiAudio() {
   return runtimeConfig.dogzilla?.audio?.enabled === true
+}
+
+function shouldSuppressLocalRobotAudio() {
+  return isAndroidAppShell()
 }
 
 async function playDogzillaPiCue(cue) {

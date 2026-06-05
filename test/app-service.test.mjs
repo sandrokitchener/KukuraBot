@@ -159,6 +159,8 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.ok(payload.speech.activationPhrases.length > 0)
   assert.equal(payload.robotRuntime.robotName, 'Questing Beast')
   assert.equal(payload.robotRuntime.robot_name, 'Questing Beast')
+  assert.equal(payload.robotRuntime.waypointSet, 'home')
+  assert.ok(payload.robotRuntime.waypoints.some((waypoint) => waypoint.id === 'kitchen' && waypoint.frame === 'map' && waypoint.verified === true))
   assert.equal(payload.app.appName, 'Questing Beast')
 })
 

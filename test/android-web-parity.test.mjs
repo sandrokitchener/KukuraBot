@@ -14,6 +14,7 @@ test('Android shell and web app share the connection center surface', async () =
   const commandCueHandler = appJs.match(/function playCommandCueIfNeeded[\s\S]+?\n}/)?.[0] || ''
   const piConfirmCue = appJs.match(/async function playRobotConfirmCue[\s\S]+?\n}/)?.[0] || ''
   const piThinkingCue = appJs.match(/async function playRobotThinkingCue[\s\S]+?\n}/)?.[0] || ''
+  const suppressLocalAudio = appJs.match(/function shouldSuppressLocalRobotAudio[\s\S]+?\n}/)?.[0] || ''
   const lidarFailureFormatter = appJs.match(/function formatLidarFailureSummary[\s\S]+?function setRobotMapMeta/)?.[0] || ''
   const assistantMetaFormatter = appJs.match(/function buildAssistantMeta[\s\S]+?function buildCompletionStatus/)?.[0] || ''
   const completionStatusFormatter = appJs.match(/function buildCompletionStatus[\s\S]+?function formatParsedOutput/)?.[0] || ''
@@ -62,6 +63,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(html, /id="robot-camera-snapshot-note"/)
   assert.match(html, /id="recon-snapshot-list"/)
   assert.match(html, /id="robot-map-track"/)
+  assert.match(html, /id="robot-map-waypoints"/)
   assert.doesNotMatch(html, /><>/)
   assert.doesNotMatch(html, />&lt;&gt;</)
   assert.doesNotMatch(html, />Scout</)
@@ -105,6 +107,10 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(serverJs, /recordDogzillaMapPose/)
   assert.match(serverJs, /telemetry\.waypointSafe !== true/)
   assert.match(css, /\.robot-map-track-dot/)
+  assert.match(css, /\.robot-map-waypoint/)
+  assert.doesNotMatch(css, /floorplan\.png/)
+  assert.match(appJs, /renderRobotMapWaypoints/)
+  assert.match(appJs, /getRobotMapRangeMeters/)
   assert.match(appJs, /document\.addEventListener\('touchmove', handleMobileTouchMove, \{ passive: false \}\)/)
   assert.ok(swipeBlocker)
   assert.match(swipeBlocker, /\.recon-gallery-drawer/)
@@ -113,7 +119,12 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(commandCueHandler, /playRobotConfirmCue/)
   assert.doesNotMatch(commandCueHandler, /commandCuePlayer\.play/)
   assert.match(piConfirmCue, /playDogzillaPiCue\('confirm'\)/)
+  assert.match(piConfirmCue, /shouldSuppressLocalRobotAudio\(\)/)
+  assert.match(piConfirmCue, /return commandCuePlayer\.play\(\)/)
   assert.match(piThinkingCue, /playDogzillaPiCue\('thinking-start'\)/)
+  assert.match(piThinkingCue, /shouldSuppressLocalRobotAudio\(\)/)
+  assert.match(piThinkingCue, /return thinkingCuePlayer\.play\(\)/)
+  assert.match(suppressLocalAudio, /isAndroidAppShell\(\)/)
   assert.match(lidarFailureFormatter, /serialDiagnostics/)
   assert.match(lidarFailureFormatter, /realPath/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/connection'/)
