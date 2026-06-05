@@ -101,6 +101,8 @@ const dogzillaRobotId = document.querySelector('#dogzilla-robot-id')
 const dogzillaRobotName = document.querySelector('#dogzilla-robot-name')
 const dogzillaDirectUrl = document.querySelector('#dogzilla-direct-url')
 const dogzillaRos2Url = document.querySelector('#dogzilla-ros2-url')
+const dogzillaAudioVolumeInput = document.querySelector('#dogzilla-audio-volume-input')
+const dogzillaAudioVolumeValue = document.querySelector('#dogzilla-audio-volume-value')
 const connectionOutput = document.querySelector('#connection-output')
 const connectionActionButtons = document.querySelectorAll('[data-connection-action]')
 const runDogzillaPreflightButton = document.querySelector('#run-dogzilla-preflight-button')
@@ -184,6 +186,8 @@ const MANUAL_CONTROL_REPEAT_MS = 700
 const MANUAL_CONTROL_ERROR_RETRY_MS = 1200
 const MANUAL_CONTROL_CHANGE_EPSILON = 0.035
 const DOGZILLA_CAMERA_LOAD_TIMEOUT_MS = 8000
+const DOGZILLA_AUDIO_VOLUME_KEY = 'robodoge.dogzillaAudioVolume'
+const DEFAULT_DOGZILLA_AUDIO_VOLUME = 0.75
 
 let thinkingState = null
 let robotFeedbackTimerId = null
@@ -294,6 +298,7 @@ robotNameInput.addEventListener('keydown', handleRobotNameInputKeydown)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
+dogzillaAudioVolumeInput?.addEventListener('input', handleDogzillaAudioVolumeInput)
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
 reconGalleryToggle.addEventListener('click', handleReconGalleryToggle)
 reconGalleryClose.addEventListener('click', closeReconGallery)
@@ -441,6 +446,7 @@ function findTouchById(touchList, id) {
 
 async function boot() {
   applyBackendControls()
+  applyDogzillaAudioVolumeControl()
 
   try {
     const payload = await fetchConfig()
@@ -1985,6 +1991,41 @@ function formatServiceName(id) {
     default:
       return id
   }
+}
+
+function handleDogzillaAudioVolumeInput() {
+  const volume = getDogzillaAudioCueVolume()
+  try {
+    window.localStorage?.setItem(DOGZILLA_AUDIO_VOLUME_KEY, String(volume))
+  } catch {}
+  applyDogzillaAudioVolumeControl(volume)
+}
+
+function applyDogzillaAudioVolumeControl(volume = loadDogzillaAudioCueVolume()) {
+  const clamped = clamp(Number(volume), 0, 1)
+  if (dogzillaAudioVolumeInput) {
+    dogzillaAudioVolumeInput.value = String(Math.round(clamped * 100))
+  }
+  if (dogzillaAudioVolumeValue) {
+    dogzillaAudioVolumeValue.textContent = `${Math.round(clamped * 100)}%`
+  }
+}
+
+function getDogzillaAudioCueVolume() {
+  if (dogzillaAudioVolumeInput) {
+    return clamp(Number(dogzillaAudioVolumeInput.value) / 100, 0, 1)
+  }
+  return loadDogzillaAudioCueVolume()
+}
+
+function loadDogzillaAudioCueVolume() {
+  try {
+    const saved = Number(window.localStorage?.getItem(DOGZILLA_AUDIO_VOLUME_KEY))
+    if (Number.isFinite(saved)) {
+      return clamp(saved, 0, 1)
+    }
+  } catch {}
+  return DEFAULT_DOGZILLA_AUDIO_VOLUME
 }
 
 function applyBackendControls() {
@@ -3746,7 +3787,10 @@ async function playDogzillaPiCue(cue) {
     headers: {
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ cue }),
+    body: JSON.stringify({
+      cue,
+      volume: getDogzillaAudioCueVolume(),
+    }),
   })
   const payload = await response.json()
   if (!response.ok || payload.ok !== true) {

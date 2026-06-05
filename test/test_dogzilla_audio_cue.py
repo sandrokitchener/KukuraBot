@@ -96,6 +96,27 @@ class DogzillaAudioCueTests(unittest.TestCase):
         self.assertTrue(thinking_process.terminated)
         self.assertIn("robot-bark-normal-103.wav", str(popen.call_args.args[0][-1]))
 
+    def test_bark_cue_uses_scaled_temp_file_when_volume_is_lowered(self):
+        state = server.AudioState(Path("public/sounds"), "aplay", "")
+        bark_process = FakeProcess()
+        scaled_file = Path("public/sounds/robodoge-audio-scaled.wav")
+
+        with (
+            patch.object(server, "resolve_player", return_value="/usr/bin/aplay"),
+            patch.object(Path, "exists", return_value=True),
+            patch.object(server.random, "choice", return_value="robot-bark-normal-103.wav"),
+            patch.object(server, "prepare_playback_file", return_value=scaled_file) as prepare,
+            patch.object(server.subprocess, "Popen", return_value=bark_process) as popen,
+            patch.object(server.time, "sleep", return_value=None),
+        ):
+            result = server.play_cue(state, "bark", 0.4)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["volume"], 0.4)
+        self.assertEqual(state.temp_files[bark_process.pid], scaled_file)
+        self.assertEqual(prepare.call_args.args[2], 0.4)
+        self.assertIn("robodoge-audio-scaled.wav", str(popen.call_args.args[0][-1]))
+
 
 if __name__ == "__main__":
     unittest.main()

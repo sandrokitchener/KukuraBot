@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import audioop
 import json
 import os
 import random
 import shutil
 import subprocess
+import tempfile
 import time
+import wave
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -43,6 +46,7 @@ class AudioState:
         self.last_error = ""
         self.play_count = 0
         self.active_processes: list[subprocess.Popen] = []
+        self.temp_files: dict[int, Path] = {}
 
 
 class AudioHandler(BaseHTTPRequestHandler):
@@ -66,7 +70,7 @@ class AudioHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Missing cue"})
                 return
 
-            result = play_cue(self.server.state, cue)
+            result = play_cue(self.server.state, cue, body.get("volume"))
             status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY
             self.send_json(status, result)
         except Exception as error:
@@ -104,13 +108,14 @@ def health_payload(state: AudioState) -> dict[str, Any]:
     }
 
 
-def play_cue(state: AudioState, cue: str) -> dict[str, Any]:
+def play_cue(state: AudioState, cue: str, volume: Any = None) -> dict[str, Any]:
     cleanup_processes(state)
+    volume_value = normalize_volume(volume)
     if cue == "thinking-stop":
         stop_active(state)
         state.last_cue = cue
         state.last_error = ""
-        return {"ok": True, "cue": cue, "stopped": True}
+        return {"ok": True, "cue": cue, "stopped": True, "volume": volume_value}
 
     files = DEFAULT_CUES.get(cue)
     if not files:
@@ -128,7 +133,8 @@ def play_cue(state: AudioState, cue: str) -> dict[str, Any]:
         stop_active(state)
 
     try:
-        command = build_play_command(player, sound_file, state.aplay_device)
+        playback_file = prepare_playback_file(state, sound_file, volume_value)
+        command = build_play_command(player, playback_file, state.aplay_device)
         process = subprocess.Popen(
             command,
             stdout=subprocess.DEVNULL,
@@ -145,10 +151,12 @@ def play_cue(state: AudioState, cue: str) -> dict[str, Any]:
             return {"ok": False, "cue": cue, "error": state.last_error}
 
         state.active_processes.append(process)
+        if playback_file != sound_file:
+            state.temp_files[process.pid] = playback_file
         state.last_cue = cue
         state.last_error = ""
         state.play_count += 1
-        return {"ok": True, "cue": cue, "file": str(sound_file), "pid": process.pid}
+        return {"ok": True, "cue": cue, "file": str(sound_file), "pid": process.pid, "volume": volume_value}
     except Exception as error:
         state.last_error = str(error)
         return {"ok": False, "cue": cue, "error": str(error)}
@@ -165,6 +173,43 @@ def build_play_command(player: str, sound_file: Path, aplay_device: str) -> list
     return command
 
 
+def prepare_playback_file(state: AudioState, sound_file: Path, volume: float) -> Path:
+    if volume >= 0.995:
+        return sound_file
+
+    temp_handle = tempfile.NamedTemporaryFile(
+        prefix="robodoge-audio-",
+        suffix=".wav",
+        dir=str(state.sounds_dir),
+        delete=False,
+    )
+    temp_path = Path(temp_handle.name)
+    temp_handle.close()
+
+    try:
+        with wave.open(str(sound_file), "rb") as source:
+            params = source.getparams()
+            frames = source.readframes(source.getnframes())
+        scaled = audioop.mul(frames, params.sampwidth, volume)
+        with wave.open(str(temp_path), "wb") as target:
+            target.setparams(params)
+            target.writeframes(scaled)
+        return temp_path
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def normalize_volume(value: Any) -> float:
+    try:
+        volume = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if volume > 1.0 and volume <= 100.0:
+        volume = volume / 100.0
+    return max(0.0, min(1.0, volume))
+
+
 def stop_active(state: AudioState) -> None:
     for process in list(state.active_processes):
         if process.poll() is None:
@@ -177,7 +222,15 @@ def stop_active(state: AudioState) -> None:
 
 
 def cleanup_processes(state: AudioState) -> None:
-    state.active_processes = [process for process in state.active_processes if process.poll() is None]
+    live_processes = []
+    for process in state.active_processes:
+        if process.poll() is None:
+            live_processes.append(process)
+            continue
+        temp_file = state.temp_files.pop(process.pid, None)
+        if temp_file:
+            temp_file.unlink(missing_ok=True)
+    state.active_processes = live_processes
 
 
 def resolve_player(player: str) -> str:

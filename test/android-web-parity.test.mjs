@@ -14,6 +14,7 @@ test('Android shell and web app share the connection center surface', async () =
   const commandCueHandler = appJs.match(/function playCommandCueIfNeeded[\s\S]+?\n}/)?.[0] || ''
   const piConfirmCue = appJs.match(/async function playRobotConfirmCue[\s\S]+?\n}/)?.[0] || ''
   const piThinkingCue = appJs.match(/async function playRobotThinkingCue[\s\S]+?\n}/)?.[0] || ''
+  const dogzillaPiCue = appJs.match(/async function playDogzillaPiCue[\s\S]+?function setStatus/)?.[0] || ''
   const suppressLocalAudio = appJs.match(/function shouldSuppressLocalRobotAudio[\s\S]+?\n}/)?.[0] || ''
   const lidarFailureFormatter = appJs.match(/function formatLidarFailureSummary[\s\S]+?function setRobotMapMeta/)?.[0] || ''
   const assistantMetaFormatter = appJs.match(/function buildAssistantMeta[\s\S]+?function buildCompletionStatus/)?.[0] || ''
@@ -46,6 +47,8 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(html, /class="router-icon"/)
   assert.match(html, /id="connection-drawer"/)
   assert.match(html, /id="dogzilla-backend-url-input"/)
+  assert.match(html, /id="dogzilla-audio-volume-input"/)
+  assert.match(html, /id="dogzilla-audio-volume-value"/)
   assert.doesNotMatch(html, /id="backend-url-input"/)
   assert.doesNotMatch(html, /id="save-backend-button"/)
   assert.match(html, /data-connection-action="sync-bridges"/)
@@ -125,6 +128,8 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(piThinkingCue, /shouldSuppressLocalRobotAudio\(\)/)
   assert.match(piThinkingCue, /return thinkingCuePlayer\.play\(\)/)
   assert.match(suppressLocalAudio, /isAndroidAppShell\(\)/)
+  assert.match(dogzillaPiCue, /volume: getDogzillaAudioCueVolume\(\)/)
+  assert.match(appJs, /DOGZILLA_AUDIO_VOLUME_KEY/)
   assert.match(lidarFailureFormatter, /serialDiagnostics/)
   assert.match(lidarFailureFormatter, /realPath/)
   assert.match(appJs, /apiFetch\('\/api\/dogzilla\/connection'/)
@@ -133,6 +138,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(css, /html\.android-app \.connection-toggle/)
   assert.match(css, /html\.android-app \.connection-drawer/)
   assert.match(css, /\.camera-rail-icon/)
+  assert.match(css, /\.dogzilla-audio-volume/)
   assert.match(css, /\.recon-gallery-drawer/)
   assert.match(css, /\.recon-snapshot-list/)
   assert.match(css, /\.recon-snapshot-note-editor/)

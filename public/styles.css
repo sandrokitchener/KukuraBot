@@ -860,6 +860,30 @@ body {
   padding-inline: 10px;
 }
 
+.dogzilla-audio-volume {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(120px, 1fr) 48px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0 2px;
+}
+
+.dogzilla-audio-volume label {
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.dogzilla-audio-volume input {
+  width: 100%;
+}
+
+.dogzilla-audio-volume strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+  text-align: right;
+}
+
 .advanced-service-tools {
   border-top: 1px solid var(--line);
   padding-top: 10px;
@@ -2050,6 +2074,14 @@ select {
   .bridge-action-grid,
   .preflight-summary {
     grid-template-columns: 1fr;
+  }
+
+  .dogzilla-audio-volume {
+    grid-template-columns: 1fr 46px;
+  }
+
+  .dogzilla-audio-volume label {
+    grid-column: 1 / -1;
   }
 
   .preflight-check {

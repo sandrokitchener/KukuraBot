@@ -44,6 +44,39 @@ test('sendDogzillaAudioCue posts cue requests to the configured Pi bridge', asyn
   }
 })
 
+test('sendDogzillaAudioCue forwards normalized cue volume', async () => {
+  let requestBody = null
+  const result = await sendDogzillaAudioCue('bark', {
+    config: {
+      audio: {
+        enabled: true,
+        cueUrl: 'http://10.0.4.32:8895/cue',
+      },
+    },
+    volume: 35,
+    fetchImpl: async (url, options) => {
+      requestBody = JSON.parse(options.body)
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            cue: 'bark',
+            volume: requestBody.volume,
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.status, 'ok')
+  assert.equal(result.cue, 'bark')
+  assert.equal(result.volume, 0.35)
+  assert.deepEqual(requestBody, { cue: 'bark', volume: 0.35 })
+})
+
 test('getDogzillaAudioCueHealth reports disabled config loudly', async () => {
   const result = await getDogzillaAudioCueHealth({
     config: {

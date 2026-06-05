@@ -212,7 +212,7 @@ const server = createServer(async (request, response) => {
 
     if (request.method === 'POST' && requestUrl.pathname === '/api/dogzilla/audio/cue') {
       const body = await readJsonBody(request)
-      const result = await sendDogzillaAudioCue(body?.cue)
+      const result = await sendDogzillaAudioCue(body?.cue, { volume: body?.volume })
       const statusCode = result.ok ? 200 : result.status === 'invalid' ? 400 : 502
       return sendJson(response, statusCode, result)
     }
