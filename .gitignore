@@ -2,6 +2,7 @@
 node_modules/
 models/
 output/
+dist-electron/
 npm-debug.log*
 dogzilla_flash_work_*/
 __pycache__/

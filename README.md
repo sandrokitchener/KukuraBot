@@ -59,7 +59,11 @@ The detailed setup guide is in [docs/setup-guide.md](docs/setup-guide.md). It co
 npm start
 npm test
 npm run tauri:android:build
+npm run desktop
+npm run desktop:build
 ```
+
+`npm run desktop` opens the Electron desktop launcher. The launcher can attach to an already-running backend or start the full `npm start` style service path from `scripts/start-clean.mjs`. `npm run desktop:build` creates the portable Windows executable under `dist-electron/`.
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:3037/healthz

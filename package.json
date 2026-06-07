@@ -1,7 +1,10 @@
 {
   "name": "questing-beast",
+  "version": "0.1.0",
+  "description": "Desktop and Android control console for Questing Beast / DOGZILLA.",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "node --watch server.mjs",
     "dev:bun": "bun --watch server.mjs",
@@ -20,6 +23,8 @@
     "tauri:android:init": "tauri android init --ci",
     "tauri:android:build": "node scripts/build-android-apk.mjs",
     "tauri:android:run": "tauri android run",
+    "desktop": "electron .",
+    "desktop:build": "node scripts/build-electron-desktop.mjs",
     "test": "node --test"
   },
   "dependencies": {
@@ -28,6 +33,42 @@
     "@ricky0123/vad-web": "^0.0.24"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1"
+    "@tauri-apps/cli": "^2.10.1",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.0"
+  },
+  "build": {
+    "appId": "com.robodoge.questingbeast.desktop",
+    "productName": "Questing Beast Desktop",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "public/**/*",
+      "config/**/*",
+      "lib/**/*",
+      "sidecars/**/*",
+      "scripts/**/*",
+      "run.mjs",
+      "server.mjs",
+      "cli.mjs",
+      "package.json"
+    ],
+    "win": {
+      "icon": "src-tauri/icons/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Questing-Beast-Desktop-${version}-${arch}.exe"
+    }
   }
 }

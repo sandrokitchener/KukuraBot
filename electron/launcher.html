@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Questing Beast Desktop</title>
+    <link rel="stylesheet" href="./launcher.css">
+  </head>
+  <body>
+    <main class="launcher-shell">
+      <section class="status-panel" aria-labelledby="launcher-title">
+        <div class="brand-row">
+          <img src="../public/assets/questing-beast-qb-mark.png" alt="" class="brand-mark">
+          <div>
+            <p class="eyebrow">Desktop control launcher</p>
+            <h1 id="launcher-title">Questing Beast</h1>
+          </div>
+        </div>
+
+        <div class="status-grid" aria-live="polite">
+          <div class="status-card">
+            <span class="label">Backend</span>
+            <strong id="backend-state">Checking...</strong>
+            <small id="backend-url">http://127.0.0.1:3037</small>
+          </div>
+          <div class="status-card">
+            <span class="label">Full services</span>
+            <strong id="service-state">Idle</strong>
+            <small id="service-pid">No service pid</small>
+          </div>
+        </div>
+
+        <div class="action-grid">
+          <button id="start-services-button" class="primary-action" type="button">
+            Launch full services
+          </button>
+          <button id="open-app-button" type="button">
+            Open console
+          </button>
+          <button id="probe-button" type="button">
+            Check backend
+          </button>
+          <button id="show-root-button" type="button">
+            Show service root
+          </button>
+          <button id="stop-services-button" class="danger-action" type="button">
+            Stop launched services
+          </button>
+        </div>
+
+        <p class="root-line">
+          Service root:
+          <code id="service-root">Detecting...</code>
+        </p>
+      </section>
+
+      <section class="log-panel" aria-labelledby="log-title">
+        <div class="log-heading">
+          <h2 id="log-title">Service log</h2>
+          <button id="open-external-button" type="button">Open in browser</button>
+        </div>
+        <pre id="service-log" tabindex="0">Launcher ready.</pre>
+      </section>
+    </main>
+
+    <script src="./launcher.js"></script>
+  </body>
+</html>

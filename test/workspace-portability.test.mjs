@@ -11,6 +11,7 @@ const SOURCE_PATHS = [
   'server.mjs',
   'package.json',
   'config',
+  'electron',
   'lib',
   'public',
   'test',
