@@ -45,7 +45,7 @@ test('compileRobotRuntimePreview maps move command to named waypoint goto plan',
   assert.equal(preview.payload.planTopic, '/dogzilla/command_plan')
 })
 
-test('compileRobotRuntimePreview normalizes space-separated waypoint names', () => {
+test('compileRobotRuntimePreview blocks space-separated waypoint names when config says unverified', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
@@ -61,9 +61,54 @@ test('compileRobotRuntimePreview normalizes space-separated waypoint names', () 
     },
   }))
 
-  assert.equal(preview.status, 'ready')
+  assert.equal(preview.status, 'waypoint-blocked')
   assert.equal(preview.resolutions.waypoint.normalizedName, 'front_door')
-  assert.equal(preview.canonicalPlan.params.waypoint, 'front_door')
+  assert.deepEqual(preview.missingRequired, [])
+  assert.equal(preview.canonicalPlan, null)
+  assert.match(preview.warnings.join('\n'), /not verified in robot-waypoints config/)
+})
+
+test('compileRobotRuntimePreview accepts config waypoint even when notes are operator comments', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'living_room',
+      },
+    },
+    waypoints: {
+      living_room: mapWaypoint({
+        notes: ['Dummy pose. Replace with a real mapped pose later.'],
+      }),
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.deepEqual(preview.missingRequired, [])
+  assert.equal(preview.canonicalPlan.params.waypoint, 'living_room')
+})
+
+test('compileRobotRuntimePreview accepts stored pose as source of truth over stale note text', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'kitchen',
+      },
+    },
+    waypoints: {
+      kitchen: mapWaypoint({
+        x: 9.2,
+        y: 6.29,
+        yaw: 2.66,
+        notes: ['Captured map pose: x=5.18, y=0.38, yaw=2.66.'],
+      }),
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.deepEqual(preview.missingRequired, [])
+  assert.equal(preview.canonicalPlan.params.x, 9.2)
 })
 
 test('compileRobotRuntimePreview converts app_map waypoint through saved origin', () => {
@@ -86,6 +131,10 @@ test('compileRobotRuntimePreview converts app_map waypoint through saved origin'
       x: 10,
       y: 20,
       yaw: Math.PI / 2,
+      map: {
+        id: 'test_map',
+        fingerprint: 'test-map-fingerprint',
+      },
     },
   }))
 
@@ -95,6 +144,8 @@ test('compileRobotRuntimePreview converts app_map waypoint through saved origin'
   assert.equal(preview.canonicalPlan.params.x, 10)
   assert.equal(preview.canonicalPlan.params.y, 21)
   assert.equal(preview.canonicalPlan.params.yaw, 3.14159)
+  assert.equal(preview.canonicalPlan.params.mapId, 'test_map')
+  assert.equal(preview.canonicalPlan.params.mapFingerprint, 'test-map-fingerprint')
 })
 
 test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', () => {
@@ -116,6 +167,33 @@ test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', 
   assert.equal(preview.status, 'invalid')
   assert.deepEqual(preview.missingRequired, ['waypoint.mapOrigin'])
   assert.match(preview.warnings.at(-1), /no saved DOGZILLA map origin/)
+})
+
+test('compileRobotRuntimePreview blocks app_map waypoint when saved origin has no map identity', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'kitchen',
+      },
+    },
+    waypoints: {
+      kitchen: mapWaypoint({
+        frame: 'app_map',
+        x: 1,
+        y: 0,
+      }),
+    },
+    mapOrigin: {
+      x: 10,
+      y: 20,
+      yaw: Math.PI / 2,
+    },
+  }))
+
+  assert.equal(preview.status, 'invalid')
+  assert.deepEqual(preview.missingRequired, ['waypoint.mapOrigin'])
+  assert.match(preview.warnings.at(-1), /origin has no active map identity/)
 })
 
 test('compileRobotRuntimePreview rejects trick actions without verified numeric ids', () => {
@@ -263,7 +341,7 @@ test('compileRobotManualControlPreview maps gamepad axes to DOGZILLA relative mo
     x_step: 25,
     y_step: 9,
     turn_rate: -75,
-    gait: 'walk',
+    gait: 'trot',
     pace: 'normal',
     source: 'gamepad',
   })

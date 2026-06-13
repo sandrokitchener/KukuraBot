@@ -3,6 +3,13 @@ const MANUAL_CONTROL_SEND_INTERVAL_MS = 180
 const MANUAL_CONTROL_REPEAT_MS = 700
 const MANUAL_CONTROL_ERROR_RETRY_MS = 1200
 const MANUAL_CONTROL_CHANGE_EPSILON = 0.035
+const MANUAL_CONTROL_GAIT = 'walk'
+const MANUAL_CONTROL_PACE = 'normal'
+const MANUAL_CONTROL_FORWARD_RAMP_MS = 1000
+const MANUAL_CONTROL_FORWARD_WALK_FLOOR = 0.25
+const MANUAL_CONTROL_BARK_BUTTON_INDEX = 7
+const MANUAL_CONTROL_BARK_THRESHOLD = 0.55
+const MANUAL_CONTROL_BARK_COOLDOWN_MS = 900
 
 export function createManualControlController({
   elements,
@@ -13,6 +20,7 @@ export function createManualControlController({
   formatError,
   setStatus,
   runtimeFeedbackOutput,
+  playBarkCue,
 } = {}) {
   let frameId = null
   const state = {
@@ -24,6 +32,12 @@ export function createManualControlController({
     lastOutputAt: 0,
     zeroSent: true,
     errorRetryAt: 0,
+    forwardRampStartedAt: 0,
+    lastGait: null,
+    lastPace: null,
+    barkTriggerPressed: false,
+    lastBarkAt: 0,
+    barkPending: false,
   }
 
   function handleToggle() {
@@ -82,6 +96,12 @@ export function createManualControlController({
     state.lastSentAt = 0
     state.zeroSent = true
     state.errorRetryAt = 0
+    state.forwardRampStartedAt = 0
+    state.lastGait = null
+    state.lastPace = null
+    state.barkTriggerPressed = false
+    state.lastBarkAt = 0
+    state.barkPending = false
     state.gamepadIndex = gamepad?.index ?? state.gamepadIndex
     renderPad(gamepad)
     renderVector(createNeutralManualVector())
@@ -100,6 +120,9 @@ export function createManualControlController({
     }
 
     renderVector(createNeutralManualVector())
+    state.forwardRampStartedAt = 0
+    state.barkTriggerPressed = false
+    state.barkPending = false
     setManualControlStatus('Manual control off.')
 
     if (shouldSendNeutral && isRealRobotTargetActive()) {
@@ -118,8 +141,8 @@ export function createManualControlController({
           strafe: 0,
           turn: 0,
           source: 'page-unload',
-          gait: 'walk',
-          pace: 'normal',
+          gait: MANUAL_CONTROL_GAIT,
+          pace: MANUAL_CONTROL_PACE,
         })], { type: 'application/json' }),
       )
     }
@@ -154,6 +177,7 @@ export function createManualControlController({
     const gamepad = findGamepad()
 
     if (!gamepad) {
+      state.barkTriggerPressed = false
       renderPad(null)
       renderVector(createNeutralManualVector())
       if (!state.zeroSent) {
@@ -168,16 +192,20 @@ export function createManualControlController({
     }
 
     state.gamepadIndex = gamepad.index
-    const vector = readManualGamepadVector(gamepad)
+    const now = Date.now()
+    const rawVector = readManualGamepadVector(gamepad)
+    const ramp = applyForwardRamp(rawVector, state, now)
+    const vector = ramp.vector
     renderPad(gamepad)
     renderVector(vector)
+    const barkTriggered = handleBarkTrigger(gamepad, now)
 
-    if (shouldSendVector(vector, state)) {
-      sendVector(vector, gamepad).catch((error) => {
+    if (shouldSendManualCommand(vector, state, ramp, now)) {
+      sendVector(vector, gamepad, { gait: ramp.gait, pace: ramp.pace }).catch((error) => {
         state.errorRetryAt = Date.now() + MANUAL_CONTROL_ERROR_RETRY_MS
         setManualControlStatus(formatError(error), true)
       })
-    } else if (!state.pending) {
+    } else if (!state.pending && !barkTriggered) {
       setManualControlStatus(`Manual control active: ${formatManualVector(vector)}.`)
     }
 
@@ -202,6 +230,8 @@ export function createManualControlController({
     applyState()
 
     const source = options.source || 'gamepad'
+    const gait = options.gait || MANUAL_CONTROL_GAIT
+    const pace = options.pace || MANUAL_CONTROL_PACE
     try {
       const response = await apiFetch('/api/robot/manual-control', {
         method: 'POST',
@@ -215,8 +245,8 @@ export function createManualControlController({
           source,
           gamepadId: gamepad?.id || '',
           gamepadIndex: gamepad?.index ?? state.gamepadIndex,
-          gait: 'walk',
-          pace: 'normal',
+          gait,
+          pace,
         }),
       })
       const payload = await response.json()
@@ -224,6 +254,8 @@ export function createManualControlController({
       state.lastVector = { ...vector }
       state.lastSentAt = Date.now()
       state.zeroSent = !hasManualVectorInput(vector)
+      state.lastGait = gait
+      state.lastPace = pace
 
       if (!response.ok || payload.dispatch?.status === 'error') {
         throw new Error(payload.dispatch?.error || payload.error || 'Manual control failed.')
@@ -245,6 +277,36 @@ export function createManualControlController({
       state.pending = false
       applyState()
     }
+  }
+
+  function handleBarkTrigger(gamepad, now = Date.now()) {
+    if (typeof playBarkCue !== 'function' || state.barkPending) {
+      updateManualBarkTriggerState(readManualBarkTriggerPressed(gamepad), state, now)
+      return false
+    }
+
+    if (!updateManualBarkTriggerState(readManualBarkTriggerPressed(gamepad), state, now)) {
+      return false
+    }
+
+    state.barkPending = true
+    playBarkCue()
+      .then(() => {
+        setManualControlStatus('Bark cue sent.')
+        setStatus?.('Bark cue sent.')
+      })
+      .catch((error) => {
+        const message = formatError(error)
+        setManualControlStatus(message, true)
+        setStatus?.(message, 'error')
+      })
+      .finally(() => {
+        state.barkPending = false
+      })
+
+    setManualControlStatus('Bark cue sent.')
+    setStatus?.('Bark cue sent.')
+    return true
   }
 
   function findGamepad() {
@@ -344,6 +406,37 @@ export function readManualGamepadVector(gamepad) {
   }
 }
 
+export function readManualBarkTriggerPressed(gamepad) {
+  const button = gamepad?.buttons?.[MANUAL_CONTROL_BARK_BUTTON_INDEX]
+  if (!button) {
+    return false
+  }
+
+  return button.pressed === true || Number(button.value) >= MANUAL_CONTROL_BARK_THRESHOLD
+}
+
+export function updateManualBarkTriggerState(
+  pressed,
+  state,
+  now = Date.now(),
+  cooldownMs = MANUAL_CONTROL_BARK_COOLDOWN_MS,
+) {
+  const wasPressed = state.barkTriggerPressed === true
+  state.barkTriggerPressed = pressed === true
+
+  if (!pressed || wasPressed) {
+    return false
+  }
+
+  const lastBarkAt = Number(state.lastBarkAt) || 0
+  if (lastBarkAt > 0 && now - lastBarkAt < cooldownMs) {
+    return false
+  }
+
+  state.lastBarkAt = now
+  return true
+}
+
 export function normalizeManualAxis(value) {
   const numeric = clamp(Number(value) || 0, -1, 1)
   return Math.abs(numeric) <= MANUAL_CONTROL_DEADBAND ? 0 : Number(numeric.toFixed(3))
@@ -355,6 +448,71 @@ export function createNeutralManualVector() {
     strafe: 0,
     turn: 0,
   }
+}
+
+export function applyForwardRamp(vector, state, now = Date.now()) {
+  const forward = Number(vector?.forward) || 0
+
+  if (forward <= 0) {
+    const movingWithoutForward = !!(Math.abs(Number(vector?.strafe) || 0) > 0 || Math.abs(Number(vector?.turn) || 0) > 0)
+    state.forwardRampStartedAt = 0
+    return {
+      vector: { ...vector, forward },
+      gait: movingWithoutForward || forward < 0 ? 'trot' : 'walk',
+      pace: MANUAL_CONTROL_PACE,
+      progress: 0,
+    }
+  }
+
+  if (!state.forwardRampStartedAt) {
+    state.forwardRampStartedAt = now
+  }
+
+  const elapsed = Math.max(0, now - state.forwardRampStartedAt)
+  const progress = clamp(elapsed / MANUAL_CONTROL_FORWARD_RAMP_MS, 0, 1)
+  const curve = easeOutCubic(progress)
+  const multiplier = MANUAL_CONTROL_FORWARD_WALK_FLOOR + (1 - MANUAL_CONTROL_FORWARD_WALK_FLOOR) * curve
+  const rampedForward = Number((forward * multiplier).toFixed(3))
+  const stage = getForwardRampStage(progress)
+
+  return {
+    vector: {
+      ...vector,
+      forward: rampedForward,
+    },
+    gait: stage.gait,
+    pace: stage.pace,
+    progress,
+  }
+}
+
+export function shouldSendManualCommand(vector, state, ramp, now = Date.now()) {
+  if (shouldSendVector(vector, state, now)) {
+    return true
+  }
+
+  return !!(
+    hasManualVectorInput(vector) &&
+    !state.pending &&
+    now >= state.errorRetryAt &&
+    now - state.lastSentAt >= MANUAL_CONTROL_SEND_INTERVAL_MS &&
+    (ramp.gait !== state.lastGait || ramp.pace !== state.lastPace)
+  )
+}
+
+function getForwardRampStage(progress) {
+  if (progress <= 0) {
+    return { gait: 'walk', pace: 'slow' }
+  }
+  if (progress >= 1) {
+    return { gait: 'trot', pace: 'high' }
+  }
+  return { gait: 'trot', pace: 'normal' }
+}
+
+function easeOutCubic(value) {
+  const t = clamp(value, 0, 1)
+  return 1 - ((1 - t) ** 3)
 }
 
 export function shouldSendVector(vector, state, now = Date.now()) {
@@ -407,8 +565,10 @@ function formatManualControlSummary(payload, runtimeConfig) {
   const dispatchStatus = payload.dispatch?.status || 'unknown'
   const plan = payload.preview?.canonicalPlan?.params || {}
   const mode = runtimeConfig?.robotRuntime?.dryRun || dispatchStatus === 'dry-run' ? 'dry-run' : dispatchStatus
+  const gait = plan.gait || 'walk'
+  const pace = plan.pace || 'normal'
 
-  return `Manual ${mode}: x ${formatStep(plan.x_step)}, y ${formatStep(plan.y_step)}, turn ${formatStep(plan.turn_rate)}.`
+  return `Manual ${mode}: ${gait}/${pace}, x ${formatStep(plan.x_step)}, y ${formatStep(plan.y_step)}, turn ${formatStep(plan.turn_rate)}.`
 }
 
 function formatManualVector(vector) {

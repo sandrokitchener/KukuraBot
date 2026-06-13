@@ -17,6 +17,13 @@ import {
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
   getDogzillaCameraSnapshot,
 } from './lib/dogzilla-camera-proxy.mjs'
+import {
+  APP_MAP_FRAME,
+  applyMapOriginToPose,
+  getDogzillaMapOriginStatus,
+  hasDogzillaMapOriginIdentity,
+  loadDogzillaMapOrigin,
+} from './lib/dogzilla-map-frame.mjs'
 import { tryHandleDogzillaRoute } from './lib/http-dogzilla-routes.mjs'
 import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
@@ -36,6 +43,7 @@ import {
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
 import { buildSystemHealthz } from './lib/system-healthz.mjs'
+import { printStartupBanner } from './lib/startup-banner.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
@@ -55,6 +63,11 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '0.0.0.0'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const appConfig = await loadAppConfig()
+printStartupBanner({
+  appName: appConfig.appName,
+  mode: 'server',
+  url: `http://${HOST}:${PORT}`,
+})
 const APP_GENERATION_ID = randomUUID()
 const APP_STARTED_AT = new Date().toISOString()
 let robotBridgeStateSeq = 0
@@ -248,11 +261,19 @@ async function buildCurrentRobotStateSnapshot() {
   const robotRuntimeConfig = await loadRobotRuntimeConfig()
   const robotRos2Config = await loadRobotRos2Config()
   const streamSnapshot = getRobotStateSnapshot()
-  const [bridgeState, poseState] = await Promise.all([
+  const [bridgeState, poseState, mapOrigin] = await Promise.all([
     fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config),
     getDogzillaRobotPose({ timeoutMs: 1200 }),
+    loadDogzillaMapOrigin(),
   ])
-  const bridgeRobot = buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState)
+  const activeMap = bridgeState?.body?.runtime?.map && typeof bridgeState.body.runtime.map === 'object'
+    ? bridgeState.body.runtime.map
+    : null
+  const mapOriginStatus = getDogzillaMapOriginStatus(mapOrigin, activeMap)
+  const bridgeRobot = applyMapOriginToRobotState(
+    buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState),
+    mapOriginStatus.configured ? mapOrigin : null,
+  )
   const bridgeOwnsActiveRobot = robotRuntimeConfig.activeTarget?.kind === 'dogzilla-direct'
   const streamRobots = bridgeOwnsActiveRobot && !bridgeRobot
     ? removeDogzillaStreamRobots(streamSnapshot.robots, robotRuntimeConfig)
@@ -277,6 +298,7 @@ async function buildCurrentRobotStateSnapshot() {
     activeTarget: robotRuntimeConfig.activeTarget,
     bridgeState,
     poseState,
+    mapOrigin: mapOriginStatus,
     poseTrack: bridgeRobot?.pose ? getDogzillaPoseTrack() : [],
   }
 }
@@ -354,15 +376,19 @@ function buildReconMapContext(robotState, lidarScan) {
 function recordDogzillaMapPose(robot) {
   const pose = robot?.pose
   const telemetry = robot?.telemetry || {}
-  if (!pose || pose.frame !== 'map' || telemetry.waypointSafe !== true) {
+  if (!pose || !isRenderableMapFrame(pose.frame) || telemetry.waypointSafe !== true) {
     return
   }
 
   dogzillaPoseTrack.push({
     x: pose.x,
     y: pose.y,
-    theta: pose.theta,
-    frame: 'map',
+    theta: pose.theta ?? pose.yaw,
+    yaw: pose.yaw ?? pose.theta,
+    frame: pose.frame,
+    sourceFrame: pose.sourceFrame || '',
+    originLabel: pose.originLabel || '',
+    originSavedAt: pose.originSavedAt || '',
     source: pose.source || telemetry.poseSource || '',
     receivedAt: robot.receivedAt,
     timestamp: robot.timestamp,
@@ -376,6 +402,31 @@ function recordDogzillaMapPose(robot) {
 
 function getDogzillaPoseTrack() {
   return dogzillaPoseTrack.map((pose) => ({ ...pose }))
+}
+
+function applyMapOriginToRobotState(robot, mapOrigin) {
+  if (!robot?.pose || !mapOrigin || !hasDogzillaMapOriginIdentity(mapOrigin)) {
+    return robot
+  }
+
+  const pose = applyMapOriginToPose(robot.pose, mapOrigin)
+  if (pose === robot.pose || pose?.frame !== APP_MAP_FRAME) {
+    return robot
+  }
+
+  return {
+    ...robot,
+    pose,
+    telemetry: {
+      ...robot.telemetry,
+      poseFrame: APP_MAP_FRAME,
+      poseSourceFrame: 'map',
+      mapOriginConfigured: true,
+      mapOriginLabel: pose.originLabel,
+      mapOriginSavedAt: pose.originSavedAt,
+      mapSource: 'saved-dogzilla-map-origin',
+    },
+  }
 }
 
 function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState = null) {
@@ -490,6 +541,10 @@ function normalizeString(value) {
 
 function normalizeFrameId(value) {
   return normalizeString(value).replace(/^\/+/, '')
+}
+
+function isRenderableMapFrame(frame) {
+  return ['map', APP_MAP_FRAME].includes(normalizeFrameId(frame))
 }
 
 function sendJson(response, statusCode, payload) {

@@ -17,7 +17,7 @@
     "healthPath": "/healthz",
     "commandsPath": "/commands",
     "feedbackPath": "/feedback",
-    "timeoutMs": 12000
+    "timeoutMs": 30000
   },
   "launch": {
     "managedByApp": false,

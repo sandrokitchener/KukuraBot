@@ -10,6 +10,10 @@ param(
   [string]$ContainerName = "robodoge-lidar-bridge",
   [int]$RosDomainId = 16,
   [int]$PosePort = 8896,
+  [ValidateSet("auto", "localization", "mapping")]
+  [string]$Mode = "auto",
+  [string]$MapPath = "",
+  [switch]$AllowMapping,
   [switch]$NoHostKeyScan
 )
 
@@ -44,7 +48,9 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Output "Starting DOGZILLA Cartographer map pose in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
-$remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId $ContainerName bash $containerScript"
+$mapEnv = if ($MapPath) { " -e DOGZILLA_MAP_PBSTREAM=$MapPath" } else { "" }
+$allowMappingEnv = if ($AllowMapping) { " -e DOGZILLA_MAP_POSE_ALLOW_MAPPING=1" } else { "" }
+$remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv $ContainerName bash $containerScript"
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
   throw "DOGZILLA Cartographer map pose failed to start"

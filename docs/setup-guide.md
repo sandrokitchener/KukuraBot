@@ -154,8 +154,9 @@ Real home waypoints live in:
 config/robot-waypoints.json
 ```
 
-Only verified `frame: "map"` waypoints are drawn on the mini map.
-Do not treat dummy `0,0` placeholders as real navigation targets.
+Only structured waypoint fields are authoritative for mini-map display and navigation.
+Do not treat `0,0` placeholder coordinates as real navigation targets unless the structured fields say they were intentionally captured and verified.
+Do not make validation or navigation decisions from `notes`; notes are human comments only.
 
 ### 6. Gamepad
 

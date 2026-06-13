@@ -88,10 +88,7 @@
               <span></span>
             </div>
           </div>
-          <p id="app-description" class="lede">
-            Use Questing Beast for safety, maintenance, and security checks in hard-to-reach areas.
-            Capture live camera evidence, robot context, and operator notes in one inspection trail.
-          </p>
+          <p id="app-description" class="lede" hidden></p>
 
           <form id="chat-form" class="chat-form">
             <label for="user-input">Message</label>
@@ -210,7 +207,10 @@
           <section class="robot-map-panel">
             <div class="robot-map-head">
               <h2>Mini Map</h2>
-              <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
+              <div class="robot-map-actions">
+                <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Reset charger origin: save current pose as 0,0</button>
+                <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
+              </div>
             </div>
             <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
@@ -228,6 +228,7 @@
             <div class="robot-map-head">
               <h2>Camera</h2>
               <div class="robot-camera-actions">
+                <button id="robot-camera-refresh-button" class="camera-refresh-button" type="button" aria-label="Refresh camera view" title="Refresh camera view" disabled>Refresh</button>
                 <span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
               </div>
             </div>
@@ -353,17 +354,11 @@
         <section class="connection-panel">
           <div class="bridge-head">
             <h2>Robot Link</h2>
-            <button type="button" data-connection-action="start-direct">Repair robot link</button>
           </div>
           <div class="bridge-action-grid bridge-action-grid-primary">
             <button type="button" data-connection-action="check-ssh">Check network</button>
             <button type="button" data-connection-action="probe-bridges">Check robot link</button>
             <button type="button" data-connection-action="probe-support">Check extras</button>
-          </div>
-          <div class="dogzilla-audio-volume">
-            <label for="dogzilla-audio-volume-input">Dog sound volume</label>
-            <input id="dogzilla-audio-volume-input" type="range" min="0" max="100" step="5" value="75" />
-            <strong id="dogzilla-audio-volume-value">75%</strong>
           </div>
           <div class="connection-url-grid">
             <div>
@@ -383,13 +378,28 @@
               <strong id="dogzilla-ros2-url">-</strong>
             </div>
           </div>
+        </section>
+
+        <section class="connection-panel">
+          <div class="bridge-head">
+            <h2>Sidecar Restarts</h2>
+          </div>
+          <div class="bridge-action-grid sidecar-action-grid">
+            <button type="button" data-connection-action="start-direct">Restart direct bridge</button>
+            <button type="button" data-connection-action="start-ros2">Restart ROS2 bridge</button>
+            <button type="button" data-connection-action="start-yolo">Restart YOLO vision</button>
+            <button type="button" data-connection-action="start-audio">Restart Pi audio</button>
+            <button type="button" data-connection-action="start-lidar">Restart lidar bridge</button>
+            <button type="button" data-connection-action="start-map-pose">Restart map localization</button>
+            <button type="button" data-connection-action="start-navigation">Start waypoint navigator</button>
+          </div>
           <details class="advanced-service-tools">
-            <summary>Advanced service controls</summary>
+            <summary>Maintenance controls</summary>
             <div class="bridge-action-grid">
               <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
-              <button type="button" data-connection-action="start-ros2">Start ROS2 bridge</button>
-              <button type="button" data-connection-action="start-audio">Restart Pi audio</button>
-              <button type="button" data-connection-action="start-lidar">Start lidar bridge</button>
+              <button type="button" data-connection-action="save-map-pose">Save SLAM map</button>
+              <button type="button" data-connection-action="start-map-pose-mapping">Start mapping mode</button>
+              <button type="button" data-connection-action="stop-vendor-app">Stop vendor app</button>
               <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
             </div>
           </details>
@@ -406,7 +416,6 @@
           <div class="meta-card">
             <span class="meta-label">Profile</span>
             <strong id="profile-name">Loading...</strong>
-            <div id="profile-source" class="meta-note"></div>
           </div>
           <div class="meta-card">
             <span class="meta-label">Provider</span>
@@ -416,30 +425,6 @@
             <span class="meta-label">Model</span>
             <strong id="model-name">Loading...</strong>
           </div>
-          <div class="meta-card">
-            <span class="meta-label">Prompt file</span>
-            <strong id="prompt-file">config/system-prompt.txt</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Schema file</span>
-            <strong id="schema-file">config/command-response-format.json</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Command types</span>
-            <strong id="command-types-file">config/command-types.txt</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Waypoints</span>
-            <strong id="waypoints-file">config/valid-waypoints.txt</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Robot runtime file</span>
-            <strong id="robot-runtime-file">config/robot-runtime.json</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">ROS2 config file</span>
-            <strong id="robot-ros2-file">config/robot-ros2.json</strong>
-          </div>
         </div>
 
         <section class="settings-panel">
@@ -448,7 +433,6 @@
             <select id="profile-select"></select>
             <button id="save-profile-button" type="button">Use profile</button>
           </div>
-          <p id="profile-lock-note" class="settings-note">Selection saves to config/runtime.json.</p>
           <div id="settings-status" class="settings-status">Loading profiles...</div>
 
           <div class="settings-row">
@@ -456,8 +440,13 @@
             <select id="robot-target-select"></select>
             <button id="save-robot-target-button" type="button">Use target</button>
           </div>
-          <p id="robot-target-lock-note" class="settings-note">Selection saves to config/robot-runtime.json.</p>
           <div id="robot-target-status" class="settings-status">Loading robot targets...</div>
+
+          <div class="dogzilla-audio-volume settings-audio-volume">
+            <label for="dogzilla-audio-volume-input">Dog sound volume</label>
+            <input id="dogzilla-audio-volume-input" type="range" min="0" max="100" step="5" value="75" />
+            <strong id="dogzilla-audio-volume-value">75%</strong>
+          </div>
 
           <div class="settings-row">
             <label for="test-robot-sit-button">Robot test</label>
@@ -478,9 +467,7 @@
             <select id="speech-profile-select"></select>
             <button id="save-speech-profile-button" type="button">Use speech profile</button>
           </div>
-          <p id="speech-lock-note" class="settings-note">Selection saves to config/speech-runtime.json.</p>
           <div id="speech-settings-status" class="settings-status">Loading speech profiles...</div>
-          <p id="speech-files" class="speech-files">Speech config files: config/speech-profiles.json, config/speech-runtime.json, config/activation_phrases.txt</p>
         </section>
 
         <section class="runtime-panel" data-state="ready">
@@ -489,7 +476,6 @@
           </div>
           <p id="runtime-feedback-status" class="runtime-status">Checking runtime target...</p>
           <pre id="runtime-feedback-output" class="runtime-preview">Waiting for runtime feedback.</pre>
-          <p id="runtime-files" class="runtime-files">Runtime config files: config/robot-runtime.json, config/robot-ros2.json, config/robot-waypoints.json, config/robot-motion.json</p>
         </section>
       </aside>
     </main>

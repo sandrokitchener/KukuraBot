@@ -86,6 +86,9 @@ export function waypointGotoPreview(overrides = {}) {
         x: 1.25,
         y: -0.5,
         yaw: 0.2,
+        verified: true,
+        mapId: 'test_map',
+        mapFingerprint: 'test-map-fingerprint',
         ...(overrides.params ?? {}),
       },
     },
@@ -109,16 +112,52 @@ export function actionOncePreview(params = {}) {
 }
 
 export function nav2HealthBody(overrides = {}) {
+  const nav2Override = overrides.nav2 ?? {}
+  const nav2Available = nav2Override.available !== undefined ? nav2Override.available === true : true
+  const odomOverride = nav2Override.odom && typeof nav2Override.odom === 'object' ? nav2Override.odom : {}
+  const odomAvailable = odomOverride.available !== undefined ? odomOverride.available === true : nav2Available
+  const waypointReady = nav2Override.waypointReady !== undefined
+    ? nav2Override.waypointReady === true
+    : nav2Available && odomAvailable
   return {
     ok: true,
     runtime: {
-      nav2: {
+      map: {
         available: true,
-        ...(overrides.nav2 ?? {}),
+        id: 'test_map',
+        resolution: 0.05,
+        widthCells: 400,
+        heightCells: 400,
+        origin: [-10, -10, 0],
+        bounds: {
+          minX: -10,
+          maxX: 10,
+          minY: -10,
+          maxY: 10,
+        },
+        fingerprint: 'test-map-fingerprint',
+      },
+      nav2: {
+        available: nav2Available,
+        waypointReady,
+        ...withoutKey(nav2Override, 'odom'),
+        odom: {
+          topic: '/odom',
+          publisherCount: odomAvailable ? 1 : 0,
+          available: odomAvailable,
+          ...odomOverride,
+        },
+      },
+      navigation: {
+        available: waypointReady,
+        primary: waypointReady ? 'nav2' : 'unavailable',
+        actionServerAvailable: nav2Available,
+        waypointReady,
+        ...(overrides.navigation ?? {}),
       },
       ...(overrides.runtime ?? {}),
     },
-    ...withoutKeys(overrides, ['nav2', 'runtime']),
+    ...withoutKeys(overrides, ['nav2', 'navigation', 'runtime']),
   }
 }
 

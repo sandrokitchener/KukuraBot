@@ -20,13 +20,13 @@
         "living_room": {
           "kind": "map_pose",
           "frame": "map",
-          "x": 0.0,
-          "y": 0.0,
-          "yaw": 0.0,
+          "x": 0,
+          "y": 0,
+          "yaw": -0.45,
           "arrivalToleranceMeters": 0.25,
-          "physicalSpot": "Center of the living room parking bubble",
-          "anchorHint": "Use a rug edge or couch corner as the tape-measure reference",
-          "verified": false,
+          "physicalSpot": "",
+          "anchorHint": "",
+          "verified": true,
           "notes": [
             "Dummy pose. Replace with a real mapped pose later.",
             "Keep enough clearance that the body can rotate without clipping furniture."
@@ -35,10 +35,11 @@
 
         "kitchen": {
           "kind": "map_pose",
+		  "map_id": "robodoge_home",
           "frame": "map",
-          "x": 5.18,
-          "y": 0.38,
-          "yaw": 2.66,
+          "x": 5.4,
+          "y": -1.65,
+          "yaw": 0,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "Verified kitchen waypoint in the current map frame",
           "anchorHint": "Re-capture this waypoint if the Cartographer map origin is reset or a new map is built",
@@ -51,13 +52,13 @@
         "garage": {
           "kind": "map_pose",
           "frame": "map",
-          "x": 0.0,
+          "x": 5.0,
           "y": 0.0,
           "yaw": 0.0,
           "arrivalToleranceMeters": 0.35,
           "physicalSpot": "Clear parking zone just inside the garage threshold",
           "anchorHint": "Measure from a wall corner or storage rack post, not from a car position",
-          "verified": false,
+          "verified": true,
           "notes": [
             "Dummy pose. Replace with a real mapped pose later.",
             "Use a wider tolerance if the floor transition at the threshold is uneven."

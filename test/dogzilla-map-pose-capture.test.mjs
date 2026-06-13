@@ -1,12 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 
 import {
+  captureWaypoint,
   normalizeWaypointName,
   poseToWaypoint,
   upsertWaypoint,
 } from '../scripts/capture-dogzilla-map-pose.mjs'
-import { APP_MAP_FRAME } from '../lib/dogzilla-map-frame.mjs'
+import { nav2HealthBody } from '../test-support/robot-http-fixtures.mjs'
 
 test('poseToWaypoint converts lidar bridge map pose to waypoint entry', () => {
   const waypoint = poseToWaypoint({
@@ -21,23 +25,23 @@ test('poseToWaypoint converts lidar bridge map pose to waypoint entry', () => {
   }, {
     physicalSpot: 'Living room rug',
     arrivalToleranceMeters: 0.3,
+    mapMetadata: nav2HealthBody().runtime.map,
   })
 
-  assert.deepEqual(waypoint, {
-    kind: 'map_pose',
-    frame: 'map',
-    x: 1.2,
-    y: -0.4,
-    yaw: 0.75,
-    arrivalToleranceMeters: 0.3,
-    physicalSpot: 'Living room rug',
-    verified: true,
-    notes: [
-      waypoint.notes[0],
-      'Use with command JSON: {"command":"move","waypoint":"<name>"}',
-    ],
-  })
+  assert.equal(waypoint.kind, 'map_pose')
+  assert.equal(waypoint.frame, 'map')
+  assert.equal(waypoint.x, 1.2)
+  assert.equal(waypoint.y, -0.4)
+  assert.equal(waypoint.yaw, 0.75)
+  assert.equal(waypoint.arrivalToleranceMeters, 0.3)
+  assert.equal(waypoint.physicalSpot, 'Living room rug')
+  assert.equal(waypoint.verified, true)
+  assert.equal(waypoint.mapId, 'test_map')
+  assert.equal(waypoint.mapFingerprint, 'test-map-fingerprint')
+  assert.equal(waypoint.map.fingerprint, 'test-map-fingerprint')
   assert.match(waypoint.notes[0], /Captured from tf:map->base_link/)
+  assert.match(waypoint.notes.join('\n'), /Captured map pose: x=1.2, y=-0.4, yaw=0.75/)
+  assert.match(waypoint.notes.join('\n'), /Captured map identity: id=test_map/)
 })
 
 test('poseToWaypoint marks odom captures as temporary unverified targets', () => {
@@ -63,7 +67,7 @@ test('poseToWaypoint marks odom captures as temporary unverified targets', () =>
   assert.match(waypoint.notes[0], /scan-odom/)
 })
 
-test('poseToWaypoint stores map captures relative to saved app origin', () => {
+test('poseToWaypoint keeps map captures in raw map frame when app origin exists', () => {
   const waypoint = poseToWaypoint({
     ok: true,
     pose: {
@@ -81,16 +85,18 @@ test('poseToWaypoint stores map captures relative to saved app origin', () => {
       label: 'dock',
       savedAt: '2026-06-04T00:00:00.000Z',
     },
+    mapMetadata: nav2HealthBody().runtime.map,
   })
 
-  assert.equal(waypoint.frame, APP_MAP_FRAME)
-  assert.equal(waypoint.sourceFrame, 'map')
-  assert.equal(waypoint.x, 1)
-  assert.equal(waypoint.y, 0)
-  assert.equal(waypoint.yaw, 1.5708)
+  assert.equal(waypoint.frame, 'map')
+  assert.equal(waypoint.x, 10)
+  assert.equal(waypoint.y, 21)
+  assert.equal(waypoint.yaw, Math.PI)
   assert.equal(waypoint.verified, true)
+  assert.equal(waypoint.mapFingerprint, 'test-map-fingerprint')
   assert.equal(waypoint.mapOrigin.label, 'dock')
-  assert.match(waypoint.notes[1], /app_map origin/)
+  assert.equal(waypoint.mapOrigin.displayOnly, true)
+  assert.match(waypoint.notes.join('\n'), /raw map coordinates/)
 })
 
 
@@ -133,4 +139,56 @@ test('upsertWaypoint preserves command waypoint key normalization', () => {
     anchorHint: 'keep me',
     verified: true,
   })
+})
+
+test('captureWaypoint writes proposal without overwriting robot-waypoints source', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-capture-'))
+  const waypointFile = path.join(tempDir, 'robot-waypoints.json')
+  const captureDir = path.join(tempDir, 'captures')
+  const originalConfig = '{"activeSet":"home","sets":{"home":{"waypoints":{}}}}\n'
+  const originalFetch = globalThis.fetch
+  await writeFile(waypointFile, originalConfig, 'utf-8')
+
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/healthz')) {
+      return {
+        ok: true,
+        json: async () => nav2HealthBody(),
+      }
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        ok: true,
+        pose: {
+          frame: 'map',
+          x: 1.2,
+          y: -0.4,
+          theta: 0.75,
+          source: 'tf:map->base_link',
+        },
+      }),
+    }
+  }
+
+  try {
+    const result = await captureWaypoint({
+      name: 'Kitchen',
+      waypointFile,
+      captureDir,
+      originFile: path.join(tempDir, 'missing-origin.json'),
+    })
+
+    assert.equal(await readFile(waypointFile, 'utf-8'), originalConfig)
+    assert.match(result.captureFile, /kitchen\.json$/)
+    const proposal = JSON.parse(await readFile(result.captureFile, 'utf-8'))
+    assert.equal(proposal.waypointName, 'kitchen')
+    assert.equal(proposal.waypoint.mapFingerprint, 'test-map-fingerprint')
+    assert.equal(proposal.mapIdentityRequired, true)
+    assert.equal(proposal.sourceOfTruthFile, waypointFile)
+    assert.match(proposal.writePolicy, /not overwritten/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

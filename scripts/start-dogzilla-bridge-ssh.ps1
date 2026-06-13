@@ -13,7 +13,15 @@ param(
   [switch]$Live,
   [switch]$Background,
   [switch]$NoSync,
-  [switch]$NoHostKeyScan
+  [switch]$NoHostKeyScan,
+  [double]$ObstacleDistance = 0,
+  [int]$ObstacleStopCount = 0,
+  [double]$MaxXStep = 0,
+  [double]$MaxYStep = 0,
+  [double]$MaxTurnRate = 0,
+  [double]$XGain = 0,
+  [double]$YGain = 0,
+  [double]$TurnGain = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,6 +58,16 @@ $configPath = Ensure-DogzillaSshConfig `
 
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
 $envPrefix = 'export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"; export DOGZILLA_EXPECTED_ROS_DOMAIN_ID="${DOGZILLA_EXPECTED_ROS_DOMAIN_ID:-16}";'
+$avoidanceEnv = ''
+if ($ObstacleDistance -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_OBSTACLE_DISTANCE=$ObstacleDistance; " }
+if ($ObstacleStopCount -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_OBSTACLE_STOP_COUNT=$ObstacleStopCount; " }
+if ($MaxXStep -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_MAX_X_STEP=$MaxXStep; " }
+if ($MaxYStep -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_MAX_Y_STEP=$MaxYStep; " }
+if ($MaxTurnRate -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_MAX_TURN_RATE=$MaxTurnRate; " }
+if ($XGain -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_X_GAIN=$XGain; " }
+if ($YGain -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_Y_GAIN=$YGain; " }
+if ($TurnGain -gt 0) { $avoidanceEnv += "export DOGZILLA_MAP_NAVIGATION_TURN_GAIN=$TurnGain; " }
+if ($avoidanceEnv) { $envPrefix = $avoidanceEnv + $envPrefix }
 
 if ($Bridge -eq "direct") {
   $stopVendorArgs = @{

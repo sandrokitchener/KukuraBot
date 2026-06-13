@@ -18,6 +18,79 @@ from typing import Any
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+BRIDGE_DIR = Path(__file__).resolve().parent
+if str(BRIDGE_DIR) not in sys.path:
+    sys.path.insert(0, str(BRIDGE_DIR))
+
+import map_metadata as map_metadata_module
+from lidar_avoidance import (
+    DEFAULT_LIDAR_AVOIDANCE_COMMAND,
+    DEFAULT_LIDAR_AVOIDANCE_ENABLED,
+    DEFAULT_LIDAR_AVOIDANCE_TIMEOUT,
+    DEFAULT_LIDAR_SCAN_WAIT_TIMEOUT,
+    LIDAR_AVOIDANCE_DOC_COMMAND,
+    LIDAR_AVOIDANCE_NODE,
+    LIDAR_AVOIDANCE_PACKAGE,
+    LIDAR_AVOIDANCE_START_COMMAND,
+    NAV2_COSTMAP_LIDAR_MODE,
+    LidarAvoidanceSupervisor,
+    parse_ros_topic_count,
+)
+from map_metadata import (
+    DEFAULT_MAP_METADATA_FILE,
+    DEFAULT_MAP_YAML_FILE,
+    file_identity,
+    hash_map_identity,
+    read_pgm_size,
+    read_ros_map_yaml,
+    sha256_file,
+)
+from map_pose_navigation import (
+    DEFAULT_MAP_NAVIGATION_ENABLED,
+    DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE,
+    DEFAULT_MAP_NAVIGATION_MAX_X_STEP,
+    DEFAULT_MAP_NAVIGATION_MAX_Y_STEP,
+    DEFAULT_MAP_NAVIGATION_OBSTACLE_DISTANCE,
+    DEFAULT_MAP_NAVIGATION_OBSTACLE_STOP_COUNT,
+    DEFAULT_MAP_NAVIGATION_POLL_SEC,
+    DEFAULT_MAP_NAVIGATION_TIMEOUT,
+    DEFAULT_MAP_NAVIGATION_TURN_GAIN,
+    DEFAULT_MAP_NAVIGATION_X_GAIN,
+    DEFAULT_MAP_NAVIGATION_YAW_TOLERANCE,
+    DEFAULT_MAP_NAVIGATION_Y_GAIN,
+    DEFAULT_MAP_POSE_URL,
+    DEFAULT_MAP_SCAN_URL,
+    MapPoseNavigationExecutor,
+)
+from motion_utils import clamp, normalize_angle, resolve_map_navigation_timeout, scan_obstacle_counts
+from nav2_gait_adapter import (
+    DEFAULT_NAV2_GAIT_ALLOW_TROT,
+    DEFAULT_NAV2_GAIT_ANGULAR_DEADBAND,
+    DEFAULT_NAV2_GAIT_ANGULAR_FULL_SCALE,
+    DEFAULT_NAV2_GAIT_FORWARD_TURN_SCALE,
+    DEFAULT_NAV2_GAIT_HIGH_LINEAR,
+    DEFAULT_NAV2_GAIT_LATERAL_FULL_SCALE,
+    DEFAULT_NAV2_GAIT_LINEAR_DEADBAND,
+    DEFAULT_NAV2_GAIT_LINEAR_FULL_SCALE,
+    DEFAULT_NAV2_GAIT_MAX_TURN_RATE,
+    DEFAULT_NAV2_GAIT_MAX_X_STEP,
+    DEFAULT_NAV2_GAIT_MAX_Y_STEP,
+    DEFAULT_NAV2_GAIT_TROT_LINEAR,
+    nav2_cmd_vel_to_locomotion,
+)
+from nav2_client import (
+    DEFAULT_NAV2_ACTION,
+    DEFAULT_NAV2_ALLOWED_FRAMES,
+    DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT,
+    DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT,
+    DEFAULT_NAV2_ODOM_WAIT_TIMEOUT,
+    DEFAULT_NAV2_STATUS_WAIT_TIMEOUT,
+    DEFAULT_NAV2_WAIT_TIMEOUT,
+    DEFAULT_ODOM_TOPIC,
+    Nav2NavigateClient,
+)
+from process_utils import parse_json_process_output, summarize_process_text
+
 LOG_FILE = Path(__file__).resolve().with_name("command_log.ndjson")
 ROBOT_ID_FILE = ROOT_DIR / "robot_id.txt"
 ROBOT_NAME_FILE = ROOT_DIR / "robot_name.txt"
@@ -29,52 +102,14 @@ DEFAULT_DRY_RUN = os.environ.get("DOGZILLA_DIRECT_DRY_RUN", "1") != "0"
 DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
 DEFAULT_INCLUDE_ATTITUDE_STATE = os.environ.get("DOGZILLA_INCLUDE_ATTITUDE_STATE", "0") == "1"
 DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") == "1"
-DEFAULT_NAV2_ACTION = os.environ.get("DOGZILLA_NAV2_ACTION", "navigate_to_pose")
-DEFAULT_NAV2_DOCKER_CONTAINER = os.environ.get("DOGZILLA_NAV2_DOCKER_CONTAINER", "robodoge-lidar-bridge")
-DEFAULT_NAV2_DOCKER_ENABLED = os.environ.get("DOGZILLA_NAV2_DOCKER_ENABLED", "1") != "0"
-DEFAULT_NAV2_ALLOWED_FRAMES = {
-    frame.strip()
-    for frame in os.environ.get("DOGZILLA_NAV2_ALLOWED_FRAMES", "map,odom").split(",")
-    if frame.strip()
-}
-DEFAULT_NAV2_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_WAIT_TIMEOUT", "2.0"))
-DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_GOAL_RESPONSE_TIMEOUT", "3.0"))
-DEFAULT_NAV2_STATUS_CACHE_SEC = float(os.environ.get("DOGZILLA_NAV2_STATUS_CACHE_SEC", "1.0"))
-DEFAULT_NAV2_STATUS_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_STATUS_WAIT_TIMEOUT", "0.25"))
-DEFAULT_MAP_POSE_URL = os.environ.get("DOGZILLA_MAP_POSE_URL", "http://127.0.0.1:8896/pose")
-DEFAULT_MAP_SCAN_URL = os.environ.get("DOGZILLA_MAP_SCAN_URL", "http://127.0.0.1:8896/scan")
-DEFAULT_MAP_NAVIGATION_ENABLED = os.environ.get("DOGZILLA_MAP_NAVIGATION_ENABLED", "1") != "0"
-DEFAULT_MAP_NAVIGATION_TIMEOUT = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_TIMEOUT", "20.0"))
-DEFAULT_MAP_NAVIGATION_POLL_SEC = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_POLL_SEC", "0.20"))
-DEFAULT_MAP_NAVIGATION_YAW_TOLERANCE = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_YAW_TOLERANCE", "0.55"))
-DEFAULT_MAP_NAVIGATION_OBSTACLE_DISTANCE = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_OBSTACLE_DISTANCE", "0.55"))
-DEFAULT_MAP_NAVIGATION_OBSTACLE_STOP_COUNT = int(os.environ.get("DOGZILLA_MAP_NAVIGATION_OBSTACLE_STOP_COUNT", "2"))
-DEFAULT_MAP_NAVIGATION_MAX_X_STEP = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_MAX_X_STEP", "10"))
-DEFAULT_MAP_NAVIGATION_MAX_Y_STEP = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_MAX_Y_STEP", "8"))
-DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_MAX_TURN_RATE", "35"))
-DEFAULT_MAP_NAVIGATION_X_GAIN = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_X_GAIN", "40"))
-DEFAULT_MAP_NAVIGATION_Y_GAIN = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_Y_GAIN", "32"))
-DEFAULT_MAP_NAVIGATION_TURN_GAIN = float(os.environ.get("DOGZILLA_MAP_NAVIGATION_TURN_GAIN", "60"))
-DEFAULT_LIDAR_AVOIDANCE_ENABLED = os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_ENABLED", "1") != "0"
-DEFAULT_LIDAR_AVOIDANCE_TIMEOUT = float(os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_TIMEOUT", "4.0"))
-DEFAULT_LIDAR_AVOIDANCE_COMMAND = os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_COMMAND", "").strip()
+DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "0") == "1"
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
-LIDAR_AVOIDANCE_PACKAGE = "yahboom_laser"
-LIDAR_AVOIDANCE_NODE = "laser_Avoidance_xgo_RS200"
-LIDAR_AVOIDANCE_DOC_COMMAND = f"ros2 run {LIDAR_AVOIDANCE_PACKAGE} {LIDAR_AVOIDANCE_NODE}"
 ROS_SETUP_COMMAND = (
     "source /opt/ros/humble/setup.bash 2>/dev/null || true; "
     "source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || "
     "source /home/pi/yahboomcar_ws/install/setup.bash 2>/dev/null || "
     "source /home/yahboom/yahboomcar_ws/install/setup.bash 2>/dev/null || true"
 )
-LIDAR_AVOIDANCE_START_COMMAND = (
-    f"{ROS_SETUP_COMMAND}; "
-    f"pgrep -af '[l]aser_Avoidance_xgo_RS200' >/dev/null || "
-    f"(nohup {LIDAR_AVOIDANCE_DOC_COMMAND} >/tmp/robodoge-lidar-avoidance.log 2>&1 &); "
-    "sleep 0.4; pgrep -af '[l]aser_Avoidance_xgo_RS200' >/dev/null"
-)
-
 VENDOR_PATHS = [
     ROOT_DIR / "vendor" / "DOGZILLALib",
     ROOT_DIR / "vendor" / "DOGZILLA",
@@ -124,349 +159,46 @@ ACTION_ALIASES = {
 }
 
 
-class LidarAvoidanceSupervisor:
-    def __init__(
-        self,
-        *,
-        enabled: bool = DEFAULT_LIDAR_AVOIDANCE_ENABLED,
-        timeout: float = DEFAULT_LIDAR_AVOIDANCE_TIMEOUT,
-        override_command: str = DEFAULT_LIDAR_AVOIDANCE_COMMAND,
-    ):
-        self.enabled = enabled
-        self.timeout = timeout
-        self.override_command = override_command
-        self.last_result: dict[str, Any] | None = None
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "enabled": self.enabled,
-            "mode": LIDAR_AVOIDANCE_PACKAGE,
-            "node": LIDAR_AVOIDANCE_NODE,
-            "requiredCommand": LIDAR_AVOIDANCE_DOC_COMMAND,
-            "timeoutSec": self.timeout,
-            "overrideCommand": bool(self.override_command),
-            "lastResult": self.last_result,
-        }
-
-    def ensure_running(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
-        request = request if isinstance(request, dict) else {}
-        base = {
-            "required": True,
-            "enabled": self.enabled,
-            "mode": request.get("mode") or LIDAR_AVOIDANCE_PACKAGE,
-            "lidarTopic": request.get("lidarTopic") or "/scan",
-            "command": request.get("command") or LIDAR_AVOIDANCE_DOC_COMMAND,
-        }
-
-        if not self.enabled:
-            result = {**base, "ok": False, "error": "DOGZILLA_LIDAR_AVOIDANCE_ENABLED=0"}
-            self.last_result = result
-            return result
-
-        failures: list[dict[str, Any]] = []
-        for label, command, shell in self._candidate_commands():
-            result = self._run_candidate(label, command, shell)
-            if result.get("ok"):
-                result = {**base, **result}
-                self.last_result = result
-                return result
-            failures.append(result)
-
-        last_error = failures[-1].get("error") if failures else "No LiDAR avoidance command configured"
-        result = {
-            **base,
-            "ok": False,
-            "error": last_error,
-            "attempts": failures,
-        }
-        self.last_result = result
-        return result
-
-    def _candidate_commands(self) -> list[tuple[str, str | list[str], bool]]:
-        if self.override_command:
-            return [("override", self.override_command, True)]
-
-        return [
-            ("host-ros2", ["bash", "-lc", LIDAR_AVOIDANCE_START_COMMAND], False),
-            (
-                "lidar-container",
-                ["docker", "exec", "robodoge-lidar-bridge", "bash", "-lc", LIDAR_AVOIDANCE_START_COMMAND],
-                False,
-            ),
-        ]
-
-    def _run_candidate(self, label: str, command: str | list[str], shell: bool) -> dict[str, Any]:
-        try:
-            completed = subprocess.run(
-                command,
-                shell=shell,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                check=False,
-            )
-        except FileNotFoundError as error:
-            return {
-                "ok": False,
-                "attempt": label,
-                "error": str(error),
-                "command": command,
-            }
-        except subprocess.TimeoutExpired as error:
-            return {
-                "ok": False,
-                "attempt": label,
-                "error": f"LiDAR avoidance start timed out after {self.timeout:.1f}s",
-                "stdout": summarize_process_text(error.stdout),
-                "stderr": summarize_process_text(error.stderr),
-                "command": command,
-            }
-
-        return {
-            "ok": completed.returncode == 0,
-            "attempt": label,
-            "returncode": completed.returncode,
-            "stdout": summarize_process_text(completed.stdout),
-            "stderr": summarize_process_text(completed.stderr),
-            "error": "" if completed.returncode == 0 else f"{label} returned {completed.returncode}",
-            "command": command,
-        }
+def read_active_map_metadata() -> dict[str, Any]:
+    return map_metadata_module.read_active_map_metadata(DEFAULT_MAP_METADATA_FILE, DEFAULT_MAP_YAML_FILE)
 
 
-class MapPoseNavigationExecutor:
-    def __init__(
-        self,
-        *,
-        enabled: bool = DEFAULT_MAP_NAVIGATION_ENABLED,
-        pose_url: str = DEFAULT_MAP_POSE_URL,
-        scan_url: str = DEFAULT_MAP_SCAN_URL,
-        timeout: float = DEFAULT_MAP_NAVIGATION_TIMEOUT,
-        poll_sec: float = DEFAULT_MAP_NAVIGATION_POLL_SEC,
-    ):
-        self.enabled = enabled
-        self.pose_url = pose_url
-        self.scan_url = scan_url
-        self.timeout = timeout
-        self.poll_sec = poll_sec
-        self.last_result: dict[str, Any] | None = None
+def validate_goal_inside_active_map(frame: str, x: float, y: float) -> dict[str, Any]:
+    return map_metadata_module.validate_goal_inside_active_map(
+        frame,
+        x,
+        y,
+        DEFAULT_MAP_METADATA_FILE,
+        DEFAULT_MAP_YAML_FILE,
+    )
 
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "available": self.enabled,
-            "mode": "map-pose-closed-loop",
-            "poseUrl": self.pose_url,
-            "scanUrl": self.scan_url,
-            "timeoutSec": self.timeout,
-            "pollSec": self.poll_sec,
-            "obstacleDistanceMeters": DEFAULT_MAP_NAVIGATION_OBSTACLE_DISTANCE,
-            "maxXStep": DEFAULT_MAP_NAVIGATION_MAX_X_STEP,
-            "maxYStep": DEFAULT_MAP_NAVIGATION_MAX_Y_STEP,
-            "maxTurnRate": DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE,
-            "lastResult": self.last_result,
-        }
 
-    def goto(self, robot, *, frame: str, x: float, y: float, yaw: float, params: dict[str, Any]) -> dict[str, Any]:
-        waypoint = params.get("waypoint") or ""
-        tolerance = clamp(
-            float(params.get("arrivalToleranceMeters", params.get("arrival_tolerance_meters", 0.25)) or 0.25),
-            0.05,
-            1.0,
-        )
-        yaw_tolerance = clamp(
-            float(params.get("yawToleranceRadians", DEFAULT_MAP_NAVIGATION_YAW_TOLERANCE) or DEFAULT_MAP_NAVIGATION_YAW_TOLERANCE),
-            0.05,
-            3.14,
-        )
-        timeout = clamp(
-            float(params.get("timeoutSec", self.timeout) or self.timeout),
-            1.0,
-            120.0,
-        )
+def get_nav2_waypoint_prerequisites(nav2_client: Any) -> dict[str, Any]:
+    snapshot_fn = getattr(nav2_client, "snapshot", None)
+    if not callable(snapshot_fn):
+        return {"ok": True, "checked": False, "reason": "nav2_snapshot_unavailable"}
 
-        result_base = {
-            "kind": "locomotion.goto",
-            "delivery": "DOGZILLALib map-pose navigation",
-            "waypoint": waypoint,
-            "waypointSafe": frame == "map",
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "yaw": yaw,
-            "arrivalToleranceMeters": tolerance,
-        }
+    snapshot = snapshot_fn()
+    if snapshot.get("waypointReady") is True:
+        return {"ok": True, "checked": True, "nav2": snapshot}
 
-        if not self.enabled:
-            result = {**result_base, "executed": False, "error": "DOGZILLA_MAP_NAVIGATION_ENABLED=0"}
-            self.last_result = result
-            return result
+    blockers = snapshot.get("blockers") if isinstance(snapshot.get("blockers"), list) else []
+    odom = snapshot.get("odom") if isinstance(snapshot.get("odom"), dict) else {}
+    if blockers:
+        message = "; ".join(str(blocker) for blocker in blockers)
+    elif snapshot.get("available") is not True:
+        message = snapshot.get("importError") or snapshot.get("serverError") or "Nav2 NavigateToPose action server is not available"
+    elif odom and odom.get("available") is not True:
+        message = odom.get("error") or f"No publishers on {odom.get('topic') or DEFAULT_ODOM_TOPIC}"
+    else:
+        message = "Nav2 waypoint prerequisites are not ready"
 
-        if frame != "map":
-            result = {**result_base, "executed": False, "error": f"map_pose_navigation_requires_map_frame:{frame}"}
-            self.last_result = result
-            return result
-
-        samples: list[dict[str, Any]] = []
-        started = time.monotonic()
-        last_pose: dict[str, Any] | None = None
-
-        try:
-            while time.monotonic() - started < timeout:
-                pose_response = self._read_pose()
-                if not pose_response.get("ok"):
-                    stop_robot(robot)
-                    result = {
-                        **result_base,
-                        "executed": False,
-                        "delivery": "map-pose-navigation-unavailable",
-                        "error": pose_response.get("error") or "map pose unavailable",
-                        "pose": pose_response,
-                    }
-                    self.last_result = result
-                    return result
-
-                pose = pose_response["pose"]
-                last_pose = pose
-                dx = x - pose["x"]
-                dy = y - pose["y"]
-                distance = math.hypot(dx, dy)
-                yaw_error = normalize_angle(yaw - pose["theta"])
-                samples.append({
-                    "x": round(pose["x"], 4),
-                    "y": round(pose["y"], 4),
-                    "theta": round(pose["theta"], 4),
-                    "distance": round(distance, 4),
-                    "yawError": round(yaw_error, 4),
-                })
-                samples = samples[-8:]
-
-                if distance <= tolerance and abs(yaw_error) <= yaw_tolerance:
-                    stop_robot(robot)
-                    result = {
-                        **result_base,
-                        "executed": True,
-                        "arrived": True,
-                        "distanceMeters": distance,
-                        "yawErrorRadians": yaw_error,
-                        "elapsedSec": round(time.monotonic() - started, 3),
-                        "samples": samples,
-                        "finalPose": pose,
-                    }
-                    self.last_result = result
-                    return result
-
-                forward_error = math.cos(pose["theta"]) * dx + math.sin(pose["theta"]) * dy
-                lateral_error = -math.sin(pose["theta"]) * dx + math.cos(pose["theta"]) * dy
-                turn_error = normalize_angle(math.atan2(dy, dx) - pose["theta"]) if distance > tolerance else yaw_error
-                x_step = clamp(forward_error * DEFAULT_MAP_NAVIGATION_X_GAIN, -DEFAULT_MAP_NAVIGATION_MAX_X_STEP, DEFAULT_MAP_NAVIGATION_MAX_X_STEP)
-                y_step = clamp(lateral_error * DEFAULT_MAP_NAVIGATION_Y_GAIN, -DEFAULT_MAP_NAVIGATION_MAX_Y_STEP, DEFAULT_MAP_NAVIGATION_MAX_Y_STEP)
-                turn_rate = clamp(turn_error * DEFAULT_MAP_NAVIGATION_TURN_GAIN, -DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE, DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE)
-                obstacle = self._read_obstacle()
-                if obstacle.get("blocked") and x_step > 0:
-                    x_step = 0.0
-                    turn_rate = clamp(
-                        turn_rate + float(obstacle.get("turnBias") or 0.0),
-                        -DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE,
-                        DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE,
-                    )
-                    y_step = clamp(
-                        y_step + float(obstacle.get("sideBias") or 0.0),
-                        -DEFAULT_MAP_NAVIGATION_MAX_Y_STEP,
-                        DEFAULT_MAP_NAVIGATION_MAX_Y_STEP,
-                    )
-                if obstacle.get("ok"):
-                    samples[-1]["obstacle"] = {
-                        "front": obstacle.get("front"),
-                        "left": obstacle.get("left"),
-                        "right": obstacle.get("right"),
-                        "blocked": obstacle.get("blocked"),
-                    }
-
-                robot.move("x", x_step)
-                robot.move("y", y_step)
-                robot.turn(turn_rate)
-                time.sleep(self.poll_sec)
-        finally:
-            stop_robot(robot)
-
-        result = {
-            **result_base,
-            "executed": False,
-            "delivery": "map-pose-navigation-timeout",
-            "error": f"Map-pose navigation timed out after {timeout:.1f}s",
-            "elapsedSec": round(time.monotonic() - started, 3),
-            "samples": samples,
-            "finalPose": last_pose,
-        }
-        self.last_result = result
-        return result
-
-    def _read_pose(self) -> dict[str, Any]:
-        try:
-            with urllib.request.urlopen(self.pose_url, timeout=1.5) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            return {"ok": False, "error": str(error)}
-
-        pose = payload.get("mapPose") or payload.get("pose") if isinstance(payload, dict) else None
-        if not isinstance(pose, dict):
-            return {"ok": False, "error": "map pose response missing pose"}
-        if payload.get("waypointSafe") is not True or pose.get("frame") != "map":
-            return {"ok": False, "error": "map pose is not waypoint-safe"}
-
-        try:
-            parsed = {
-                "x": float(pose["x"]),
-                "y": float(pose["y"]),
-                "theta": normalize_angle(float(pose.get("theta") or 0.0)),
-                "frame": str(pose.get("frame") or ""),
-                "childFrame": str(pose.get("childFrame") or ""),
-                "source": str(pose.get("source") or ""),
-            }
-        except (KeyError, TypeError, ValueError) as error:
-            return {"ok": False, "error": f"invalid map pose: {error}"}
-
-        if not all(math.isfinite(parsed[key]) for key in ("x", "y", "theta")):
-            return {"ok": False, "error": "invalid map pose: non_finite"}
-
-        return {"ok": True, "pose": parsed}
-
-    def _read_obstacle(self) -> dict[str, Any]:
-        try:
-            with urllib.request.urlopen(self.scan_url, timeout=0.7) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            return {"ok": False, "blocked": False, "error": str(error)}
-
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
-            return {"ok": False, "blocked": False, "error": str(payload.get("error") or "scan unavailable")}
-
-        front, left, right, min_range = scan_obstacle_counts(
-            payload.get("points") if isinstance(payload.get("points"), list) else [],
-            DEFAULT_MAP_NAVIGATION_OBSTACLE_DISTANCE,
-        )
-        blocked = front >= DEFAULT_MAP_NAVIGATION_OBSTACLE_STOP_COUNT
-        side_bias = 0.0
-        turn_bias = 0.0
-
-        if blocked:
-            # Pick the clearer side. Positive y steps left; positive turn rotates left.
-            if left <= right:
-                side_bias = DEFAULT_MAP_NAVIGATION_MAX_Y_STEP
-                turn_bias = DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE * 0.65
-            else:
-                side_bias = -DEFAULT_MAP_NAVIGATION_MAX_Y_STEP
-                turn_bias = -DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE * 0.65
-
-        return {
-            "ok": True,
-            "blocked": blocked,
-            "front": front,
-            "left": left,
-            "right": right,
-            "minRange": min_range,
-            "sideBias": side_bias,
-            "turnBias": turn_bias,
-        }
+    return {
+        "ok": False,
+        "checked": True,
+        "message": message,
+        "nav2": snapshot,
+    }
 
 
 class DogzillaRuntime:
@@ -482,6 +214,14 @@ class DogzillaRuntime:
         self.nav2_client = Nav2NavigateClient(DEFAULT_NAV2_ACTION)
         self.lidar_avoidance = LidarAvoidanceSupervisor()
         self.map_navigation = MapPoseNavigationExecutor()
+        self.navigation_cancel = threading.Event()
+        self.navigation_event_lock = threading.Lock()
+        self.last_locomotion_gait: str | None = None
+        self.last_locomotion_pace: str | None = None
+        self.nav2_gait_adapter_count = 0
+        self.last_nav2_gait_command: dict[str, Any] | None = None
+        self.nav2_cmd_vel_blocked = False
+        self.nav2_cmd_vel_blocked_reason: str | None = None
 
         for vendor_path in self.vendor_paths:
             if vendor_path.exists():
@@ -494,6 +234,7 @@ class DogzillaRuntime:
         return self.import_error is None
 
     def snapshot(self) -> dict[str, Any]:
+        nav2 = self.nav2_client.snapshot()
         return {
             **identity_payload(),
             "available": self.available,
@@ -504,23 +245,41 @@ class DogzillaRuntime:
             "logFile": str(LOG_FILE),
             "knownActions": ACTION_ALIASES,
             "studyHints": STUDY_HINTS,
-            "nav2": self.nav2_client.snapshot(),
-            "navigation": self.navigation_snapshot(),
+            "map": read_active_map_metadata(),
+            "nav2": nav2,
+            "navigation": self.navigation_snapshot(nav2),
             "lidarAvoidance": self.lidar_avoidance.snapshot() if hasattr(self, "lidar_avoidance") else None,
+            "nav2GaitAdapter": {
+                "receivedCount": int(getattr(self, "nav2_gait_adapter_count", 0) or 0),
+                "lastCommand": getattr(self, "last_nav2_gait_command", None),
+                "blocked": self._nav2_cmd_vel_is_blocked(),
+                "blockedReason": getattr(self, "nav2_cmd_vel_blocked_reason", None),
+                "endpoint": "/nav2/cmd_vel",
+                "sourceTopic": "/cmd_vel",
+            },
             "rosDomainId": os.environ.get("ROS_DOMAIN_ID"),
             "expectedRosDomainId": DEFAULT_EXPECTED_ROS_DOMAIN_ID,
             "importError": self.import_error,
             "robotError": self.robot_error,
         }
 
-    def navigation_snapshot(self) -> dict[str, Any]:
-        nav2 = self.nav2_client.snapshot()
+    def navigation_snapshot(self, nav2: dict[str, Any] | None = None) -> dict[str, Any]:
+        nav2 = nav2 if isinstance(nav2, dict) else self.nav2_client.snapshot()
         fallback = self.map_navigation.snapshot() if hasattr(self, "map_navigation") else {"available": False}
+        nav2_available = nav2.get("available") is True
+        waypoint_ready = nav2.get("waypointReady") is True
         return {
-            "available": nav2.get("available") is True or fallback.get("available") is True,
-            "primary": "nav2" if nav2.get("available") is True else "map-pose-closed-loop",
+            "available": waypoint_ready,
+            "primary": "nav2" if waypoint_ready else "unavailable",
+            "actionServerAvailable": nav2_available,
+            "waypointReady": waypoint_ready,
+            "blockers": nav2.get("blockers") or [],
             "nav2": nav2,
-            "fallback": fallback,
+            "fallback": {
+                **fallback,
+                "automaticDispatch": False,
+                "reason": "DOGZILLALib map-pose movement is not used for waypoint dispatch; Nav2 is required.",
+            },
         }
 
     def execute(self, canonical_plan: dict[str, Any]) -> dict[str, Any]:
@@ -533,11 +292,18 @@ class DogzillaRuntime:
         if self.dry_run:
             return {"executed": False, "delivery": "dry-run", "kind": kind, "params": params}
 
+        if kind == "noop" and params.get("reason") == "emergency_stop":
+            return self._execute_emergency_stop()
+
         if kind == "locomotion.goto":
-            return self._execute_goto(params)
+            cancel_event = self._replace_navigation_cancel_event()
+            return self._execute_goto(params, cancel_event=cancel_event)
 
         if not self.available:
             return {"executed": False, "error": self.import_error or "DOGZILLALib unavailable"}
+
+        if kind != "state.read":
+            self.cancel_active_navigation()
 
         with self._lock:
             robot = self._robot()
@@ -592,6 +358,90 @@ class DogzillaRuntime:
             except Exception as error:
                 self.robot_error = str(error)
                 return {"executed": False, "error": str(error)}
+
+    def execute_nav2_cmd_vel(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        params = nav2_cmd_vel_to_locomotion(payload or {})
+        self.nav2_gait_adapter_count = int(getattr(self, "nav2_gait_adapter_count", 0) or 0) + 1
+
+        if self._nav2_cmd_vel_is_blocked() and locomotion_params_have_motion(params):
+            result = {
+                "executed": False,
+                "delivery": "nav2-gait-adapter-blocked",
+                "kind": "nav2.cmd_vel.gait_adapter",
+                "error": "emergency_stop_active",
+                "blocked": True,
+                "blockedReason": getattr(self, "nav2_cmd_vel_blocked_reason", None) or "emergency_stop",
+                "params": params,
+            }
+            self.last_nav2_gait_command = {
+                "receivedAt": utc_now(),
+                "result": result,
+            }
+            return result
+
+        if self.dry_run:
+            result = {
+                "executed": False,
+                "delivery": "dry-run",
+                "kind": "nav2.cmd_vel.gait_adapter",
+                "params": params,
+            }
+            self.last_nav2_gait_command = {
+                "receivedAt": utc_now(),
+                "result": result,
+            }
+            return result
+
+        if not self.available:
+            result = {
+                "executed": False,
+                "delivery": "nav2-gait-adapter-unavailable",
+                "error": self.import_error or "DOGZILLALib unavailable",
+                "params": params,
+            }
+            self.last_nav2_gait_command = {
+                "receivedAt": utc_now(),
+                "result": result,
+            }
+            return result
+
+        with self._lock:
+            robot = self._robot()
+            if robot is None:
+                result = {
+                    "executed": False,
+                    "delivery": "nav2-gait-adapter-unavailable",
+                    "error": self.robot_error or "robot unavailable",
+                    "params": params,
+                }
+                self.last_nav2_gait_command = {
+                    "receivedAt": utc_now(),
+                    "result": result,
+                }
+                return result
+
+            try:
+                locomotion = self._execute_locomotion(robot, params)
+                result = {
+                    **locomotion,
+                    "delivery": "DOGZILLALib nav2 gait adapter",
+                    "kind": "nav2.cmd_vel.gait_adapter",
+                    "params": params,
+                }
+            except Exception as error:
+                self.robot_error = str(error)
+                result = {
+                    "executed": False,
+                    "delivery": "nav2-gait-adapter-error",
+                    "error": str(error),
+                    "params": params,
+                }
+
+        self.last_nav2_gait_command = {
+            "receivedAt": utc_now(),
+            "result": result,
+        }
+        return result
 
     def read_state(self) -> dict[str, Any]:
         if not self.available:
@@ -658,10 +508,12 @@ class DogzillaRuntime:
         pace = params.get("pace")
         gait = params.get("gait")
 
-        if pace in ("normal", "slow", "high"):
+        if pace in ("normal", "slow", "high") and pace != getattr(self, "last_locomotion_pace", None):
             robot.pace(pace)
-        if gait in ("trot", "walk", "high_walk") and hasattr(robot, "gait_type"):
+            self.last_locomotion_pace = pace
+        if gait in ("trot", "walk", "high_walk") and gait != getattr(self, "last_locomotion_gait", None) and hasattr(robot, "gait_type"):
             robot.gait_type(gait)
+            self.last_locomotion_gait = gait
 
         robot.move("x", x_step)
         robot.move("y", y_step)
@@ -688,7 +540,7 @@ class DogzillaRuntime:
                 robot.attitude(axis, clamp(float(params[key]), low, high))
         return {"executed": True, "delivery": "DOGZILLALib", "kind": "pose.body"}
 
-    def _execute_goto(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _execute_goto(self, params: dict[str, Any], cancel_event: threading.Event | None = None) -> dict[str, Any]:
         frame = str(params.get("frame") or "map")
         if frame not in DEFAULT_NAV2_ALLOWED_FRAMES:
             return {"executed": False, "error": f"unsupported_navigation_frame:{frame}"}
@@ -702,6 +554,32 @@ class DogzillaRuntime:
 
         if not all(math.isfinite(value) for value in (x, y, yaw)):
             return {"executed": False, "error": "invalid_navigation_pose:non_finite"}
+
+        map_validation = validate_goal_inside_active_map(frame, x, y)
+        if not map_validation.get("ok"):
+            return {
+                "executed": False,
+                "delivery": "waypoint-map-blocked",
+                "kind": "locomotion.goto",
+                "waypoint": params.get("waypoint") or "",
+                "waypointSafe": False,
+                "error": map_validation.get("message") or "waypoint target is not valid for active map",
+                "mapValidation": map_validation,
+            }
+
+        nav_prerequisites = get_nav2_waypoint_prerequisites(self.nav2_client)
+        if not nav_prerequisites.get("ok"):
+            return {
+                "executed": False,
+                "delivery": "nav2-prerequisite-unavailable",
+                "kind": "locomotion.goto",
+                "waypoint": params.get("waypoint") or "",
+                "waypointSafe": frame == "map",
+                "error": nav_prerequisites.get("message") or "Nav2 waypoint prerequisites are not ready",
+                "nav2Prerequisites": nav_prerequisites,
+                "fallback": "disabled",
+                "fallbackError": "Refusing DOGZILLALib map-pose movement fallback; Nav2 with live odometry is required for waypoint navigation.",
+            }
 
         avoidance_request = get_lidar_avoidance_request(params)
         avoidance_result = {"required": False, "ok": True}
@@ -737,31 +615,16 @@ class DogzillaRuntime:
         result = self.nav2_client.send_goal(frame=frame, x=x, y=y, yaw=yaw)
         if not result.get("executed"):
             if result.get("delivery") == "nav2-unavailable":
-                robot = self._robot()
-                if robot is None:
-                    return {
-                        **result,
-                        "lidarAvoidance": avoidance_result,
-                        "fallback": "map-pose-closed-loop",
-                        "fallbackError": self.robot_error or "robot unavailable",
-                    }
-
-                fallback_result = self.map_navigation.goto(
-                    robot,
-                    frame=frame,
-                    x=x,
-                    y=y,
-                    yaw=yaw,
-                    params=params,
-                )
                 return {
-                    **fallback_result,
-                    "nav2": result,
+                    **result,
                     "lidarAvoidance": avoidance_result,
+                    "fallback": "disabled",
+                    "fallbackError": "Refusing DOGZILLALib map-pose movement fallback; Nav2 NavigateToPose is required for waypoint navigation.",
                 }
 
             return {**result, "lidarAvoidance": avoidance_result}
 
+        self._clear_nav2_cmd_vel_block()
         return {
             **result,
             "kind": "locomotion.goto",
@@ -784,6 +647,90 @@ class DogzillaRuntime:
             return None
         return self.robot
 
+    def _navigation_cancel_event(self) -> threading.Event:
+        event = getattr(self, "navigation_cancel", None)
+        if event is None:
+            event = threading.Event()
+            self.navigation_cancel = event
+        return event
+
+    def _replace_navigation_cancel_event(self) -> threading.Event:
+        lock = getattr(self, "navigation_event_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self.navigation_event_lock = lock
+
+        with lock:
+            previous = getattr(self, "navigation_cancel", None)
+            if previous is not None:
+                previous.set()
+            event = threading.Event()
+            self.navigation_cancel = event
+            return event
+
+    def cancel_active_navigation(self) -> None:
+        self._navigation_cancel_event().set()
+
+    def _execute_emergency_stop(self) -> dict[str, Any]:
+        self.cancel_active_navigation()
+        self._block_nav2_cmd_vel("emergency_stop")
+
+        performance_stopped = False
+        stop_error: str | None = None
+        if not self.available:
+            stop_error = self.import_error or "DOGZILLALib unavailable"
+        else:
+            with self._lock:
+                robot = self._robot()
+                if robot is None:
+                    stop_error = self.robot_error or "robot unavailable"
+                else:
+                    try:
+                        performance_stopped = stop_performance_mode(robot)
+                        robot.stop()
+                    except Exception as error:
+                        self.robot_error = str(error)
+                        stop_error = str(error)
+
+        nav2_cancel = self._cancel_nav2_active_goal()
+        result = {
+            "executed": stop_error is None,
+            "delivery": "stop" if stop_error is None else "stop-error",
+            "performanceStopped": performance_stopped,
+            "nav2CmdVelBlocked": True,
+            "nav2Cancel": nav2_cancel,
+        }
+        if stop_error is not None:
+            result["error"] = stop_error
+        return result
+
+    def _cancel_nav2_active_goal(self) -> dict[str, Any]:
+        nav2_client = getattr(self, "nav2_client", None)
+        cancel_goal = getattr(nav2_client, "cancel_active_goal", None)
+        if not callable(cancel_goal):
+            return {"attempted": False, "status": "unsupported"}
+
+        try:
+            return {"attempted": True, **cancel_goal()}
+        except Exception as error:
+            return {
+                "attempted": True,
+                "executed": False,
+                "delivery": "nav2-cancel-error",
+                "error": str(error),
+            }
+
+    def _block_nav2_cmd_vel(self, reason: str) -> None:
+        self.nav2_cmd_vel_blocked = True
+        self.nav2_cmd_vel_blocked_reason = reason
+
+    def _clear_nav2_cmd_vel_block(self) -> None:
+        self.nav2_cmd_vel_blocked = False
+        self.nav2_cmd_vel_blocked_reason = None
+
+    def _nav2_cmd_vel_is_blocked(self) -> bool:
+        return bool(getattr(self, "nav2_cmd_vel_blocked", False))
+
     def _load_factory(self):
         for module_name in load_module_candidates():
             try:
@@ -803,372 +750,6 @@ class DogzillaRuntime:
 
         self.import_error = "No DOGZILLA Python control factory found"
         return None
-
-
-class Nav2NavigateClient:
-    def __init__(self, action_name: str):
-        self.action_name = action_name
-        self.wait_timeout = DEFAULT_NAV2_WAIT_TIMEOUT
-        self.goal_response_timeout = DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT
-        self.import_error: str | None = None
-        self.host_import_error: str | None = None
-        self.docker_import_error: str | None = None
-        self.server_error: str | None = None
-        self.client_available = False
-        self.server_available = False
-        self._last_status_check = 0.0
-        self.backend = "host-rclpy"
-        self.docker_container = DEFAULT_NAV2_DOCKER_CONTAINER
-        self.available = False
-        self._node = None
-        self._executor = None
-        self._thread: threading.Thread | None = None
-        self._action_client = None
-        self._navigate_to_pose_type = None
-
-        try:
-            import rclpy
-            from nav2_msgs.action import NavigateToPose
-            from rclpy.action import ActionClient
-            from rclpy.executors import SingleThreadedExecutor
-        except Exception as error:
-            self.host_import_error = str(error)
-            self.import_error = str(error)
-            self._try_enable_docker_backend()
-            return
-
-        try:
-            rclpy.init(args=None)
-            self._node = rclpy.create_node("dogzilla_direct_nav2_client")
-            self._executor = SingleThreadedExecutor()
-            self._executor.add_node(self._node)
-            self._thread = threading.Thread(target=self._executor.spin, daemon=True)
-            self._thread.start()
-            self._action_client = ActionClient(self._node, NavigateToPose, action_name)
-            self._navigate_to_pose_type = NavigateToPose
-            self.client_available = True
-            self._refresh_status(force=True)
-        except Exception as error:
-            self.import_error = str(error)
-
-    def send_goal(self, *, frame: str, x: float, y: float, yaw: float) -> dict[str, Any]:
-        if self.backend == "docker-rclpy":
-            return self._send_goal_via_docker(frame=frame, x=x, y=y, yaw=yaw)
-
-        self._refresh_status()
-
-        if not self.client_available:
-            return {
-                "executed": False,
-                "delivery": "nav2-unavailable",
-                "error": self.import_error or "Nav2 NavigateToPose client unavailable",
-                "action": self.action_name,
-            }
-
-        if not self._action_client.wait_for_server(timeout_sec=self.wait_timeout):
-            return {
-                "executed": False,
-                "delivery": "nav2-unavailable",
-                "error": f"Nav2 NavigateToPose action server unavailable after {self.wait_timeout:.1f}s",
-                "action": self.action_name,
-            }
-
-        goal = self._navigate_to_pose_type.Goal()
-        goal.pose.header.frame_id = frame
-        goal.pose.header.stamp = self._node.get_clock().now().to_msg()
-        goal.pose.pose.position.x = x
-        goal.pose.pose.position.y = y
-        goal.pose.pose.position.z = 0.0
-        goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
-        goal.pose.pose.orientation.w = math.cos(yaw / 2.0)
-        future = self._action_client.send_goal_async(goal)
-        deadline = time.monotonic() + self.goal_response_timeout
-        while not future.done() and time.monotonic() < deadline:
-            time.sleep(0.02)
-
-        if not future.done():
-            return {
-                "executed": False,
-                "delivery": "nav2-timeout",
-                "error": f"Nav2 NavigateToPose goal response timeout after {self.goal_response_timeout:.1f}s",
-                "action": self.action_name,
-                "frame": frame,
-                "x": x,
-                "y": y,
-                "yaw": yaw,
-            }
-
-        goal_handle = future.result()
-        if goal_handle is None or not getattr(goal_handle, "accepted", False):
-            return {
-                "executed": False,
-                "delivery": "nav2-rejected",
-                "error": "Nav2 NavigateToPose goal rejected",
-                "action": self.action_name,
-                "frame": frame,
-                "x": x,
-                "y": y,
-                "yaw": yaw,
-            }
-
-        return {
-            "executed": True,
-            "delivery": "Nav2 NavigateToPose",
-            "action": self.action_name,
-            "goalAccepted": True,
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "yaw": yaw,
-        }
-
-    def _try_enable_docker_backend(self) -> None:
-        if not DEFAULT_NAV2_DOCKER_ENABLED:
-            self.docker_import_error = "DOGZILLA_NAV2_DOCKER_ENABLED=0"
-            return
-
-        if not self.docker_container:
-            self.docker_import_error = "DOGZILLA_NAV2_DOCKER_CONTAINER is empty"
-            return
-
-        completed = self._run_docker_python(
-            "import rclpy\nfrom nav2_msgs.action import NavigateToPose\nfrom rclpy.action import ActionClient\nprint('ok')\n",
-            timeout=6,
-        )
-        if completed.returncode == 0:
-            self.backend = "docker-rclpy"
-            self.client_available = True
-            self.import_error = None
-            self.docker_import_error = None
-            self._refresh_status(force=True)
-            return
-
-        self.docker_import_error = summarize_process_text(completed.stderr) or summarize_process_text(completed.stdout) or f"docker exec returned {completed.returncode}"
-        self.import_error = f"{self.host_import_error}; docker:{self.docker_import_error}"
-
-    def _refresh_status(self, *, force: bool = False) -> None:
-        now = time.monotonic()
-        if not force and now - self._last_status_check < DEFAULT_NAV2_STATUS_CACHE_SEC:
-            return
-
-        self._last_status_check = now
-
-        if self.backend == "docker-rclpy":
-            self._refresh_docker_status()
-            return
-
-        if not self.client_available or self._action_client is None:
-            if self.host_import_error and DEFAULT_NAV2_DOCKER_ENABLED:
-                self._try_enable_docker_backend()
-                if self.backend == "docker-rclpy":
-                    return
-            self.server_available = False
-            self.available = False
-            return
-
-        try:
-            self.server_available = bool(
-                self._action_client.wait_for_server(timeout_sec=DEFAULT_NAV2_STATUS_WAIT_TIMEOUT)
-            )
-            self.server_error = None if self.server_available else self._nav2_server_unavailable_message()
-            self.available = self.client_available and self.server_available
-            self.import_error = None if self.available else self.server_error
-        except Exception as error:
-            self.server_available = False
-            self.available = False
-            self.server_error = str(error)
-            self.import_error = self.server_error
-
-    def _refresh_docker_status(self) -> None:
-        try:
-            completed = self._run_docker_shell(
-                f"{ROS_SETUP_COMMAND}; ros2 action list",
-                timeout=3,
-            )
-        except subprocess.TimeoutExpired:
-            self.server_available = False
-            self.available = False
-            self.server_error = "Nav2 action list timed out"
-            self.import_error = self.server_error
-            return
-
-        if completed.returncode != 0:
-            error = summarize_process_text(completed.stderr) or summarize_process_text(completed.stdout) or f"docker exec returned {completed.returncode}"
-            self.client_available = False
-            self.server_available = False
-            self.available = False
-            self.docker_import_error = error
-            self.server_error = None
-            self.import_error = f"{self.host_import_error}; docker:{error}" if self.host_import_error else error
-            return
-
-        actions = {
-            line.strip().lstrip("/")
-            for line in summarize_process_text(completed.stdout, limit=5000).splitlines()
-            if line.strip()
-        }
-        self.client_available = True
-        self.server_available = self.action_name.strip().lstrip("/") in actions
-        self.available = self.client_available and self.server_available
-        self.docker_import_error = None
-        self.server_error = None if self.server_available else self._nav2_server_unavailable_message()
-        self.import_error = None if self.available else self.server_error
-
-    def _nav2_server_unavailable_message(self) -> str:
-        return f"Nav2 NavigateToPose action server is not running in the ROS graph for action {self.action_name!r}"
-
-    def _run_docker_shell(self, command: str, *, timeout: float) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-e",
-                f"ROS_DOMAIN_ID={DEFAULT_EXPECTED_ROS_DOMAIN_ID}",
-                self.docker_container,
-                "bash",
-                "-lc",
-                command,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-
-    def _send_goal_via_docker(self, *, frame: str, x: float, y: float, yaw: float) -> dict[str, Any]:
-        request = {
-            "action": self.action_name,
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "yaw": yaw,
-            "waitTimeout": self.wait_timeout,
-            "goalResponseTimeout": self.goal_response_timeout,
-        }
-        request_json = json.dumps(request)
-        script = f"""
-import json
-import math
-import sys
-
-import rclpy
-from nav2_msgs.action import NavigateToPose
-from rclpy.action import ActionClient
-
-request = json.loads({json.dumps(request_json)})
-rclpy.init(args=None)
-node = rclpy.create_node("dogzilla_direct_nav2_docker_client")
-client = ActionClient(node, NavigateToPose, request["action"])
-try:
-    if not client.wait_for_server(timeout_sec=float(request["waitTimeout"])):
-        print(json.dumps({{
-            "executed": False,
-            "delivery": "nav2-unavailable",
-            "error": f"Nav2 NavigateToPose action server unavailable after {{float(request['waitTimeout']):.1f}}s",
-            "action": request["action"],
-        }}))
-        raise SystemExit(2)
-
-    goal = NavigateToPose.Goal()
-    goal.pose.header.frame_id = request["frame"]
-    goal.pose.header.stamp = node.get_clock().now().to_msg()
-    goal.pose.pose.position.x = float(request["x"])
-    goal.pose.pose.position.y = float(request["y"])
-    goal.pose.pose.position.z = 0.0
-    yaw = float(request["yaw"])
-    goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
-    goal.pose.pose.orientation.w = math.cos(yaw / 2.0)
-
-    future = client.send_goal_async(goal)
-    rclpy.spin_until_future_complete(node, future, timeout_sec=float(request["goalResponseTimeout"]))
-    if not future.done():
-        print(json.dumps({{
-            "executed": False,
-            "delivery": "nav2-timeout",
-            "error": f"Nav2 NavigateToPose goal response timeout after {{float(request['goalResponseTimeout']):.1f}}s",
-            "action": request["action"],
-        }}))
-        raise SystemExit(3)
-
-    goal_handle = future.result()
-    if goal_handle is None or not getattr(goal_handle, "accepted", False):
-        print(json.dumps({{
-            "executed": False,
-            "delivery": "nav2-rejected",
-            "error": "Nav2 NavigateToPose goal rejected",
-            "action": request["action"],
-        }}))
-        raise SystemExit(4)
-
-    print(json.dumps({{
-        "executed": True,
-        "delivery": "Nav2 NavigateToPose",
-        "action": request["action"],
-        "goalAccepted": True,
-        "frame": request["frame"],
-        "x": float(request["x"]),
-        "y": float(request["y"]),
-        "yaw": yaw,
-    }}))
-finally:
-    node.destroy_node()
-    rclpy.shutdown()
-"""
-        completed = self._run_docker_python(script, timeout=self.wait_timeout + self.goal_response_timeout + 3)
-        parsed = parse_json_process_output(completed.stdout)
-        if isinstance(parsed, dict):
-            return {
-                **parsed,
-                "backend": self.backend,
-                "container": self.docker_container,
-            }
-
-        return {
-            "executed": False,
-            "delivery": "nav2-docker-failed",
-            "error": summarize_process_text(completed.stderr) or summarize_process_text(completed.stdout) or f"docker exec returned {completed.returncode}",
-            "action": self.action_name,
-            "backend": self.backend,
-            "container": self.docker_container,
-        }
-
-    def _run_docker_python(self, script: str, *, timeout: float) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-i",
-                "-e",
-                f"ROS_DOMAIN_ID={DEFAULT_EXPECTED_ROS_DOMAIN_ID}",
-                self.docker_container,
-                "bash",
-                "-lc",
-                f"{ROS_SETUP_COMMAND}; python3 -",
-            ],
-            input=script,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-
-    def snapshot(self) -> dict[str, Any]:
-        self._refresh_status()
-        return {
-            "available": self.available,
-            "clientAvailable": self.client_available,
-            "serverAvailable": self.server_available,
-            "action": self.action_name,
-            "backend": self.backend,
-            "dockerContainer": self.docker_container,
-            "allowedFrames": sorted(DEFAULT_NAV2_ALLOWED_FRAMES),
-            "waitTimeoutSec": self.wait_timeout,
-            "goalResponseTimeoutSec": self.goal_response_timeout,
-            "importError": self.import_error,
-            "hostImportError": self.host_import_error,
-            "dockerImportError": self.docker_import_error,
-            "serverError": self.server_error,
-        }
 
 
 class BridgeServer(ThreadingHTTPServer):
@@ -1219,6 +800,24 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
+        if self.path == "/nav2/cmd_vel":
+            payload = self._read_json_body()
+            if payload is None:
+                self._send_json(400, {"error": "Expected JSON cmd_vel payload"})
+                return
+
+            result = self.server.runtime.execute_nav2_cmd_vel(payload)
+            accepted = result.get("executed") or result.get("delivery") in ("dry-run", "nav2-gait-adapter-blocked")
+            self._send_json(
+                202 if accepted else 422,
+                {
+                    "accepted": bool(accepted),
+                    "result": result,
+                    **identity_payload(),
+                },
+            )
+            return
+
         if self.path != "/commands":
             self._send_json(404, {"error": "Not found"})
             return
@@ -1236,6 +835,40 @@ class Handler(BaseHTTPRequestHandler):
 
         self.server.received_count += 1
         command_id = f"dogzilla-lib-{self.server.received_count:04d}"
+        if canonical_plan.get("kind") == "locomotion.goto" and DEFAULT_ASYNC_HTTP_GOTO:
+            result = {
+                "executed": True,
+                "delivery": "navigation-accepted",
+                "kind": "locomotion.goto",
+                "waypoint": (canonical_plan.get("params") or {}).get("waypoint") or "",
+                "async": True,
+                "status": "running",
+            }
+            record = {
+                "commandId": command_id,
+                "receivedAt": utc_now(),
+                "envelope": envelope,
+                "canonicalPlan": canonical_plan,
+                "result": result,
+            }
+            self.server.recent_commands.appendleft(record)
+            append_log_record(record)
+            threading.Thread(
+                target=self._execute_background_command,
+                args=(command_id, envelope, canonical_plan),
+                daemon=True,
+            ).start()
+            self._send_json(
+                202,
+                {
+                    "accepted": True,
+                    "commandId": command_id,
+                    "result": result,
+                    **identity_payload(),
+                },
+            )
+            return
+
         result = self.server.runtime.execute(canonical_plan)
         record = {
             "commandId": command_id,
@@ -1260,6 +893,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         return
+
+    def _execute_background_command(self, command_id: str, envelope: dict[str, Any], canonical_plan: dict[str, Any]) -> None:
+        result = self.server.runtime.execute(canonical_plan)
+        record = {
+            "commandId": command_id,
+            "completedAt": utc_now(),
+            "envelope": envelope,
+            "canonicalPlan": canonical_plan,
+            "result": result,
+            "background": True,
+        }
+        self.server.recent_commands.appendleft(record)
+        append_log_record(record)
 
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -1334,6 +980,16 @@ def stop_robot(robot: Any) -> None:
         pass
 
 
+def locomotion_params_have_motion(params: dict[str, Any]) -> bool:
+    for key in ("x_step", "y_step", "turn_rate"):
+        try:
+            if abs(float(params.get(key) or 0.0)) > 1e-6:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def stop_performance_mode(robot: Any) -> bool:
     method = getattr(robot, "perform", None)
     if method is None:
@@ -1347,36 +1003,6 @@ def stop_performance_mode(robot: Any) -> bool:
     return True
 
 
-def scan_obstacle_counts(points: list[Any], max_distance: float) -> tuple[int, int, int, float | None]:
-    front = 0
-    left = 0
-    right = 0
-    min_range: float | None = None
-
-    for point in points:
-        if not isinstance(point, dict):
-            continue
-        try:
-            angle = float(point.get("angle"))
-            distance = float(point.get("range"))
-        except (TypeError, ValueError):
-            continue
-        if not math.isfinite(angle) or not math.isfinite(distance) or distance <= 0:
-            continue
-
-        min_range = distance if min_range is None else min(min_range, distance)
-        if distance > max_distance:
-            continue
-        if -math.radians(15) <= angle <= math.radians(15):
-            front += 1
-        elif math.radians(15) < angle <= math.radians(75):
-            left += 1
-        elif -math.radians(75) <= angle < -math.radians(15):
-            right += 1
-
-    return front, left, right, min_range
-
-
 def get_lidar_avoidance_request(params: dict[str, Any]) -> dict[str, Any]:
     raw = params.get("obstacleAvoidance", params.get("obstacle_avoidance"))
     if raw is True:
@@ -1384,35 +1010,6 @@ def get_lidar_avoidance_request(params: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {"required": False}
     return {**raw, "required": raw.get("required") is True}
-
-
-def summarize_process_text(value: Any, *, limit: int = 500) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    text = str(value).strip()
-    if len(text) <= limit:
-        return text
-    return text[-limit:]
-
-
-def parse_json_process_output(value: Any) -> dict[str, Any] | None:
-    text = summarize_process_text(value, limit=5000)
-    if not text:
-        return None
-
-    for line in reversed(text.splitlines()):
-        candidate = line.strip()
-        if not candidate:
-            continue
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        return parsed if isinstance(parsed, dict) else None
-
-    return None
 
 
 def build_preflight_checks() -> list[dict[str, Any]]:
@@ -1448,18 +1045,6 @@ def read_first_line(path: Path) -> str:
         return path.read_text(encoding="utf-8").splitlines()[0].strip()
     except (OSError, IndexError):
         return ""
-
-
-def clamp(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
-
-
-def normalize_angle(value: float) -> float:
-    while value > math.pi:
-        value -= 2 * math.pi
-    while value <= -math.pi:
-        value += 2 * math.pi
-    return value
 
 
 def clamp_int(value: int, low: int, high: int) -> int:

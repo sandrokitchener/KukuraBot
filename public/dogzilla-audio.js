@@ -15,6 +15,7 @@ export function createDogzillaAudioController({
       storage?.setItem(DOGZILLA_AUDIO_VOLUME_KEY, String(volume))
     } catch {}
     applyVolumeControl(volume)
+    persistVolume(volume)
   }
 
   function applyVolumeControl(volume = loadVolume()) {
@@ -36,13 +37,17 @@ export function createDogzillaAudioController({
 
   function loadVolume() {
     try {
-      return normalizeDogzillaAudioVolume(
-        Number(storage?.getItem(DOGZILLA_AUDIO_VOLUME_KEY)),
-        DEFAULT_DOGZILLA_AUDIO_VOLUME,
-      )
+      const stored = storage?.getItem(DOGZILLA_AUDIO_VOLUME_KEY)
+      if (stored != null && stored !== '') {
+        return normalizeDogzillaAudioVolume(Number(stored), DEFAULT_DOGZILLA_AUDIO_VOLUME)
+      }
     } catch {
-      return DEFAULT_DOGZILLA_AUDIO_VOLUME
     }
+
+    return normalizeDogzillaAudioVolume(
+      getRuntimeConfig?.().dogzilla?.audio?.volume,
+      DEFAULT_DOGZILLA_AUDIO_VOLUME,
+    )
   }
 
   function shouldUsePiAudio() {
@@ -74,6 +79,16 @@ export function createDogzillaAudioController({
       throw new Error(payload.error || 'DOGZILLA Pi audio cue failed.')
     }
     return payload
+  }
+
+  function persistVolume(volume) {
+    apiFetch?.('/api/dogzilla/audio/volume', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ volume }),
+    }).catch(() => {})
   }
 
   return {

@@ -117,6 +117,20 @@ class DogzillaAudioCueTests(unittest.TestCase):
         self.assertEqual(prepare.call_args.args[2], 0.4)
         self.assertIn("robodoge-audio-scaled.wav", str(popen.call_args.args[0][-1]))
 
+    def test_zero_volume_mutes_without_starting_player(self):
+        state = server.AudioState(Path("public/sounds"), "aplay", "")
+        thinking_process = FakeProcess()
+        state.active_processes.append(thinking_process)
+
+        with patch.object(server.subprocess, "Popen") as popen:
+            result = server.play_cue(state, "bark", 0)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["muted"])
+        self.assertEqual(result["volume"], 0.0)
+        self.assertTrue(thinking_process.terminated)
+        popen.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

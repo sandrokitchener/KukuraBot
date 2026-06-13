@@ -1,0 +1,29 @@
+#usda 1.0
+(
+    defaultPrim = "xgo"
+    metersPerUnit = 1
+    upAxis = "Z"
+    subLayers = [
+        @Dogzilla_full.usd@
+    ]
+)
+
+over "xgo"
+{
+    over "base_footprint" (
+        prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+    )
+    {
+        uniform bool physxArticulation:enabledSelfCollisions = 0
+        int physxArticulation:solverPositionIterationCount = 8
+        int physxArticulation:solverVelocityIterationCount = 2
+    }
+
+    over "root_joint" (
+        delete apiSchemas = ["PhysicsArticulationRootAPI"]
+    )
+    {
+        bool physics:jointEnabled = 0
+        bool physics:excludeFromArticulation = 1
+    }
+}

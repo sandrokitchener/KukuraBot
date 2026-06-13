@@ -121,6 +121,13 @@ def play_cue(state: AudioState, cue: str, volume: Any = None) -> dict[str, Any]:
     if not files:
         return {"ok": False, "cue": cue, "error": f"Unknown cue: {cue}"}
 
+    if volume_value <= 0.0:
+        if cue in ("thinking-start", "confirm", "bark"):
+            stop_active(state)
+        state.last_cue = cue
+        state.last_error = ""
+        return {"ok": True, "cue": cue, "muted": True, "volume": volume_value}
+
     player = resolve_player(state.player)
     if not player:
         return {"ok": False, "cue": cue, "error": f"Audio player not found: {state.player}"}

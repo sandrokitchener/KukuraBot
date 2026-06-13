@@ -219,10 +219,12 @@
     border-right: 0;
   }
 
+  .robot-map-head,
   .robot-camera-panel .robot-map-head {
     flex-wrap: wrap;
   }
 
+  .robot-map-actions,
   .robot-camera-actions {
     width: 100%;
     justify-content: space-between;

@@ -1,0 +1,16 @@
+{
+  "nav2RobotRadius": 0.1,
+  "nav2FootprintPadding": 0.01,
+  "nav2InflationRadius": 0.16,
+  "nav2CostScalingFactor": 10.0,
+  "nav2ObstacleMaxRange": 2.5,
+  "nav2RaytraceMaxRange": 3.5,
+  "mapNavigationObstacleDistance": 0.35,
+  "mapNavigationObstacleStopCount": 3,
+  "mapNavigationMaxXStep": 4,
+  "mapNavigationMaxYStep": 3,
+  "mapNavigationMaxTurnRate": 18,
+  "mapNavigationXGain": 14,
+  "mapNavigationYGain": 10,
+  "mapNavigationTurnGain": 28
+}

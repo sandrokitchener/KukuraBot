@@ -24,6 +24,10 @@ Do not hardcode `/dev/video0`. The Sonix USB camera re-enumerates on the Pi and 
 
 Do not remove low-latency capture behavior. V4L can buffer old camera frames; if the capture loop sleeps or inference is slower than the sensor, the app shows stale video behind what DOGZILLA actually sees. The sidecar sets `CAP_PROP_BUFFERSIZE=1` and drains a few queued frames before encoding each MJPEG frame. If camera lag returns, check `DOGZILLA_YOLO_CAMERA_DRAIN_FRAMES` before changing camera source.
 
+Health must fail when the latest frame is stale. The app should not treat an old cached JPEG as live video, so `/healthz` reports `staleFrame`, `latestFrameAgeSec`, and `captureRestarts`.
+
+The boot service must release camera desktop consumers before YOLO starts. Keep `release_camera_consumers.py` wired into the service template so `pipewire` and `wireplumber` do not keep `/dev/video*` open after boot.
+
 Known bad states:
 
 - `sourceStreamUrl: "/dev/video0"` in `config/dogzilla-connection.json`.

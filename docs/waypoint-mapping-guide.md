@@ -41,9 +41,9 @@ Today the real-robot command compiler actually uses these keys from `config/robo
 | `physicalSpot` | Human-readable meaning | Describe the parking bubble, not just the room name. |
 | `anchorHint` | How you measured it | Reference a wall, dock, door frame, tile seam, or furniture corner that does not move. |
 | `verified` | Bench-tested or still placeholder | Leave `false` until both sim and real runs agree. |
-| `notes` | Extra context | Use for safety notes, rug warnings, dock offsets, or retry tips. |
+| `notes` | Extra context only | Notes are never authoritative. Use them for safety notes, rug warnings, dock offsets, or retry tips, but validation and navigation must read structured fields. |
 
-Anything else you add is currently metadata only. Safe pattern: keep future tuning values in `notes` until the app or bridge starts reading them explicitly.
+Anything else you add is currently metadata only. Safe pattern: add future tuning values as explicit structured fields when the app or bridge should read them; keep `notes` human-only.
 
 ## Current Isaac Sim Contract
 
@@ -55,7 +55,7 @@ Anything else you add is currently metadata only. Safe pattern: keep future tuni
 | `position` | `[x, y, z]` meters | Mirror the semantic spot, not necessarily the exact real-house coordinate. |
 | `yawDegrees` | Heading in degrees | Keep this file in degrees because that is the existing repo convention. |
 | `verified` | Sim-tested | Mark true only after actual scene playback looks right. |
-| `notes` | Scene caveats | Call out local-room-only or proxy-rig-only assumptions. |
+| `notes` | Scene caveats only | Human context only; do not make sim routing or validation depend on note text. |
 
 ## Pick Physical Spots, Not Room Centers
 

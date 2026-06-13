@@ -40,6 +40,7 @@ DEFAULT_COLORS = [
     (255, 220, 0),
 ]
 WAKE_COMMAND = "$010F040115#"
+DEFAULT_STALE_HEALTH_SECONDS = 2.0
 
 
 @dataclass
@@ -64,6 +65,7 @@ class VisionState:
     inference_ms: float = 0.0
     model_loaded: bool = False
     labels: list[str] = field(default_factory=list)
+    capture_restarts: int = 0
 
 
 class YoloOnnxDetector:
@@ -148,6 +150,7 @@ class VisionWorker(threading.Thread):
             except Exception as error:
                 with self.state.lock:
                     self.state.latest_error = str(error)
+                    self.state.capture_restarts += 1
                 time.sleep(self.args.restart_delay)
             finally:
                 if control_socket:
@@ -274,8 +277,12 @@ def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, An
     ensure_worker(state, args)
     with state.lock:
         age = time.time() - state.latest_frame_at if state.latest_frame_at else None
+        stale = age is None or age > args.stale_health_seconds
+        error = state.latest_error
+        if stale and state.latest_jpeg is not None and not error:
+            error = f"Camera frame is stale; latest age {age:.2f}s."
         return {
-            "ok": state.latest_jpeg is not None and not state.latest_error,
+            "ok": state.latest_jpeg is not None and not error and not stale,
             "modelLoaded": state.model_loaded,
             "model": args.model,
             "cameraUrl": args.camera_url,
@@ -286,8 +293,11 @@ def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, An
             "inferences": state.inferences,
             "detections": len(state.latest_detections),
             "latestFrameAgeSec": age,
+            "staleFrame": stale,
+            "staleHealthSeconds": args.stale_health_seconds,
             "inferenceMs": state.inference_ms,
-            "error": state.latest_error,
+            "captureRestarts": state.capture_restarts,
+            "error": error,
             "streamUrl": "/stream.mjpg",
             "detectionsUrl": "/detections",
         }
@@ -325,7 +335,7 @@ def open_camera_control_session(args: argparse.Namespace) -> socket.socket | Non
         raise RuntimeError(f"Camera control wake failed: {error}") from error
 
 
-def read_camera_frames(source: str, timeout: float, read_retries: int = 30, drain_frames: int = 4, stale_frame_limit: int = 36):
+def read_camera_frames(source: str, timeout: float, read_retries: int = 0, drain_frames: int = 4, stale_frame_limit: int = 36):
     source = resolve_camera_source(source)
     if is_http_camera(source):
         yield from read_mjpeg_frames(source, timeout)
@@ -650,7 +660,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-control-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_CAMERA_CONTROL_TIMEOUT", "2.5")))
     parser.add_argument("--camera-wake-command", default=os.getenv("DOGZILLA_YOLO_CAMERA_WAKE_COMMAND", WAKE_COMMAND))
     parser.add_argument("--camera-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_CAMERA_TIMEOUT", "8")))
-    parser.add_argument("--camera-read-retries", type=int, default=int(os.getenv("DOGZILLA_YOLO_CAMERA_READ_RETRIES", "30")))
+    parser.add_argument("--camera-read-retries", type=int, default=int(os.getenv("DOGZILLA_YOLO_CAMERA_READ_RETRIES", "0")))
     parser.add_argument("--camera-drain-frames", type=int, default=int(os.getenv("DOGZILLA_YOLO_CAMERA_DRAIN_FRAMES", "4")))
     parser.add_argument("--stale-frame-limit", type=int, default=int(os.getenv("DOGZILLA_YOLO_STALE_FRAME_LIMIT", "36")))
     parser.add_argument("--imgsz", type=int, default=int(os.getenv("DOGZILLA_YOLO_IMGSZ", "640")))
@@ -659,6 +669,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_MAX_FPS", "12")))
     parser.add_argument("--stream-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STREAM_FPS", "12")))
     parser.add_argument("--infer-interval", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_INFER_INTERVAL", "0.25")))
+    parser.add_argument("--stale-health-seconds", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STALE_HEALTH_SECONDS", str(DEFAULT_STALE_HEALTH_SECONDS))))
     parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "65")))
     parser.add_argument("--restart-delay", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_RESTART_DELAY", "2")))
     parser.add_argument("--first-frame-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_FIRST_FRAME_TIMEOUT", "15")))

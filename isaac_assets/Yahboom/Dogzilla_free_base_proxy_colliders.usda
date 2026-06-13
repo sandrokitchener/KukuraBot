@@ -1,0 +1,122 @@
+#usda 1.0
+(
+    defaultPrim = "xgo"
+    metersPerUnit = 1
+    upAxis = "Z"
+    subLayers = [
+        @Dogzilla_free_base.usda@
+    ]
+)
+
+def Xform "xgo"
+{
+    def Xform "base_link"
+    {
+        def Cube "proxy_body_box" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            double size = 1
+            double3 xformOp:translate = (0.0, 0.0, 0.052)
+            float3 xformOp:scale = (0.110, 0.034, 0.044)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+    }
+
+    def Xform "lf_lower_leg_link"
+    {
+        def Capsule "proxy_shin_capsule" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            uniform token axis = "Z"
+            double height = 0.072
+            double radius = 0.0075
+            double3 xformOp:translate = (0.0, 0.0, -0.034)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+        def Sphere "proxy_foot_sphere" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            double radius = 0.014
+            double3 xformOp:translate = (0.0, 0.0, -0.073)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "rf_lower_leg_link"
+    {
+        def Capsule "proxy_shin_capsule" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            uniform token axis = "Z"
+            double height = 0.072
+            double radius = 0.0075
+            double3 xformOp:translate = (0.0, 0.0, -0.034)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+        def Sphere "proxy_foot_sphere" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            double radius = 0.014
+            double3 xformOp:translate = (0.0, 0.0, -0.073)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "lh_lower_leg_link"
+    {
+        def Capsule "proxy_shin_capsule" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            uniform token axis = "Z"
+            double height = 0.072
+            double radius = 0.0075
+            double3 xformOp:translate = (0.0, 0.0, -0.034)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+        def Sphere "proxy_foot_sphere" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            double radius = 0.014
+            double3 xformOp:translate = (0.0, 0.0, -0.073)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+
+    def Xform "rh_lower_leg_link"
+    {
+        def Capsule "proxy_shin_capsule" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            uniform token axis = "Z"
+            double height = 0.072
+            double radius = 0.0075
+            double3 xformOp:translate = (0.0, 0.0, -0.034)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+        def Sphere "proxy_foot_sphere" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            token visibility = "invisible"
+            double radius = 0.014
+            double3 xformOp:translate = (0.0, 0.0, -0.073)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+}

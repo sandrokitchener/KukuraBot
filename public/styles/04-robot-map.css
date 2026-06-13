@@ -60,6 +60,46 @@
   max-width: 118px;
 }
 
+.robot-map-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.map-origin-button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-color: rgba(63, 53, 43, 0.28);
+  background: #fffaf4;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.map-origin-button:hover:not(:disabled),
+.map-origin-button:focus-visible {
+  border-color: rgba(255, 123, 86, 0.72);
+  background: #fff0e5;
+}
+
+.camera-refresh-button {
+  min-width: 72px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-color: rgba(63, 53, 43, 0.28);
+  background: #fffaf4;
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.camera-refresh-button:hover:not(:disabled),
+.camera-refresh-button:focus-visible {
+  border-color: rgba(255, 123, 86, 0.72);
+  background: #fff0e5;
+}
+
 .snapshot-button {
   min-width: 94px;
   min-height: 32px;
@@ -280,13 +320,13 @@
   transform: translateX(-50%);
 }
 
-.robot-map-waypoint[data-verified='false'] {
+.robot-map-waypoint[data-enabled='false'] {
   background: #7f7568;
   box-shadow: 0 0 0 3px rgba(127, 117, 104, 0.16);
   opacity: 0.45;
 }
 
-.robot-map-waypoint[data-verified='false']::after {
+.robot-map-waypoint[data-enabled='false']::after {
   border-bottom-color: #7f7568;
 }
 

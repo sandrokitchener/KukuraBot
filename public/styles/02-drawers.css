@@ -359,6 +359,13 @@
   text-align: right;
 }
 
+.settings-audio-volume {
+  margin-top: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
 .advanced-service-tools {
   border-top: 1px solid var(--line);
   padding-top: 10px;

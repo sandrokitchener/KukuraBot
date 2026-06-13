@@ -77,6 +77,64 @@ test('sendDogzillaAudioCue forwards normalized cue volume', async () => {
   assert.deepEqual(requestBody, { cue: 'bark', volume: 0.35 })
 })
 
+test('sendDogzillaAudioCue uses configured volume when request omits volume', async () => {
+  let requestBody = null
+  const result = await sendDogzillaAudioCue('bark', {
+    config: {
+      audio: {
+        enabled: true,
+        cueUrl: 'http://10.0.4.32:8895/cue',
+        volume: 0,
+      },
+    },
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body)
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            cue: 'bark',
+            muted: true,
+            volume: requestBody.volume,
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.volume, 0)
+  assert.deepEqual(requestBody, { cue: 'bark', volume: 0 })
+})
+
+test('sendDogzillaAudioCue lets explicit request volume override configured volume', async () => {
+  let requestBody = null
+  await sendDogzillaAudioCue('bark', {
+    config: {
+      audio: {
+        enabled: true,
+        cueUrl: 'http://10.0.4.32:8895/cue',
+        volume: 0,
+      },
+    },
+    volume: 50,
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body)
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, cue: 'bark', volume: requestBody.volume }
+        },
+      }
+    },
+  })
+
+  assert.deepEqual(requestBody, { cue: 'bark', volume: 0.5 })
+})
+
 test('getDogzillaAudioCueHealth reports disabled config loudly', async () => {
   const result = await getDogzillaAudioCueHealth({
     config: {

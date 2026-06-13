@@ -66,6 +66,7 @@ Observed stack:
 - The available Yahboom ROS Humble images (`3.6` and `3.5`) expose `bringup`, `yahboom_bringup`, and `tf_publisher`, but `ros2 pkg list` did not show the section-14 navigation/localization packages `yahboom_dog_cartographer`, `yahboom_dog_navigation2`, `cartographer_ros`, `rf2o_laser_odometry`, or `localization_server`.
 - No saved `.pbstream` or ROS map `.yaml` was found on the Pi or in either Yahboom image. Until a real Cartographer/map localization source is installed and running, `/pose` must remain unavailable.
 - Live repair on 2026-06-04 installed `ros-humble-cartographer-ros` in the running Yahboom Docker container, started a laser-only Cartographer SLAM config from `sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only.lua`, and started the vendor ORADAR static TF `base_link -> laser_frame` (`0 0 0.18 0 0 0`). `/pose` then returned `frame: "map"`, `source: "tf:map->base_link"`, and `waypointSafe: true`.
+- Current Robo-Doge persistent map contract: `start-map-pose` defaults to saved-map localization using `$REMOTE_ROOT/maps/robodoge_home.pbstream`. It refuses to create a fresh map when that file is missing. Use the explicit mapping action (`start-map-pose-mapping` or `-Mode mapping`) to build a new map, then save it with `save-map-pose`.
 - Camera `cv2.VideoCapture(0..5)` did not open, though vendor Flask stream exists on port `6500`.
 - Opening the vendor `/video_feed` stream can monopolize or hang the vendor Flask app. The Robo-Doge UI now lazy-loads the stream only while the Camera tab is active.
 - Running the Docker ROS2 mapping/navigation stack would require device mounts and launch testing. Ask before changing/running anything beyond read-only inspection.
@@ -104,7 +105,14 @@ Working map-pose starter:
 powershell -ExecutionPolicy Bypass -File scripts\start-dogzilla-map-pose-ssh.ps1 -Host 10.0.4.32
 ```
 
-This starts the real Cartographer TF source used by `/pose`; it must not be replaced with scan-odom or app-side synthetic pose.
+This starts the real Cartographer TF source used by `/pose`; it must not be replaced with scan-odom or app-side synthetic pose. By default it loads the saved `.pbstream` and localizes against it.
+
+Explicit mapping and save commands:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-dogzilla-map-pose-ssh.ps1 -Host 10.0.4.32 -Mode mapping
+powershell -ExecutionPolicy Bypass -File scripts\save-dogzilla-map-pose-ssh.ps1 -Host 10.0.4.32
+```
 
 ## Exposed Pose Feed
 

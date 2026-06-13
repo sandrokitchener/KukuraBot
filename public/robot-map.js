@@ -7,7 +7,9 @@ export function createRobotMapRenderer({
   formatEventTimestamp,
 } = {}) {
   let baseMeta = ''
+  let waypointReadinessSummary = ''
   let lidarSummary = ''
+  let lastRenderedRobot = null
 
   function renderWaypoints(robot = null) {
     if (!elements.waypoints) {
@@ -26,11 +28,16 @@ export function createRobotMapRenderer({
       const marker = document.createElement('span')
       marker.className = 'robot-map-waypoint'
       marker.dataset.waypointId = waypoint.id
+      marker.dataset.frame = waypoint.frame
       marker.dataset.verified = waypoint.verified ? 'true' : 'false'
+      marker.dataset.enabled = waypoint.enabled ? 'true' : 'false'
+      if (waypoint.sourceFrame) {
+        marker.dataset.sourceFrame = waypoint.sourceFrame
+      }
       marker.style.left = `${position.xPercent}%`
       marker.style.top = `${position.yPercent}%`
       marker.style.setProperty('--waypoint-heading', `${waypoint.yaw || 0}rad`)
-      marker.title = `${waypoint.label}: x ${waypoint.x.toFixed(2)}m, y ${waypoint.y.toFixed(2)}m`
+      marker.title = formatRobotMapWaypointTitle(waypoint)
 
       const label = document.createElement('span')
       label.className = 'robot-map-waypoint-label'
@@ -44,6 +51,7 @@ export function createRobotMapRenderer({
 
   function renderDot(robot) {
     if (!robot?.pose) {
+      lastRenderedRobot = null
       hideDot()
       clearPoseTrack()
       setPoseReadout(null)
@@ -53,6 +61,7 @@ export function createRobotMapRenderer({
 
     const position = poseToMapPosition(robot.pose, getRobotMapRangeMeters(getWaypoints(), robot))
     if (!position) {
+      lastRenderedRobot = null
       hideDot()
       clearPoseTrack()
       setPoseReadout(null)
@@ -60,6 +69,7 @@ export function createRobotMapRenderer({
       return
     }
 
+    lastRenderedRobot = robot
     elements.dot.style.left = `${position.xPercent}%`
     elements.dot.style.top = `${position.yPercent}%`
     elements.dot.style.opacity = '1'
@@ -72,6 +82,7 @@ export function createRobotMapRenderer({
   }
 
   function hideDot() {
+    lastRenderedRobot = null
     elements.dot.style.opacity = '0'
   }
 
@@ -88,7 +99,7 @@ export function createRobotMapRenderer({
     const samples = Array.isArray(track) ? track.slice(-40) : []
     const dots = []
     samples.forEach((pose, index) => {
-      if (pose?.frame !== 'map') {
+      if (!isRenderableRobotMapFrame(pose?.frame)) {
         return
       }
       const position = poseToMapPosition(pose, getRobotMapRangeMeters(getWaypoints(), robot))
@@ -101,7 +112,7 @@ export function createRobotMapRenderer({
       dot.style.left = `${position.xPercent}%`
       dot.style.top = `${position.yPercent}%`
       dot.style.opacity = String(0.18 + ageRatio * 0.55)
-      dot.title = `map ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}`
+      dot.title = `${pose.frame || 'map'} ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}`
       dots.push(dot)
     })
 
@@ -133,15 +144,24 @@ export function createRobotMapRenderer({
 
   function setMeta(message) {
     baseMeta = message || ''
-    elements.meta.textContent = [baseMeta, lidarSummary].filter(Boolean).join(' ')
+    updateMeta()
   }
 
   function setLidarSummary(summary) {
     lidarSummary = summary || ''
-    elements.meta.textContent = [baseMeta, lidarSummary].filter(Boolean).join(' ')
+    updateMeta()
   }
 
-  function renderLidarScan(scan) {
+  function setWaypointReadiness(summary) {
+    waypointReadinessSummary = summary || ''
+    updateMeta()
+  }
+
+  function updateMeta() {
+    elements.meta.textContent = [baseMeta, waypointReadinessSummary, lidarSummary].filter(Boolean).join(' ')
+  }
+
+  function renderLidarScan(scan, robot = lastRenderedRobot) {
     if (!elements.lidarScan) {
       return
     }
@@ -165,31 +185,52 @@ export function createRobotMapRenderer({
       return
     }
 
-    const radius = Math.min(width, height) * 0.42
-    const centerX = width / 2
-    const centerY = height / 2
     const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
-    const displayRange = clamp(Math.max(1.5, maxSeen), 1.5, 6)
-    const scale = radius / displayRange
+    const robotPose = normalizeRobotMapPose(robot?.pose)
+
+    if (!robotPose) {
+      drawCenteredLidarScan(context, points, {
+        width,
+        height,
+        displayRange: clamp(Math.max(1.5, maxSeen), 1.5, 6),
+      })
+      return
+    }
+
+    const mapRange = getRobotMapRangeMeters(getWaypoints(), robot)
+    const robotPosition = poseToMapPosition(robotPose, mapRange)
+    if (!robotPosition) {
+      return
+    }
+
+    const centerX = (robotPosition.xPercent / 100) * width
+    const centerY = (robotPosition.yPercent / 100) * height
+    const displayRange = clamp(Math.max(1.5, maxSeen), 1.5, mapRange)
+    const scaleX = width / (mapRange * 2)
+    const scaleY = height / (mapRange * 2)
 
     context.save()
     context.lineWidth = 1
     context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
     for (const ring of [0.25, 0.5, 0.75, 1]) {
+      const ringMeters = displayRange * ring
       context.beginPath()
-      context.arc(centerX, centerY, radius * ring, 0, Math.PI * 2)
+      context.ellipse(centerX, centerY, ringMeters * scaleX, ringMeters * scaleY, 0, 0, Math.PI * 2)
       context.stroke()
     }
 
     context.fillStyle = 'rgba(0, 123, 132, 0.78)'
     for (const point of points) {
-      const x = toFiniteNumber(point.x)
-      const y = toFiniteNumber(point.y)
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      const mapPoint = lidarPointToMapPose(point, robotPose)
+      if (!mapPoint) {
         continue
       }
-      const px = centerX + x * scale
-      const py = centerY - y * scale
+      const pointPosition = poseToMapPosition(mapPoint, mapRange)
+      if (!pointPosition) {
+        continue
+      }
+      const px = (pointPosition.xPercent / 100) * width
+      const py = (pointPosition.yPercent / 100) * height
       if (px < 0 || px > width || py < 0 || py > height) {
         continue
       }
@@ -198,10 +239,6 @@ export function createRobotMapRenderer({
       context.fill()
     }
 
-    context.fillStyle = 'rgba(255, 114, 79, 0.95)'
-    context.beginPath()
-    context.arc(centerX, centerY, 4, 0, Math.PI * 2)
-    context.fill()
     context.restore()
   }
 
@@ -235,6 +272,7 @@ export function createRobotMapRenderer({
     setLidarSummary,
     setMeta,
     setPoseReadout,
+    setWaypointReadiness,
     streamPath: () => getRuntimeConfig?.().robotRuntime?.stateStreamPath || defaultRobotRuntime?.stateStreamPath,
   }
 }
@@ -242,7 +280,7 @@ export function createRobotMapRenderer({
 export function getRenderableRobotMapWaypoints(waypoints) {
   return (Array.isArray(waypoints) ? waypoints : [])
     .map(normalizeRobotMapWaypoint)
-    .filter((waypoint) => waypoint && waypoint.frame === 'map' && waypoint.verified)
+    .filter((waypoint) => waypoint && isRenderableRobotMapFrame(waypoint.frame))
 }
 
 export function normalizeRobotMapWaypoint(waypoint) {
@@ -252,15 +290,70 @@ export function normalizeRobotMapWaypoint(waypoint) {
     return null
   }
 
+  const frame = String(waypoint.frame || 'map').trim().replace(/^\/+/, '')
+  const sourceFrame = String(waypoint.sourceFrame || waypoint.source_frame || '').trim().replace(/^\/+/, '')
+  const originLabel = String(waypoint.originLabel || waypoint.origin_label || '').trim()
+  const verificationProblem = String(waypoint.verificationProblem || '').trim()
+  const disabledReason = String(waypoint.disabledReason || waypoint.disabled_reason || '').trim()
+  const advisoryProblems = normalizeRobotMapWaypointAdvisories(waypoint.advisoryProblems || waypoint.advisory_problems)
+  const mapFramePose = normalizeRobotMapWaypointSourcePose(waypoint.mapFramePose)
+  const enabled = waypoint.enabled !== false && waypoint.navigable !== false
+
   return {
     id: String(waypoint.id || '').trim(),
     label: String(waypoint.label || waypoint.id || 'Waypoint').trim(),
-    frame: String(waypoint.frame || 'map').trim(),
+    frame,
     x,
     y,
     yaw: toFiniteNumber(waypoint.yaw ?? waypoint.theta) || 0,
     verified: waypoint.verified === true,
+    enabled,
+    ...(sourceFrame ? { sourceFrame } : {}),
+    ...(originLabel ? { originLabel } : {}),
+    ...(verificationProblem ? { verificationProblem } : {}),
+    ...(disabledReason ? { disabledReason } : {}),
+    ...(advisoryProblems.length ? { advisoryProblems } : {}),
+    ...(mapFramePose ? { mapFramePose } : {}),
   }
+}
+
+export function formatRobotMapWaypointTitle(waypoint) {
+  const frame = String(waypoint?.frame || 'map').trim().replace(/^\/+/, '') || 'map'
+  const label = String(waypoint?.label || waypoint?.id || 'Waypoint').trim()
+  const yaw = toFiniteNumber(waypoint?.yaw ?? waypoint?.theta)
+  const parts = [
+    `${label}: ${frame} x ${waypoint.x.toFixed(2)}m, y ${waypoint.y.toFixed(2)}m${Number.isFinite(yaw) ? `, yaw ${yaw.toFixed(2)}rad` : ''}`,
+  ]
+
+  const sourcePose = normalizeRobotMapWaypointSourcePose(waypoint?.mapFramePose)
+  const sourceFrame = String(waypoint?.sourceFrame || waypoint?.source_frame || sourcePose?.frame || '').trim().replace(/^\/+/, '')
+  if (sourcePose && sourceFrame && sourceFrame !== frame) {
+    parts.push(
+      `source ${sourceFrame} x ${sourcePose.x.toFixed(2)}m, y ${sourcePose.y.toFixed(2)}m, yaw ${sourcePose.yaw.toFixed(2)}rad`,
+    )
+  }
+
+  const originLabel = String(waypoint?.originLabel || waypoint?.origin_label || '').trim()
+  if (originLabel) {
+    parts.push(`origin ${originLabel}`)
+  }
+
+  if (waypoint?.enabled === false) {
+    const disabledReason = String(waypoint?.disabledReason || waypoint?.disabled_reason || waypoint?.verificationProblem || 'disabled by config').trim()
+    parts.push(`disabled ${disabledReason}`)
+  }
+
+  const verificationProblem = String(waypoint?.verificationProblem || '').trim()
+  if (verificationProblem) {
+    parts.push(`warning ${verificationProblem}`)
+  }
+
+  const advisoryProblems = normalizeRobotMapWaypointAdvisories(waypoint?.advisoryProblems || waypoint?.advisory_problems)
+  if (advisoryProblems.length) {
+    parts.push(`advisory ${advisoryProblems.join('; ')}`)
+  }
+
+  return `${parts.join('. ')}.`
 }
 
 export function poseToMapPosition(pose, rangeMeters = ROBOT_MAP_RANGE_METERS) {
@@ -276,6 +369,23 @@ export function poseToMapPosition(pose, rangeMeters = ROBOT_MAP_RANGE_METERS) {
   return {
     xPercent: 50 + (xRatio * 50),
     yPercent: 50 - (yRatio * 50),
+  }
+}
+
+export function lidarPointToMapPose(point, robotPose) {
+  const robot = normalizeRobotMapPose(robotPose)
+  const localX = toFiniteNumber(point?.x)
+  const localY = toFiniteNumber(point?.y)
+  if (!robot || !Number.isFinite(localX) || !Number.isFinite(localY)) {
+    return null
+  }
+
+  const c = Math.cos(robot.theta)
+  const s = Math.sin(robot.theta)
+  return {
+    frame: robot.frame,
+    x: robot.x + c * localX - s * localY,
+    y: robot.y + s * localX + c * localY,
   }
 }
 
@@ -368,6 +478,27 @@ export function formatLidarSerialDetail(payload) {
   return ` Serial ${serialPath}${baudText}${detail ? ` (${detail})` : ''}.`
 }
 
+export function formatWaypointReadinessSummary(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return ''
+  }
+
+  const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {}
+  const ready = Number.isFinite(Number(summary.ready)) ? Number(summary.ready) : 0
+  const navigable = Number.isFinite(Number(summary.navigable)) ? Number(summary.navigable) : 0
+  if (payload.readyForMapWaypoints === true) {
+    return `Waypoints: ready (${ready}/${navigable}).`
+  }
+
+  const blockers = Array.isArray(payload.blockers)
+    ? payload.blockers.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  const detail = blockers.length > 0
+    ? blockers.slice(0, 2).join('; ')
+    : payload.error || 'readiness unknown'
+  return `Waypoints not ready: ${detail}.`
+}
+
 export function toFiniteNumber(value) {
   if (value === null || value === undefined || value === '') {
     return Number.NaN
@@ -377,6 +508,95 @@ export function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : Number.NaN
 }
 
+function drawCenteredLidarScan(context, points, { width, height, displayRange }) {
+  const radius = Math.min(width, height) * 0.42
+  const centerX = width / 2
+  const centerY = height / 2
+  const scale = radius / displayRange
+
+  context.save()
+  context.lineWidth = 1
+  context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
+  for (const ring of [0.25, 0.5, 0.75, 1]) {
+    context.beginPath()
+    context.arc(centerX, centerY, radius * ring, 0, Math.PI * 2)
+    context.stroke()
+  }
+
+  context.fillStyle = 'rgba(0, 123, 132, 0.78)'
+  for (const point of points) {
+    const x = toFiniteNumber(point.x)
+    const y = toFiniteNumber(point.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue
+    }
+    const px = centerX + x * scale
+    const py = centerY - y * scale
+    if (px < 0 || px > width || py < 0 || py > height) {
+      continue
+    }
+    context.beginPath()
+    context.arc(px, py, 2.2, 0, Math.PI * 2)
+    context.fill()
+  }
+
+  context.fillStyle = 'rgba(255, 114, 79, 0.95)'
+  context.beginPath()
+  context.arc(centerX, centerY, 4, 0, Math.PI * 2)
+  context.fill()
+  context.restore()
+}
+
+function normalizeRobotMapWaypointSourcePose(value) {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const x = toFiniteNumber(value.x)
+  const y = toFiniteNumber(value.y)
+  const yaw = toFiniteNumber(value.yaw ?? value.theta)
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(yaw)) {
+    return null
+  }
+
+  return {
+    frame: String(value.frame || 'map').trim().replace(/^\/+/, '') || 'map',
+    x,
+    y,
+    yaw,
+  }
+}
+
+function normalizeRobotMapWaypointAdvisories(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)
+}
+
+function normalizeRobotMapPose(value) {
+  const x = toFiniteNumber(value?.x)
+  const y = toFiniteNumber(value?.y)
+  const theta = toFiniteNumber(value?.theta ?? value?.yaw)
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(theta)) {
+    return null
+  }
+
+  return {
+    frame: String(value?.frame || 'map').trim().replace(/^\/+/, '') || 'map',
+    x,
+    y,
+    theta,
+  }
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
+}
+
+function isRenderableRobotMapFrame(frame) {
+  return ['map', 'app_map'].includes(String(frame || '').trim().replace(/^\/+/, ''))
 }

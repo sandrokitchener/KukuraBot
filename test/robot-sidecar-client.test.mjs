@@ -141,6 +141,7 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
+        { autoStartWaypointNavigation: false },
       )
 
       assert.equal(result.status, 'sent')
@@ -154,9 +155,9 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
       assert.equal(requests[1].envelope.canonicalPlan.params.waypoint, 'living_room')
       assert.equal(requests[1].envelope.canonicalPlan.params.frame, 'map')
       assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.required, true)
-      assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.mode, 'yahboom_laser')
+      assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.mode, 'nav2_costmap')
       assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.lidarTopic, '/scan')
-      assert.match(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.command, /laser_Avoidance_xgo_RS200/)
+      assert.match(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.command, /Nav2 costmaps/)
     },
   )
 })
@@ -181,11 +182,16 @@ test('sendRobotCommand blocks direct waypoint goto when Nav2 is unavailable', as
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
+        { autoStartWaypointNavigation: false },
       )
 
       assert.equal(result.status, 'navigation-unavailable')
       assert.equal(result.attempted, false)
-      assert.match(result.error, /Waypoint navigation unavailable on DOGZILLA Direct Bridge/)
+      assert.equal(result.kind, 'map-waypoint')
+      assert.equal(result.directControlAvailable, true)
+      assert.match(result.operatorMessage, /Waypoint not sent/)
+      assert.match(result.operatorMessage, /Manual controls and non-waypoint actions are still available/)
+      assert.match(result.error, /Waypoint blocked: no DOGZILLA waypoint navigation server is running/)
       assert.match(result.error, /action server is not running/)
       assert.match(result.error, /Docker ROS client is available/)
       assert.equal(requests.length, 1)
@@ -195,7 +201,234 @@ test('sendRobotCommand blocks direct waypoint goto when Nav2 is unavailable', as
   )
 })
 
-test('sendRobotCommand allows direct waypoint goto when map-pose navigation fallback is available', async () => {
+test('sendRobotCommand blocks direct waypoint goto when Nav2 has no odom publisher', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody({
+        nav2: {
+          odom: {
+            topic: '/odom',
+            publisherCount: 0,
+            available: false,
+            error: 'No publishers on /odom',
+          },
+        },
+      }))
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        { autoStartWaypointNavigation: false },
+      )
+
+      assert.equal(result.status, 'navigation-unavailable')
+      assert.equal(result.attempted, false)
+      assert.equal(result.kind, 'map-waypoint')
+      assert.match(result.operatorMessage, /odometry is not publishing/)
+      assert.match(result.error, /No publishers on \/odom/)
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+    },
+  )
+})
+
+test('sendRobotCommand accepts old bridge health when pose service reports odom publisher', async () => {
+  const requests = []
+  const map = nav2HealthBody().runtime.map
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      if (String(url).endsWith('/healthz')) {
+        return jsonResponse({
+          ok: true,
+          runtime: {
+            map,
+            nav2: {
+              available: true,
+              serverAvailable: true,
+            },
+            navigation: {
+              available: true,
+              primary: 'nav2',
+            },
+          },
+        })
+      }
+      if (String(url).endsWith('/pose')) {
+        return jsonResponse({
+          ok: true,
+          rosGraph: {
+            topics: {
+              '/odom': { publisherCount: 1 },
+            },
+          },
+        })
+      }
+
+      return jsonResponse({ accepted: true }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        {
+          loadDogzillaConnectionConfigImpl: async () => ({
+            lidar: {
+              poseUrl: 'http://10.0.4.32:8896/pose',
+            },
+          }),
+        },
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.equal(requests.filter((request) => request.url.endsWith('/pose')).length, 1)
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand sends trusted config waypoint outside active DOGZILLA map bounds', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody())
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview({
+          params: {
+            waypoint: 'kitchen',
+            x: 11,
+            y: 0,
+          },
+        }),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.equal(result.attempted, true)
+      assert.equal(requests.length, 3)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand sends trusted config waypoint captured against a different DOGZILLA map', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody())
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview({
+          params: {
+            waypoint: 'kitchen',
+            mapId: 'old_map',
+            mapFingerprint: 'old-fingerprint',
+          },
+        }),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.equal(result.attempted, true)
+      assert.equal(requests.length, 3)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand blocks waypoint unverified by config before Nav2', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody())
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview({
+          params: {
+            waypoint: 'draft',
+            verified: false,
+          },
+        }),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'waypoint-blocked')
+      assert.equal(result.attempted, false)
+      assert.match(result.operatorMessage, /draft is not verified/)
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+    },
+  )
+})
+
+test('sendRobotCommand starts missing direct waypoint navigator before posting goto', async () => {
+  const requests = []
+  const actions = []
+  let healthCount = 0
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+
+      if (String(url).endsWith('/healthz')) {
+        healthCount += 1
+        return jsonResponse(nav2HealthBody({
+          nav2: {
+            available: healthCount > 1,
+            clientAvailable: true,
+            serverAvailable: healthCount > 1,
+            importError: healthCount > 1 ? null : 'Nav2 NavigateToPose action server is not running in the ROS graph',
+          },
+        }))
+      }
+
+      return jsonResponse({ accepted: true }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        {
+          sleepImpl: async () => {},
+          runDogzillaConnectionActionImpl: async (action) => {
+            actions.push(action)
+            return { status: 'ok', action }
+          },
+        },
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.deepEqual(actions, ['start-navigation'])
+      assert.equal(requests.filter((request) => request.url.endsWith('/healthz')).length, 2)
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand blocks direct waypoint goto when only map-pose fallback is available', async () => {
   const requests = []
 
   await withMockedFetch(
@@ -225,40 +458,38 @@ test('sendRobotCommand allows direct waypoint goto when map-pose navigation fall
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
+        { autoStartWaypointNavigation: false },
       )
 
-      assert.equal(result.status, 'sent')
-      assert.equal(requests.length, 3)
+      assert.equal(result.status, 'navigation-unavailable')
+      assert.equal(result.attempted, false)
+      assert.match(result.error, /not a safe waypoint navigator/)
+      assert.equal(requests.length, 1)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
-      assert.equal(requests[2].body.envelope.canonicalPlan.kind, 'locomotion.goto')
     },
   )
 })
 
-test('sendRobotCommand gives waypoint movement a long response timeout', async () => {
+test('sendRobotCommand does not timeout waypoint movement response', async () => {
   const requests = []
   const originalTimeout = AbortSignal.timeout
 
   AbortSignal.timeout = (timeoutMs) => {
-    requests.push(timeoutMs)
+    requests.push({ kind: 'timeout', timeoutMs })
     return originalTimeout(timeoutMs)
   }
 
   try {
     await withMockedFetch(
-      async (url) => {
+      async (url, options) => {
+        requests.push({
+          kind: 'fetch',
+          url: String(url),
+          hasSignal: Boolean(options?.signal),
+        })
+
         if (String(url).endsWith('/healthz')) {
-          return jsonResponse(nav2HealthBody({
-            nav2: {
-              available: false,
-            },
-            runtime: {
-              navigation: {
-                available: true,
-                primary: 'map-pose-closed-loop',
-              },
-            },
-          }))
+          return jsonResponse(nav2HealthBody())
         }
 
         return jsonResponse({ accepted: true }, { status: 202 })
@@ -275,33 +506,37 @@ test('sendRobotCommand gives waypoint movement a long response timeout', async (
     AbortSignal.timeout = originalTimeout
   }
 
-  assert.deepEqual(requests, [12000, 12000, 180000])
+  assert.deepEqual(requests, [
+    { kind: 'timeout', timeoutMs: 30000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true },
+    { kind: 'timeout', timeoutMs: 12000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: true },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: false },
+  ])
 })
 
-test('sendRobotCommand uses waypoint timeoutSec when provided', async () => {
+test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', async () => {
   const requests = []
   const originalTimeout = AbortSignal.timeout
 
   AbortSignal.timeout = (timeoutMs) => {
-    requests.push(timeoutMs)
+    requests.push({ kind: 'timeout', timeoutMs })
     return originalTimeout(timeoutMs)
   }
 
   try {
     await withMockedFetch(
-      async (url) => {
+      async (url, options) => {
+        const body = options?.body ? JSON.parse(options.body) : null
+        requests.push({
+          kind: 'fetch',
+          url: String(url),
+          hasSignal: Boolean(options?.signal),
+          commandParams: body?.envelope?.canonicalPlan?.params,
+        })
+
         if (String(url).endsWith('/healthz')) {
-          return jsonResponse(nav2HealthBody({
-            nav2: {
-              available: false,
-            },
-            runtime: {
-              navigation: {
-                available: true,
-                primary: 'map-pose-closed-loop',
-              },
-            },
-          }))
+          return jsonResponse(nav2HealthBody())
         }
 
         return jsonResponse({ accepted: true }, { status: 202 })
@@ -318,7 +553,35 @@ test('sendRobotCommand uses waypoint timeoutSec when provided', async () => {
     AbortSignal.timeout = originalTimeout
   }
 
-  assert.deepEqual(requests, [12000, 12000, 45000])
+  assert.deepEqual(requests, [
+    { kind: 'timeout', timeoutMs: 30000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true, commandParams: undefined },
+    { kind: 'timeout', timeoutMs: 12000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: true, commandParams: { reason: 'command_preempt', action: 'stop' } },
+    {
+      kind: 'fetch',
+      url: 'http://10.0.4.32:8893/commands',
+      hasSignal: false,
+      commandParams: {
+        targetKind: 'waypoint',
+        waypoint: 'living_room',
+        frame: 'map',
+        x: 1.25,
+        y: -0.5,
+        yaw: 0.2,
+        verified: true,
+        mapId: 'test_map',
+        mapFingerprint: 'test-map-fingerprint',
+        obstacleAvoidance: {
+          required: true,
+          mode: 'nav2_costmap',
+          lidarTopic: '/scan',
+          command: 'verify Nav2 costmaps have live /scan; do not start Yahboom laser_Avoidance_xgo_RS200 during Nav2 waypoint control',
+          docs: 'sidecars/dogzilla_navigation/README.md',
+        },
+      },
+    },
+  ])
 })
 
 test('sendRobotCommand blocks new command when preempt stop fails', async () => {

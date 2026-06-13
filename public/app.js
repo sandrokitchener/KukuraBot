@@ -4,7 +4,10 @@ import { splitRecentChatHistory } from './chat-history.js'
 import { apiFetch, getApiBaseUrl, setApiBaseUrl, toApiUrl } from './api-client.js'
 import { createDogzillaAudioController } from './dogzilla-audio.js'
 import { createManualControlController } from './manual-control.js'
-import { createRobotMapRenderer } from './robot-map.js'
+import {
+  createRobotMapRenderer,
+  formatWaypointReadinessSummary,
+} from './robot-map.js'
 
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
@@ -79,6 +82,7 @@ const robotCameraPanel = document.querySelector('#robot-camera-panel')
 const robotCameraFrame = document.querySelector('#robot-camera-frame')
 const robotCameraChip = document.querySelector('#robot-camera-chip')
 const robotCameraMeta = document.querySelector('#robot-camera-meta')
+const robotCameraRefreshButton = document.querySelector('#robot-camera-refresh-button')
 const robotCameraSnapshotButton = document.querySelector('#robot-camera-snapshot-button')
 const robotCameraSnapshotNote = document.querySelector('#robot-camera-snapshot-note')
 const reconGalleryToggle = document.querySelector('#recon-gallery-toggle')
@@ -177,8 +181,10 @@ const DEFAULT_ROBOT_RUNTIME = {
   statePollMs: 125,
   stateSnapshotPath: '/api/robot/state',
   stateStreamPath: '/api/robot/state/stream',
+  waypointReadinessPath: '/api/dogzilla/waypoint-readiness',
   waypointSet: 'home',
   waypoints: [],
+  waypointReadiness: null,
   selectionLocked: false,
   source: 'runtime',
 }
@@ -215,8 +221,7 @@ let appConfig = {
   sendButtonLabel: 'Ask Assistant',
   thinkingStatus: 'Assistant is thinking',
   introEyebrow: 'Quadruped inspection console',
-  introDescription:
-    'Use Questing Beast for safety, maintenance, and security checks in hard-to-reach areas. Capture live camera evidence, robot context, and operator notes in one inspection trail.',
+  introDescription: '',
   emptyChatMessage: 'Waiting for first message.',
   emptyChatMeta: 'Prompt ready.',
   waitingForJsonMessage: 'Waiting for valid JSON.',
@@ -289,6 +294,7 @@ const manualControl = createManualControlController({
   formatError,
   setStatus,
   runtimeFeedbackOutput,
+  playBarkCue: () => dogzillaAudio.playPiCue('bark'),
 })
 const robotMap = createRobotMapRenderer({
   elements: {
@@ -325,6 +331,7 @@ saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionS
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
 dogzillaAudioVolumeInput?.addEventListener('input', dogzillaAudio.handleVolumeInput)
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
+robotCameraRefreshButton.addEventListener('click', handleDogzillaCameraRefresh)
 reconGalleryToggle.addEventListener('click', handleReconGalleryToggle)
 reconGalleryClose.addEventListener('click', closeReconGallery)
 reconSnapshotList.addEventListener('click', handleReconSnapshotListClick)
@@ -975,6 +982,7 @@ async function refreshRobotFeedback() {
     const feedbackPayload = await feedbackResponse.json()
 
     renderRobotFeedback(healthPayload, feedbackPayload)
+    void refreshDogzillaWaypointReadiness()
   } catch (error) {
     setRuntimeFeedbackStatus(`Runtime feedback failed: ${formatError(error)}`, true)
     runtimeFeedbackOutput.textContent = 'Runtime feedback unavailable.'
@@ -1089,6 +1097,29 @@ async function refreshDogzillaLidarScan() {
   } catch (error) {
     robotMap.clearLidarScan()
     robotMap.setLidarSummary(`Lidar: ${formatError(error)}`)
+  }
+}
+
+async function refreshDogzillaWaypointReadiness() {
+  if (!isRealRobotTargetActive()) {
+    runtimeConfig.robotRuntime.waypointReadiness = null
+    robotMap.setWaypointReadiness('')
+    return
+  }
+
+  const readinessPath = runtimeConfig.robotRuntime.waypointReadinessPath || DEFAULT_ROBOT_RUNTIME.waypointReadinessPath
+  try {
+    const response = await apiFetch(readinessPath)
+    const payload = await response.json()
+    if (!response.ok) {
+      throw new Error(payload.error || 'DOGZILLA waypoint readiness unavailable.')
+    }
+
+    runtimeConfig.robotRuntime.waypointReadiness = payload
+    robotMap.setWaypointReadiness(formatWaypointReadinessSummary(payload))
+  } catch (error) {
+    runtimeConfig.robotRuntime.waypointReadiness = null
+    robotMap.setWaypointReadiness(`Waypoints not ready: ${formatError(error)}.`)
   }
 }
 
@@ -1362,6 +1393,33 @@ async function handleDogzillaConnectionAction(event) {
   connectionOutput.textContent = `Running ${formatConnectionAction(action)}...`
 
   try {
+    if (action === 'capture-map-origin') {
+      const response = await apiFetch('/api/dogzilla/map-origin/capture', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ label: 'charger_origin' }),
+      })
+      const payload = await response.json()
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || 'DOGZILLA charger origin reset failed.')
+      }
+
+      await loadPublicConfig()
+      const origin = payload.origin || {}
+      const originText = formatMapOriginCapture(origin)
+      connectionStatus.textContent = originText
+      connectionOutput.textContent = JSON.stringify({
+        action,
+        status: 'saved',
+        origin,
+      }, null, 2)
+      setStatus(originText)
+      return
+    }
+
     const response = await apiFetch('/api/dogzilla/connection/action', {
       method: 'POST',
       headers: {
@@ -1577,15 +1635,25 @@ function formatConnectionAction(action) {
     case 'sync-bridges':
       return 'bridge code deploy'
     case 'start-direct':
-      return 'robot link repair'
+      return 'direct bridge restart'
     case 'start-ros2':
-      return 'ROS2 bridge start'
+      return 'ROS2 bridge restart'
     case 'start-yolo':
-      return 'object recognition restart'
+      return 'YOLO vision restart'
     case 'start-audio':
       return 'Pi audio restart'
     case 'start-lidar':
-      return 'lidar bridge start'
+      return 'lidar bridge restart'
+    case 'start-map-pose':
+      return 'map localization restart'
+    case 'start-navigation':
+      return 'waypoint navigator start'
+    case 'start-map-pose-mapping':
+      return 'SLAM mapping mode start'
+    case 'capture-map-origin':
+      return 'charger origin reset'
+    case 'save-map-pose':
+      return 'SLAM map save'
     case 'stop-vendor-app':
       return 'vendor DOGZILLA app stop'
     case 'stop-bridges':
@@ -1593,6 +1661,22 @@ function formatConnectionAction(action) {
     default:
       return action || 'connection action'
   }
+}
+
+function formatMapOriginCapture(origin = {}) {
+  const x = toFiniteNumber(origin.x)
+  const y = toFiniteNumber(origin.y)
+  const yaw = toFiniteNumber(origin.yaw)
+  const parts = [
+    'Charger origin reset. Current verified map pose is now app 0,0.',
+  ]
+  if (Number.isFinite(x) && Number.isFinite(y)) {
+    parts.push(`Raw map anchor x ${formatTelemetryNumber(x)}, y ${formatTelemetryNumber(y)}.`)
+  }
+  if (Number.isFinite(yaw)) {
+    parts.push(`Yaw ${formatTelemetryNumber(yaw)} rad.`)
+  }
+  return parts.join(' ')
 }
 
 function formatDogzillaActionOutput(payload) {
@@ -1688,13 +1772,23 @@ function applyPayload(payload) {
 
 function applyModelConfig(payload) {
   profileName.textContent = runtimeConfig.activeProfile.label
-  profileSource.textContent = `Source: ${formatSource(runtimeConfig.activeProfile.source)}`
+  if (profileSource) {
+    profileSource.textContent = ''
+  }
   providerName.textContent = runtimeConfig.activeProfile.provider
   modelName.textContent = payload.model || runtimeConfig.activeProfile.model
-  promptFile.textContent = payload.systemPromptFile
-  schemaFile.textContent = payload.commandFormatFile
-  commandTypesFile.textContent = payload.commandTypesFile
-  waypointsFile.textContent = payload.validWaypointsFile
+  if (promptFile) {
+    promptFile.textContent = payload.systemPromptFile
+  }
+  if (schemaFile) {
+    schemaFile.textContent = payload.commandFormatFile
+  }
+  if (commandTypesFile) {
+    commandTypesFile.textContent = payload.commandTypesFile
+  }
+  if (waypointsFile) {
+    waypointsFile.textContent = payload.validWaypointsFile
+  }
   renderProfileOptions()
   applyProfileSelectionState()
 }
@@ -1703,8 +1797,9 @@ function applySpeechConfig() {
   const activeSpeechProfile = runtimeConfig.speech.activeProfile
 
   speechProfileName.textContent = activeSpeechProfile?.label || 'Speech unavailable'
-  speechFiles.textContent =
-    `Speech config files: ${runtimeConfig.speech.profileFile}, ${runtimeConfig.speech.runtimeFile}, ${runtimeConfig.speech.sidecarConfigFile}, ${runtimeConfig.speech.activationPhrasesFile}`
+  if (speechFiles) {
+    speechFiles.textContent = ''
+  }
   renderSpeechProfileOptions()
   applySpeechSelectionState()
 
@@ -1715,38 +1810,22 @@ function applySpeechConfig() {
   }
 
   if (activeSpeechProfile.provider === 'whisper-browser') {
-    const activationPhrases = runtimeConfig.speech.activationPhrases?.join(', ') || 'none'
-
     speechPreview.textContent =
-      `Listening mode: buffered local recording\n` +
-      `Model: ${activeSpeechProfile.modelId}\n` +
-      `Device: ${activeSpeechProfile.device || 'wasm default'}\n` +
-      `Activation phrases: ${activationPhrases}\n` +
-      `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
-      `Trigger window: ${(activeSpeechProfile.activationCommandWindowMs || 8000) / 1000}s after phrase-only wake\n` +
-      `Live transcript: none while recording`
+      `Ready: ${activeSpeechProfile.label}\n` +
+      `Device: ${activeSpeechProfile.device || 'browser'}`
     return
   }
 
   if (activeSpeechProfile.provider === 'parakeet-sidecar') {
-    const activationPhrases = runtimeConfig.speech.activationPhrases?.join(', ') || 'none'
-
     speechPreview.textContent =
-      `Listening mode: buffered local recording\n` +
-      `Model: ${activeSpeechProfile.modelId}\n` +
-      `Sidecar model: ${activeSpeechProfile.sidecarModelId || activeSpeechProfile.modelId}\n` +
-      `Runtime: local Parakeet sidecar\n` +
-      `Device: ${activeSpeechProfile.device || 'auto'}\n` +
-      `Activation phrases: ${activationPhrases}\n` +
-      `Auto-send: after ${activeSpeechProfile.silenceDurationMs}ms of silence\n` +
-      `Trigger window: ${(activeSpeechProfile.activationCommandWindowMs || 8000) / 1000}s after phrase-only wake\n` +
-      `Timestamps: ${activeSpeechProfile.timestamps ? 'enabled' : 'disabled'}`
+      `Ready: ${activeSpeechProfile.label}\n` +
+      `Device: ${activeSpeechProfile.device || 'auto'}`
     return
   }
 
   speechPreview.textContent =
-    `Listening mode: ${activeSpeechProfile.useVad ? 'VAD commits' : 'streaming updates'}\n` +
-    `Model path: ${activeSpeechProfile.modelUrl}`
+    `Ready: ${activeSpeechProfile.label}\n` +
+    `Mode: ${activeSpeechProfile.useVad ? 'VAD' : 'streaming'}`
 }
 
 function applyRobotRuntimeConfig() {
@@ -1754,7 +1833,9 @@ function applyRobotRuntimeConfig() {
   const activeTarget = robotRuntime.activeTarget
 
   runtimeTargetName.textContent = activeTarget.label
-  runtimeTargetSource.textContent = `Source: ${formatSource(activeTarget.source || robotRuntime.source)}`
+  if (runtimeTargetSource) {
+    runtimeTargetSource.textContent = ''
+  }
   runtimeTargetChip.textContent = activeTarget.label
   const robotName = robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
   if (primaryRobotTabName) {
@@ -1765,10 +1846,15 @@ function applyRobotRuntimeConfig() {
   if (robotNameInput) {
     robotNameInput.value = robotName
   }
-  robotRuntimeFile.textContent = robotRuntime.runtimeFile
-  robotRos2File.textContent = robotRuntime.ros2ConfigFile
-  runtimeFiles.textContent =
-    `Runtime config files: ${robotRuntime.runtimeFile}, ${robotRuntime.ros2ConfigFile}, ${robotRuntime.waypointsFile}, ${robotRuntime.motionFile}`
+  if (robotRuntimeFile) {
+    robotRuntimeFile.textContent = robotRuntime.runtimeFile
+  }
+  if (robotRos2File) {
+    robotRos2File.textContent = robotRuntime.ros2ConfigFile
+  }
+  if (runtimeFiles) {
+    runtimeFiles.textContent = ''
+  }
   renderRobotTargetOptions()
   applyRobotTargetSelectionState()
 }
@@ -1933,6 +2019,7 @@ function renderRobotStateInactive() {
   robotMap.renderWaypoints()
   robotMap.clearPoseTrack()
   robotMap.setPoseReadout(null)
+  robotMap.setWaypointReadiness('')
   robotMap.setMeta('Real robot target required for live map.')
 }
 
@@ -2066,6 +2153,7 @@ function applyDogzillaCameraConfig() {
     robotCameraFrame.dataset.statusPath = ''
     robotCameraFrame.dataset.snapshotPath = ''
     robotCameraFrame.dataset.viewerMode = ''
+    robotCameraRefreshButton.disabled = true
     robotCameraSnapshotButton.disabled = true
     robotCameraChip.textContent = 'No stream'
     robotCameraMeta.textContent = 'Camera stream not configured.'
@@ -2076,6 +2164,7 @@ function applyDogzillaCameraConfig() {
   robotCameraFrame.dataset.statusPath = camera?.proxyStatusPath || ''
   robotCameraFrame.dataset.snapshotPath = camera?.proxySnapshotPath ? toApiUrl(camera.proxySnapshotPath) : ''
   robotCameraFrame.dataset.viewerMode = 'stream'
+  robotCameraRefreshButton.disabled = false
   robotCameraSnapshotButton.disabled = false
   robotCameraChip.textContent = robotCameraFrame.getAttribute('src') === streamUrl ? 'Live' : 'Starting'
   robotCameraMeta.textContent = formatDogzillaCameraSource(camera, upstreamStreamUrl)
@@ -2093,26 +2182,53 @@ function applyRobotView(view) {
   }
 }
 
-function startDogzillaCameraViewer() {
+function startDogzillaCameraViewer({ forceRefresh = false } = {}) {
   const streamUrl = robotCameraFrame.dataset.streamUrl || ''
   if (!streamUrl) {
     return
   }
 
-  if (robotCameraFrame.getAttribute('src') === streamUrl) {
+  if (!forceRefresh && robotCameraFrame.getAttribute('src') === streamUrl) {
     return
   }
 
   clearDogzillaCameraTimers()
-  robotCameraChip.textContent = 'Starting'
-  robotCameraMeta.textContent = 'Starting DOGZILLA camera stream through the backend proxy.'
+  robotCameraChip.textContent = forceRefresh ? 'Refreshing' : 'Starting'
+  robotCameraMeta.textContent = forceRefresh
+    ? 'Refreshing DOGZILLA camera stream through the backend proxy.'
+    : 'Starting DOGZILLA camera stream through the backend proxy.'
   robotCameraFrame.removeAttribute('src')
-  setDogzillaCameraFrameSource(streamUrl)
+  setDogzillaCameraFrameSource(streamUrl, { cacheBust: forceRefresh })
   scheduleDogzillaCameraLoadTimeout()
 }
 
-function setDogzillaCameraFrameSource(streamUrl) {
-  robotCameraFrame.src = streamUrl
+function setDogzillaCameraFrameSource(streamUrl, { cacheBust = false } = {}) {
+  robotCameraFrame.src = cacheBust ? withCameraRefreshParam(streamUrl) : streamUrl
+}
+
+function withCameraRefreshParam(streamUrl) {
+  try {
+    const url = new URL(streamUrl, window.location.href)
+    url.searchParams.set('cameraRefresh', String(Date.now()))
+    return /^https?:\/\//i.test(streamUrl)
+      ? url.toString()
+      : `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    const separator = streamUrl.includes('?') ? '&' : '?'
+    return `${streamUrl}${separator}cameraRefresh=${Date.now()}`
+  }
+}
+
+function handleDogzillaCameraRefresh() {
+  const streamUrl = robotCameraFrame.dataset.streamUrl || ''
+  if (!streamUrl) {
+    robotCameraChip.textContent = 'No stream'
+    robotCameraMeta.textContent = 'Camera stream not configured.'
+    return
+  }
+
+  robotCameraRefreshButton.disabled = true
+  startDogzillaCameraViewer({ forceRefresh: true })
 }
 
 function scheduleDogzillaCameraLoadTimeout() {
@@ -2124,6 +2240,7 @@ function scheduleDogzillaCameraLoadTimeout() {
 
     clearDogzillaCameraTimers()
     robotCameraFrame.removeAttribute('src')
+    robotCameraRefreshButton.disabled = false
     robotCameraChip.textContent = 'Camera unavailable'
     robotCameraMeta.textContent = 'Camera did not respond. Run Diagnostics to check the Pi camera and YOLO services.'
   }, DOGZILLA_CAMERA_LOAD_TIMEOUT_MS)
@@ -2176,6 +2293,7 @@ function handleDogzillaCameraFrameError() {
 
   clearDogzillaCameraTimers()
   robotCameraFrame.removeAttribute('src')
+  robotCameraRefreshButton.disabled = false
   robotCameraChip.textContent = 'Camera unavailable'
   robotCameraMeta.textContent = 'Camera failed to load through the backend proxy. Run Diagnostics to check the Pi camera and YOLO services.'
 }
@@ -2186,6 +2304,7 @@ function handleDogzillaCameraFrameLoad() {
   }
 
   clearDogzillaCameraLoadTimeout()
+  robotCameraRefreshButton.disabled = false
   robotCameraChip.textContent = 'Live'
   robotCameraMeta.textContent = 'Receiving DOGZILLA camera stream through the backend proxy.'
 }
@@ -2450,9 +2569,9 @@ function applyProfileSelectionState() {
   const locked = runtimeConfig.activeProfile.selectionLocked
   profileSelect.disabled = locked
   saveProfileButton.disabled = locked
-  profileLockNote.textContent = locked
-    ? 'Profile locked by APP_MODEL_PROFILE or --profile.'
-    : 'Selection saves to config/runtime.json.'
+  if (profileLockNote) {
+    profileLockNote.textContent = locked ? 'Profile locked by environment.' : ''
+  }
   settingsStatus.textContent = `Using ${runtimeConfig.activeProfile.label} (${runtimeConfig.activeProfile.model}).`
 }
 
@@ -2460,9 +2579,9 @@ function applySpeechSelectionState() {
   const locked = runtimeConfig.speech.activeProfile?.selectionLocked
   speechProfileSelect.disabled = locked
   saveSpeechProfileButton.disabled = locked
-  speechLockNote.textContent = locked
-    ? 'Speech profile locked by APP_SPEECH_PROFILE.'
-    : 'Selection saves to config/speech-runtime.json.'
+  if (speechLockNote) {
+    speechLockNote.textContent = locked ? 'Speech profile locked by environment.' : ''
+  }
   if (runtimeConfig.speech.activeProfile) {
     speechSettingsStatus.textContent = `Using ${runtimeConfig.speech.activeProfile.label}.`
   }
@@ -2472,9 +2591,9 @@ function applyRobotTargetSelectionState() {
   const locked = runtimeConfig.robotRuntime.selectionLocked || runtimeConfig.robotRuntime.activeTarget.selectionLocked
   robotTargetSelect.disabled = locked
   saveRobotTargetButton.disabled = locked
-  robotTargetLockNote.textContent = locked
-    ? 'Runtime target locked by ROBOT_RUNTIME_TARGET.'
-    : 'Selection saves to config/robot-runtime.json.'
+  if (robotTargetLockNote) {
+    robotTargetLockNote.textContent = locked ? 'Runtime target locked by environment.' : ''
+  }
   robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
   robotSitTestStatus.textContent = runtimeConfig.robotRuntime.dryRun ? 'Ready. Dry-run on.' : 'Ready. Live enabled.'
   emergencyStopStatus.textContent = isRealRobotTargetActive()
@@ -2561,6 +2680,10 @@ function buildAssistantText(payload) {
   }
 
   const command = normalizeCommandName(payload.parsed.command)
+  if (isRobotRuntimeTarget(payload) && payload.robotDispatch?.status === 'sent') {
+    return formatParsedCommandJson(payload, 2) || summarizeParsedCommand(command, payload)
+  }
+
   if (command === 'trick') {
     return buildTrickAssistantText(payload)
   }
@@ -2661,10 +2784,22 @@ function formatActiveRuntimeSummary(payload) {
   }
 
   if (isRobotRuntimeTarget(payload)) {
-    return formatRobotSummary(payload.robotRuntime, payload.robotDispatch)
+    return formatRobotSummary(payload.robotRuntime, payload.robotDispatch, payload)
   }
 
   return ''
+}
+
+function formatParsedCommandJson(payload, spaces = 0) {
+  if (!payload?.parsed || typeof payload.parsed !== 'object') {
+    return ''
+  }
+
+  try {
+    return JSON.stringify(payload.parsed, null, spaces)
+  } catch {
+    return ''
+  }
 }
 
 function summarizeParsedCommand(command, payload) {
@@ -2708,9 +2843,10 @@ function formatIsaacSummary(isaacSim, isaacDispatch) {
   return ''
 }
 
-function formatRobotSummary(robotRuntime, robotDispatch) {
+function formatRobotSummary(robotRuntime, robotDispatch, payload) {
   if (robotDispatch?.status === 'sent') {
-    return 'Robot command sent.'
+    const commandJson = formatParsedCommandJson(payload)
+    return commandJson ? `Robot command JSON: ${commandJson}` : 'Robot dispatch completed.'
   }
 
   if (robotDispatch?.status === 'dry-run') {
@@ -2727,6 +2863,11 @@ function formatRobotSummary(robotRuntime, robotDispatch) {
 
   if (robotDispatch?.status === 'disabled') {
     return 'Robot transport disabled.'
+  }
+
+  if (robotDispatch?.status === 'navigation-unavailable' || robotDispatch?.status === 'waypoint-blocked') {
+    return robotDispatch.operatorMessage
+      || 'Waypoint not sent: DOGZILLA map pose is available, but no waypoint navigation server is running. Manual controls and non-waypoint actions are still available.'
   }
 
   if (isRobotDispatchFailure(robotDispatch)) {
@@ -2749,7 +2890,7 @@ function formatRobotSummary(robotRuntime, robotDispatch) {
 }
 
 function isRobotDispatchFailure(robotDispatch) {
-  return ['error', 'navigation-unavailable', 'preempt-failed'].includes(robotDispatch?.status)
+  return ['error', 'navigation-unavailable', 'waypoint-blocked', 'preempt-failed'].includes(robotDispatch?.status)
 }
 
 function isActiveDispatchFailure(payload) {
@@ -3119,7 +3260,10 @@ function applyAppConfig() {
   } else {
     appTitle.textContent = appConfig.consoleTitle
   }
-  appDescription.textContent = appConfig.introDescription
+  if (appDescription) {
+    appDescription.textContent = appConfig.introDescription || ''
+    appDescription.hidden = !appConfig.introDescription
+  }
   sendButton.textContent = appConfig.sendButtonLabel
   emptyMessageRole.textContent = appConfig.assistantName
   emptyMessageBubble.textContent = appConfig.emptyChatMessage

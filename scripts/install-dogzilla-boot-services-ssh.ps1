@@ -145,7 +145,7 @@ Type=simple
 User=$USER_NAME
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
-ExecStartPre=/bin/bash -lc 'pkill -f "[/]home/pi/DOGZILLA/app_dogzilla/app_dogzilla.py" 2>/dev/null || true; pkill -f "[s]idecars/dogzilla_yolo_vision/server.py" 2>/dev/null || true'
+ExecStartPre=/bin/bash -lc 'pkill -f "[s]idecars/dogzilla_yolo_vision/server.py" 2>/dev/null || true; python3 "$REMOTE_ROOT/sidecars/dogzilla_yolo_vision/release_camera_consumers.py" --camera-source auto || true'
 ExecStart=/usr/bin/python3 $REMOTE_ROOT/sidecars/dogzilla_yolo_vision/server.py --host 0.0.0.0 --port $VISION_PORT --model $REMOTE_ROOT/models/dogzilla_yolo/best.onnx --labels $REMOTE_ROOT/models/dogzilla_yolo/custom.yaml --camera-url auto --camera-control-host '' --camera-control-port 0
 Restart=always
 RestartSec=5
@@ -190,8 +190,8 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
-ExecStart=/usr/bin/docker exec -e REMOTE_ROOT=$REMOTE_ROOT -e POSE_PORT=$LIDAR_PORT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE robodoge-lidar-bridge bash $REMOTE_ROOT/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh
-ExecStop=/usr/bin/docker exec robodoge-lidar-bridge bash -lc 'pkill -f "[c]artographer_node.*robodoge_dogzilla_laser_only.lua" 2>/dev/null || true; pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true'
+ExecStart=/usr/bin/docker exec -e REMOTE_ROOT=$REMOTE_ROOT -e POSE_PORT=$LIDAR_PORT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_MAP_POSE_MODE=auto robodoge-lidar-bridge bash $REMOTE_ROOT/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh
+ExecStop=/usr/bin/docker exec robodoge-lidar-bridge bash -lc 'pkill -f "[c]artographer_node.*robodoge_dogzilla_laser_only" 2>/dev/null || true; pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true'
 TimeoutStartSec=90
 StandardOutput=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/map-pose-systemd.log

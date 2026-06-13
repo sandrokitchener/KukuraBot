@@ -4,6 +4,10 @@ import net from 'node:net'
 import path from 'node:path'
 import { forceDogzillaDirectBridgeOnStartup } from './lib/dogzilla-direct-bridge-launcher.mjs'
 import { forceDogzillaRequiredServicesOnStartup } from './lib/dogzilla-required-services-launcher.mjs'
+import {
+  forceDogzillaWaypointNavigationOnStartup,
+  isDogzillaWaypointNavigationReady,
+} from './lib/dogzilla-waypoint-navigation-launcher.mjs'
 import { loadIsaacSidecarConfig } from './lib/isaacsim-config.mjs'
 import { startManagedIsaacEnvironment } from './lib/isaacsim-launcher.mjs'
 import { loadRobotRos2Config, loadRobotRuntimeConfig } from './lib/robot-runtime-config.mjs'
@@ -16,6 +20,7 @@ import { startManagedRobotEnvironment } from './lib/robot-sidecar-launcher.mjs'
 import { resolveActiveSpeechProfile } from './lib/speech-profile-config.mjs'
 import { loadSpeechSidecarConfig } from './lib/speech-sidecar-config.mjs'
 import { startManagedSpeechSidecar } from './lib/speech-sidecar-launcher.mjs'
+import { printStartupBanner } from './lib/startup-banner.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
@@ -24,6 +29,10 @@ const PORT = Number(cliOptions.port || process.env.APP_PORT || process.env.KUKUR
 const MODEL_PROFILE = cliOptions.profile || process.env.APP_MODEL_PROFILE || ''
 const APP_URL = `http://${resolveProbeHost(HOST)}:${PORT}`
 const startupStatus = createStartupStatus()
+const startupBannerPrinted = printStartupBanner({
+  mode: 'managed launch',
+  url: APP_URL,
+})
 
 startupStatus.start(`Questing Beast startup at ${APP_URL}`)
 let existingAppConfig = await fetchExistingAppConfig(HOST, PORT)
@@ -35,8 +44,9 @@ if (existingAppConfig && reuseExistingApp) {
   const requiredServicesStartup = ensureExistingAppDogzillaRequiredServices(existingAppConfig)
   await requiredServicesStartup
   await ensureExistingAppDogzillaDirectBridge(APP_URL, existingAppConfig)
+  await ensureExistingAppDogzillaWaypointNavigation(APP_URL, existingAppConfig)
   startupStatus.update('Running robot startup sequence')
-  const startupSequence = await runExistingAppRobotStartupSequence(APP_URL, existingAppConfig, {
+  await runExistingAppRobotStartupSequence(APP_URL, existingAppConfig, {
     logger: console,
   })
   startupStatus.stop(`App already ready at ${APP_URL}. Reusing existing process.`)
@@ -52,135 +62,150 @@ if (existingAppConfig && reuseExistingApp) {
     console.error(`Port ${HOST}:${PORT} is already in use by another process. Stop that process or start with --port <free-port>.`)
     process.exitCode = 1
   } else {
-  startupStatus.update('Loading runtime config')
-  const isaacSidecarConfig = await loadIsaacSidecarConfig()
-  const robotRuntimeConfig = await loadRobotRuntimeConfig({
-    env: {
-      ...process.env,
-      ...(cliOptions.robotTarget ? { ROBOT_RUNTIME_TARGET: cliOptions.robotTarget } : {}),
-    },
-  })
-  const robotRos2Config = await loadRobotRos2Config()
-  const speechProfileConfig = await resolveActiveSpeechProfile()
-  const speechSidecarConfig = await loadSpeechSidecarConfig()
-  const shouldManageIsaac = !robotRuntimeConfig.enabled || (robotRuntimeConfig.activeTarget?.kind || '') === 'isaacsim'
-  const shouldManageRobot = robotRuntimeConfig.enabled && (robotRuntimeConfig.activeTarget?.kind || '') === 'ros2-bridge'
+    startupStatus.update('Loading runtime config')
+    const [isaacSidecarConfig, robotRuntimeConfig, robotRos2Config, speechProfileConfig, speechSidecarConfig] = await Promise.all([
+      loadIsaacSidecarConfig(),
+      loadRobotRuntimeConfig({
+        env: {
+          ...process.env,
+          ...(cliOptions.robotTarget ? { ROBOT_RUNTIME_TARGET: cliOptions.robotTarget } : {}),
+        },
+      }),
+      loadRobotRos2Config(),
+      resolveActiveSpeechProfile(),
+      loadSpeechSidecarConfig(),
+    ])
+    const shouldManageIsaac = !robotRuntimeConfig.enabled || (robotRuntimeConfig.activeTarget?.kind || '') === 'isaacsim'
+    const shouldManageRobot = robotRuntimeConfig.enabled && (robotRuntimeConfig.activeTarget?.kind || '') === 'ros2-bridge'
 
-  startupStatus.update('Checking DOGZILLA support services')
-  const requiredServicesStartup = forceDogzillaRequiredServicesOnStartup({
-    logger: console,
-    replaceExisting: replaceManagedSidecars,
-  }).catch((error) => {
-    console.warn(`DOGZILLA required service startup failed: ${error instanceof Error ? error.message : String(error)}`)
-  })
-  await requiredServicesStartup
-  startupStatus.update('Checking robot bridge')
-  await forceDogzillaDirectBridgeOnStartup({
-    runtimeConfig: robotRuntimeConfig,
-    ros2Config: robotRos2Config,
-    logger: console,
-    replaceExisting: replaceManagedSidecars,
-  })
+    startupStatus.update('Starting services')
+    const [
+      ,
+      ,
+      managedIsaacEnvironment,
+      managedRobotEnvironment,
+      managedSpeechEnvironment,
+    ] = await Promise.all([
+      forceDogzillaRequiredServicesOnStartup({
+        logger: console,
+        replaceExisting: replaceManagedSidecars,
+      }).catch((error) => {
+        console.warn(`DOGZILLA required service startup failed: ${error instanceof Error ? error.message : String(error)}`)
+      }),
+      forceDogzillaDirectBridgeOnStartup({
+        runtimeConfig: robotRuntimeConfig,
+        ros2Config: robotRos2Config,
+        logger: console,
+        replaceExisting: replaceManagedSidecars,
+      }),
+      shouldManageIsaac
+        ? startManagedIsaacEnvironment({
+          sidecarConfig: isaacSidecarConfig,
+          rootDir: __dirname,
+          logger: console,
+          replaceExisting: replaceManagedSidecars,
+        })
+        : createNoopManagedEnvironment('isaacsim'),
+      shouldManageRobot
+        ? startManagedRobotEnvironment({
+          runtimeConfig: robotRuntimeConfig,
+          ros2Config: robotRos2Config,
+          rootDir: __dirname,
+          logger: console,
+          replaceExisting: replaceManagedSidecars,
+        })
+        : createNoopManagedEnvironment('ros2'),
+      startOptionalManagedSpeechSidecar({
+        sidecarConfig: shouldManageSpeechSidecar(speechProfileConfig)
+          ? speechSidecarConfig
+          : {
+            ...speechSidecarConfig,
+            launch: {
+              ...speechSidecarConfig.launch,
+              managedByApp: false,
+            },
+          },
+        rootDir: __dirname,
+        logger: console,
+        replaceExisting: replaceManagedSidecars,
+      }),
+    ])
 
-  startupStatus.update(shouldManageIsaac ? 'Starting Isaac runtime' : 'Skipping Isaac runtime')
-  const managedIsaacEnvironment = shouldManageIsaac
-    ? await startManagedIsaacEnvironment({
-      sidecarConfig: isaacSidecarConfig,
-      rootDir: __dirname,
-      logger: console,
-      replaceExisting: replaceManagedSidecars,
-    })
-    : createNoopManagedEnvironment('isaacsim')
-  startupStatus.update(shouldManageRobot ? 'Starting ROS2 runtime' : 'Skipping ROS2 runtime')
-  const managedRobotEnvironment = shouldManageRobot
-    ? await startManagedRobotEnvironment({
+    startupStatus.update('Checking waypoint navigator')
+    await forceDogzillaWaypointNavigationOnStartup({
       runtimeConfig: robotRuntimeConfig,
       ros2Config: robotRos2Config,
-      rootDir: __dirname,
       logger: console,
       replaceExisting: replaceManagedSidecars,
+    }).catch((error) => {
+      console.warn(`DOGZILLA waypoint navigator startup failed: ${error instanceof Error ? error.message : String(error)}`)
     })
-    : createNoopManagedEnvironment('ros2')
-  startupStatus.update('Starting speech runtime')
-  const managedSpeechEnvironment = await startOptionalManagedSpeechSidecar({
-    sidecarConfig: shouldManageSpeechSidecar(speechProfileConfig)
-      ? speechSidecarConfig
-      : {
-        ...speechSidecarConfig,
-        launch: {
-          ...speechSidecarConfig.launch,
-          managedByApp: false,
-        },
+
+    startupStatus.update('Running robot startup sequence')
+    await runRobotStartupSequence({
+      runtimeConfig: robotRuntimeConfig,
+      ros2Config: robotRos2Config,
+      logger: console,
+    })
+
+    startupStatus.stop('Starting Questing Beast server')
+    const server = spawn(process.execPath, ['server.mjs'], {
+      cwd: __dirname,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        APP_HOST: HOST,
+        APP_PORT: String(PORT),
+        APP_MODEL_PROFILE: MODEL_PROFILE,
+        ROBOT_RUNTIME_TARGET: robotRuntimeConfig.activeTargetId,
+        KUKURA_HOST: HOST,
+        KUKURA_PORT: String(PORT),
+        ...(startupBannerPrinted ? { QUESTING_BEAST_BANNER_PRINTED: '1' } : {}),
       },
-    rootDir: __dirname,
-    logger: console,
-    replaceExisting: replaceManagedSidecars,
-  })
+    })
 
-  startupStatus.update('Running robot startup sequence')
-  await runRobotStartupSequence({
-    runtimeConfig: robotRuntimeConfig,
-    ros2Config: robotRos2Config,
-    logger: console,
-  })
+    server.once('spawn', () => {
+      console.log(`Launcher ready. App URL: ${APP_URL}`)
 
-  startupStatus.stop('Starting Questing Beast server')
-  const server = spawn(process.execPath, ['server.mjs'], {
-    cwd: __dirname,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      APP_HOST: HOST,
-      APP_PORT: String(PORT),
-      APP_MODEL_PROFILE: MODEL_PROFILE,
-      ROBOT_RUNTIME_TARGET: robotRuntimeConfig.activeTargetId,
-      KUKURA_HOST: HOST,
-      KUKURA_PORT: String(PORT),
-    },
-  })
+      if (isLocalDesktopHost(HOST)) {
+        openBrowser(APP_URL)
+      } else {
+        console.log('Browser auto-open skipped for non-local host.')
+      }
+    })
 
-  server.once('spawn', () => {
-    console.log(`Launcher ready. App URL: ${APP_URL}`)
-
-    if (isLocalDesktopHost(HOST)) {
-      openBrowser(APP_URL)
-    } else {
-      console.log('Browser auto-open skipped for non-local host.')
-    }
-  })
-
-  server.on('exit', (code, signal) => {
-    void managedSpeechEnvironment.stop()
-    void managedIsaacEnvironment.stop()
-    void managedRobotEnvironment.stop()
-
-    if (signal) {
-      process.exit(0)
-      return
-    }
-
-    process.exit(code ?? 0)
-  })
-
-  server.on('error', (error) => {
-    void managedSpeechEnvironment.stop()
-    void managedIsaacEnvironment.stop()
-    void managedRobotEnvironment.stop()
-    console.error(`Launcher failed: ${error instanceof Error ? error.message : String(error)}`)
-    process.exit(1)
-  })
-
-  for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.on(signal, () => {
+    server.on('exit', (code, signal) => {
       void managedSpeechEnvironment.stop()
       void managedIsaacEnvironment.stop()
       void managedRobotEnvironment.stop()
 
-      if (!server.killed) {
-        server.kill(signal)
+      if (signal) {
+        process.exit(0)
+        return
       }
+
+      process.exit(code ?? 0)
     })
-  }
+
+    server.on('error', (error) => {
+      void managedSpeechEnvironment.stop()
+      void managedIsaacEnvironment.stop()
+      void managedRobotEnvironment.stop()
+      console.error(`Launcher failed: ${error instanceof Error ? error.message : String(error)}`)
+      process.exit(1)
+    })
+
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+      process.on(signal, () => {
+        void managedSpeechEnvironment.stop()
+        void managedIsaacEnvironment.stop()
+        void managedRobotEnvironment.stop()
+
+        if (!server.killed) {
+          server.kill(signal)
+        }
+      })
+    }
   }
 }
 
@@ -283,6 +308,40 @@ async function ensureExistingAppDogzillaDirectBridge(appUrl, appConfig) {
   })
 }
 
+async function ensureExistingAppDogzillaWaypointNavigation(appUrl, appConfig) {
+  if (appConfig?.robotRuntime?.activeTarget?.kind !== 'dogzilla-direct' || appConfig?.dogzilla?.lidar?.enabled !== true) {
+    return
+  }
+
+  try {
+    const healthResponse = await fetch(new URL('/api/robot/health', appUrl), {
+      signal: AbortSignal.timeout(2500),
+    })
+    const health = await safeReadJson(healthResponse)
+
+    if (healthResponse.ok && isDogzillaWaypointNavigationReady(health)) {
+      console.log(`DOGZILLA waypoint navigator already ready at ${health.destination}.`)
+      return
+    }
+  } catch {
+    // Fall through to startup repair.
+  }
+
+  console.log('App is already open, but DOGZILLA waypoint navigator is not ready. Starting it now.')
+  const startResult = await runExistingAppDogzillaAction(appUrl, 'start-navigation', 180_000)
+  if (startResult?.status === 'error') {
+    return
+  }
+
+  const health = await waitForExistingAppDogzillaWaypointNavigation(appUrl)
+
+  if (isDogzillaWaypointNavigationReady(health)) {
+    console.log(`DOGZILLA waypoint navigator ready at ${health.destination}.`)
+  } else {
+    console.warn(`DOGZILLA waypoint navigator did not become ready: ${health?.error || health?.status || 'unknown status'}`)
+  }
+}
+
 async function runExistingAppDogzillaAction(appUrl, action, timeoutMs, options = {}) {
   const response = await fetch(new URL('/api/dogzilla/connection/action', appUrl), {
     method: 'POST',
@@ -299,6 +358,42 @@ async function runExistingAppDogzillaAction(appUrl, action, timeoutMs, options =
 
   if (!response.ok || result?.status === 'error') {
     console.warn(`DOGZILLA ${action} failed: ${result?.error || result?.stderr || `HTTP ${response.status}`}`)
+  }
+
+  return result || {
+    status: response.ok ? 'ok' : 'error',
+    action,
+    responseStatus: response.status,
+  }
+}
+
+async function waitForExistingAppDogzillaWaypointNavigation(appUrl, timeoutMs = 45_000) {
+  const startedAt = Date.now()
+  let lastHealth = null
+
+  do {
+    try {
+      const healthResponse = await fetch(new URL('/api/robot/health', appUrl), {
+        signal: AbortSignal.timeout(2500),
+      })
+      lastHealth = await safeReadJson(healthResponse)
+
+      if (healthResponse.ok && isDogzillaWaypointNavigationReady(lastHealth)) {
+        return lastHealth
+      }
+    } catch (error) {
+      lastHealth = {
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+
+    await sleep(1000)
+  } while (Date.now() - startedAt < timeoutMs)
+
+  return lastHealth || {
+    status: 'error',
+    error: `Timed out waiting ${timeoutMs}ms for DOGZILLA waypoint navigator readiness.`,
   }
 }
 
@@ -484,10 +579,6 @@ function parseCliArgs(argv) {
 
 function isTruthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase())
-}
-
-function isFalsy(value) {
-  return ['0', 'false', 'no', 'off'].includes(String(value || '').trim().toLowerCase())
 }
 
 function sleep(ms) {

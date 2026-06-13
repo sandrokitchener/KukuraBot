@@ -165,6 +165,55 @@ test('buildDogzillaActionPlan starts map pose localization through the lidar con
   assert.equal(plan.args[plan.args.indexOf('-RemoteRoot') + 1], '/home/pi/robodoge')
   assert.ok(plan.args.includes('-PosePort'))
   assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '8896')
+  assert.ok(plan.args.includes('-Mode'))
+  assert.equal(plan.args[plan.args.indexOf('-Mode') + 1], 'auto')
+})
+
+test('buildDogzillaActionPlan starts waypoint navigation through the lidar container', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+    lidar: {
+      enabled: true,
+      port: 8896,
+    },
+  })
+  const plan = buildDogzillaActionPlan('start-navigation', config)
+
+  assert.equal(plan.action, 'start-navigation')
+  assert.equal(plan.background, false)
+  assert.ok(plan.args.some((arg) => arg.endsWith('start-dogzilla-navigation-ssh.ps1')))
+  assert.ok(plan.args.includes('-RemoteRoot'))
+  assert.equal(plan.args[plan.args.indexOf('-RemoteRoot') + 1], '/home/pi/robodoge')
+  assert.ok(plan.args.includes('-PosePort'))
+  assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '8896')
+})
+
+test('buildDogzillaActionPlan exposes explicit map mapping and save actions', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+    lidar: {
+      enabled: true,
+      port: 8896,
+    },
+  })
+  const mappingPlan = buildDogzillaActionPlan('start-map-pose-mapping', config)
+  const savePlan = buildDogzillaActionPlan('save-map-pose', config)
+
+  assert.equal(mappingPlan.action, 'start-map-pose-mapping')
+  assert.ok(mappingPlan.args.some((arg) => arg.endsWith('start-dogzilla-map-pose-ssh.ps1')))
+  assert.equal(mappingPlan.args[mappingPlan.args.indexOf('-Mode') + 1], 'mapping')
+  assert.equal(savePlan.action, 'save-map-pose')
+  assert.ok(savePlan.args.some((arg) => arg.endsWith('save-dogzilla-map-pose-ssh.ps1')))
 })
 
 test('buildDogzillaActionPlan stops the vendor DOGZILLA app before direct control', () => {

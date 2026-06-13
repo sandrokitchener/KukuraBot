@@ -127,6 +127,8 @@ export function mapWaypoint(overrides = {}) {
     yaw: 0,
     arrivalToleranceMeters: 0.25,
     verified: true,
+    mapId: 'test_map',
+    mapFingerprint: 'test-map-fingerprint',
     ...overrides,
   }
 }

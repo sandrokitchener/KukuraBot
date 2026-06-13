@@ -100,8 +100,7 @@ test('normalizeAppConfig accepts app-level brand overrides', () => {
   assert.equal(config.pageTitle, 'Questing Beast')
   assert.equal(config.consoleTitle, 'Questing Beast')
   assert.equal(config.sendButtonLabel, 'Ask Dog')
-  assert.match(config.introDescription, /safety, maintenance, and security checks/)
-  assert.match(config.introDescription, /operator notes/)
+  assert.equal(config.introDescription, '')
 })
 
 test('renderTemplate replaces assistant placeholders', () => {
@@ -160,7 +159,21 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.robotRuntime.robotName, 'Questing Beast')
   assert.equal(payload.robotRuntime.robot_name, 'Questing Beast')
   assert.equal(payload.robotRuntime.waypointSet, 'home')
-  assert.ok(payload.robotRuntime.waypoints.some((waypoint) => waypoint.id === 'kitchen' && waypoint.frame === 'map' && waypoint.verified === true))
+  assert.equal(typeof payload.robotRuntime.mapOrigin.configured, 'boolean')
+  const kitchenWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'kitchen')
+  assert.ok(kitchenWaypoint)
+  assert.equal(kitchenWaypoint.sourceVerified, true)
+  assert.equal(kitchenWaypoint.verified, true)
+  assert.equal(kitchenWaypoint.enabled, true)
+  assert.equal(kitchenWaypoint.navigable, true)
+  assert.doesNotMatch(kitchenWaypoint.verificationProblem, /captured-pose note|notes still|dummy|stored pose does not match/i)
+  assert.match(payload.robotRuntime.mapOrigin.status, /ready|stale-missing-map-identity|missing/)
+  assert.equal(kitchenWaypoint.frame, 'map')
+  if (payload.robotRuntime.mapOrigin.configured) {
+    assert.equal(kitchenWaypoint.appMapPose?.frame, 'app_map')
+    assert.equal(kitchenWaypoint.appMapPose?.sourceFrame, 'map')
+    assert.equal(kitchenWaypoint.appMapPose?.originLabel, payload.robotRuntime.mapOrigin.origin.label)
+  }
   assert.equal(payload.app.appName, 'Questing Beast')
 })
 

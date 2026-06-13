@@ -1,0 +1,166 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  forceDogzillaWaypointNavigationOnStartup,
+  isDogzillaWaypointNavigationReady,
+  shouldForceDogzillaWaypointNavigation,
+} from '../lib/dogzilla-waypoint-navigation-launcher.mjs'
+
+test('shouldForceDogzillaWaypointNavigation follows DOGZILLA Direct target and lidar config', () => {
+  assert.equal(shouldForceDogzillaWaypointNavigation(directRuntimeConfig(), { lidar: { enabled: true } }, {}), true)
+  assert.equal(shouldForceDogzillaWaypointNavigation(directRuntimeConfig(), { lidar: { enabled: false } }, {}), false)
+  assert.equal(shouldForceDogzillaWaypointNavigation({ enabled: true, activeTarget: { kind: 'isaacsim' } }, { lidar: { enabled: true } }, {}), false)
+  assert.equal(shouldForceDogzillaWaypointNavigation(directRuntimeConfig(), { lidar: { enabled: true } }, {
+    APP_DOGZILLA_WAYPOINT_NAVIGATION_START: '0',
+  }), false)
+  assert.equal(shouldForceDogzillaWaypointNavigation(directRuntimeConfig(), { lidar: { enabled: false } }, {
+    APP_DOGZILLA_WAYPOINT_NAVIGATION_START: '1',
+  }), true)
+})
+
+test('isDogzillaWaypointNavigationReady accepts Nav2 health only', () => {
+  assert.equal(isDogzillaWaypointNavigationReady(nav2Health()), true)
+  assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ nav2Available: false })), false)
+  assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ odomAvailable: false })), false)
+  assert.equal(isDogzillaWaypointNavigationReady({ status: 'error' }), false)
+})
+
+test('forceDogzillaWaypointNavigationOnStartup reuses existing Nav2 server', async () => {
+  const actionCalls = []
+  const result = await forceDogzillaWaypointNavigationOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    probeRobotSidecarHealthImpl: async () => nav2Health(),
+    runDogzillaConnectionActionImpl: async (action) => {
+      actionCalls.push(action)
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reusedNavigation, true)
+  assert.deepEqual(actionCalls, [])
+})
+
+test('forceDogzillaWaypointNavigationOnStartup starts Nav2 and waits for bridge health', async () => {
+  const healthSequence = [
+    nav2Health({ nav2Available: false }),
+    nav2Health({ nav2Available: false }),
+    nav2Health(),
+  ]
+  const actionCalls = []
+
+  const result = await forceDogzillaWaypointNavigationOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    sleepImpl: async () => {},
+    probeRobotSidecarHealthImpl: async () => healthSequence.shift() || nav2Health(),
+    runDogzillaConnectionActionImpl: async (action) => {
+      actionCalls.push(action)
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reusedNavigation, false)
+  assert.deepEqual(actionCalls, ['start-navigation'])
+})
+
+test('forceDogzillaWaypointNavigationOnStartup does not start Nav2 when direct bridge is down', async () => {
+  const actionCalls = []
+  const result = await forceDogzillaWaypointNavigationOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    probeRobotSidecarHealthImpl: async () => ({
+      status: 'error',
+      error: 'fetch failed',
+    }),
+    runDogzillaConnectionActionImpl: async (action) => {
+      actionCalls.push(action)
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.error, 'DOGZILLA direct bridge is not ready')
+  assert.deepEqual(actionCalls, [])
+})
+
+test('forceDogzillaWaypointNavigationOnStartup reports start-navigation failure', async () => {
+  const result = await forceDogzillaWaypointNavigationOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    probeRobotSidecarHealthImpl: async () => nav2Health({ nav2Available: false }),
+    runDogzillaConnectionActionImpl: async (action) => ({
+      status: 'error',
+      action,
+      error: 'map pose unavailable',
+    }),
+  })
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.startResult.error, 'map pose unavailable')
+})
+
+function directRuntimeConfig() {
+  return {
+    enabled: true,
+    activeTarget: {
+      id: 'dogzilla_direct',
+      kind: 'dogzilla-direct',
+      label: 'DOGZILLA Direct Bridge',
+    },
+  }
+}
+
+function directRos2Config() {
+  return {
+    transport: {
+      baseUrl: 'http://10.0.4.32:8893',
+    },
+  }
+}
+
+function nav2Health({ nav2Available = true, odomAvailable = true } = {}) {
+  return {
+    status: 'ok',
+    destination: 'http://10.0.4.32:8893/healthz',
+    body: {
+      runtime: {
+        available: true,
+        nav2: {
+          available: nav2Available,
+          waypointReady: nav2Available && odomAvailable,
+          serverAvailable: nav2Available,
+          odom: {
+            topic: '/odom',
+            publisherCount: odomAvailable ? 1 : 0,
+            available: odomAvailable,
+          },
+        },
+        navigation: {
+          available: nav2Available && odomAvailable,
+          primary: nav2Available && odomAvailable ? 'nav2' : 'unavailable',
+          actionServerAvailable: nav2Available,
+          waypointReady: nav2Available && odomAvailable,
+        },
+      },
+    },
+  }
+}
+
+function quietLogger() {
+  return {
+    log() {},
+    warn() {},
+  }
+}

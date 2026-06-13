@@ -39,6 +39,22 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
           id: 'dogzilla-direct',
           kind: 'dogzilla-direct',
         },
+        mapOrigin: {
+          configured: true,
+          status: 'ready',
+          origin: {
+            label: 'charger_origin',
+            savedAt: '2026-06-04T12:00:06.000Z',
+          },
+          identity: {
+            id: 'robodoge_home',
+            fingerprint: 'abc123',
+          },
+          activeMap: {
+            id: 'robodoge_home',
+            fingerprint: 'abc123',
+          },
+        },
         activeRobot: {
           timestamp: '2026-06-04T12:00:08.000Z',
           receivedAt: '2026-06-04T12:00:08.500Z',
@@ -138,6 +154,8 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
   assert.equal(payload.sensors.lidarScan.ageSec, 0.42)
   assert.equal(payload.sensors.mapPose.authority, 'tf:map->base_footprint')
   assert.equal(payload.sensors.mapPose.ageSec, 0.1)
+  assert.equal(payload.sensors.mapOrigin.status, 'ready')
+  assert.equal(payload.sensors.mapOrigin.mapId, 'robodoge_home')
   assert.equal(payload.sensors.yoloVision.authority, 'DOGZILLA YOLO vision sidecar')
   assert.equal(payload.sensors.yoloVision.ageSec, 0.5)
   assert.equal(payload.sidecars.lidarBridge.destination, 'http://10.0.4.32:8896/healthz')
@@ -175,6 +193,58 @@ test('buildHealthzPayload marks missing required map pose as failed', () => {
   assert.equal(payload.sensors.mapPose.status, 'no-pose')
   assert.match(payload.sensors.mapPose.error, /TF lookup/)
   assert.deepEqual(payload.failedRequiredSensors, ['mapPose'])
+})
+
+test('buildHealthzPayload degrades when saved map origin is stale', () => {
+  const payload = buildHealthzPayload({
+    generationId: 'gen-stale-origin',
+    checkedAt: '2026-06-04T12:00:10.000Z',
+    probeResults: {
+      robotState: {
+        status: 'ok',
+        activeTarget: {
+          id: 'dogzilla-direct',
+          kind: 'dogzilla-direct',
+        },
+        mapOrigin: {
+          configured: false,
+          status: 'stale-missing-map-identity',
+          origin: {
+            label: 'charger_origin',
+            savedAt: '2026-06-04T12:00:06.000Z',
+          },
+          identity: {
+            id: '',
+            fingerprint: '',
+          },
+          activeMap: {
+            id: 'robodoge_home',
+            fingerprint: 'abc123',
+          },
+        },
+        activeRobot: {
+          timestamp: '2026-06-04T12:00:08.000Z',
+          receivedAt: '2026-06-04T12:00:08.500Z',
+          telemetry: {
+            battery: 80,
+            batteryReadStatus: 'ok',
+          },
+        },
+      },
+      robotBridge: {
+        status: 'ok',
+        destination: 'http://10.0.4.32:8893/healthz',
+      },
+    },
+  })
+
+  assert.equal(payload.ok, true)
+  assert.equal(payload.status, 'degraded')
+  assert.equal(payload.sensors.mapOrigin.ok, false)
+  assert.equal(payload.sensors.mapOrigin.status, 'stale-missing-map-identity')
+  assert.match(payload.sensors.mapOrigin.detail, /reset and resave origin/)
+  assert.deepEqual(payload.failedRequiredSensors, [])
+  assert.ok(payload.failedEnabledSensors.includes('mapOrigin'))
 })
 
 test('collectHealthzProbes reads the configured YOLO vision health endpoint', async () => {
