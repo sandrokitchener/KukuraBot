@@ -1,16 +1,17 @@
 {
   "activeSet": "home",
   "mappingGuidance": {
-    "frame": "map",
+    "frame": "app_map",
     "coordinateConvention": {
-      "x": "forward from your chosen home origin or dock reference",
+      "x": "forward from the saved map origin (auto-saved on Nav2 startup)",
       "y": "left from that same origin",
-      "yaw": "robot heading in radians or degrees converted consistently"
+      "yaw": "robot heading in radians"
     },
     "suggestedMeasurementFlow": [
-      "Pick one anchor origin that never moves, such as a charging dock, hallway tile seam, or SLAM map origin.",
-      "Mark each named spot as the center of a safe parking bubble, not the middle of furniture.",
-      "Capture doorway clearance and arrival tolerance separately so a waypoint can stay stable even if furniture shifts."
+      "Waypoints are now captured in app_map frame, which is stable across Cartographer restarts.",
+      "Save the map origin first: `node scripts/set-dogzilla-map-origin.mjs` (or restart the app, which auto-saves it).",
+      "Then capture each waypoint from the physical spot: `node scripts/capture-dogzilla-map-pose.mjs <name> --spot \"<description>\"`",
+      "Migrate existing map-frame waypoints: `node scripts/migrate-waypoints-to-appmap.mjs --no-dry-run`"
     ]
   },
   "sets": {
@@ -52,8 +53,8 @@
         "garage": {
           "kind": "map_pose",
           "frame": "map",
-          "x": 5.0,
-          "y": 0.0,
+          "x": 2.78,
+          "y": 3.56,
           "yaw": 0.0,
           "arrivalToleranceMeters": 0.35,
           "physicalSpot": "Clear parking zone just inside the garage threshold",

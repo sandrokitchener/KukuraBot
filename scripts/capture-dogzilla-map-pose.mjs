@@ -6,6 +6,7 @@ import {
   APP_MAP_FRAME,
   DEFAULT_MAP_ORIGIN_FILE,
   loadDogzillaMapOrigin,
+  mapPoseToAppPose,
 } from '../lib/dogzilla-map-frame.mjs'
 import { normalizeDogzillaMapMetadata } from '../lib/dogzilla-map-metadata.mjs'
 
@@ -30,16 +31,33 @@ export function poseToWaypoint(pose, {
   mapMetadata = null,
 } = {}) {
   const body = pose?.pose && typeof pose.pose === 'object' ? pose.pose : pose
-  const frame = String(body?.frameId || body?.frame_id || body?.frame || '').trim()
+  const rawFrame = String(body?.frameId || body?.frame_id || body?.frame || '').trim()
   const source = String(body?.source || '').trim()
-  const x = Number(body?.x)
-  const y = Number(body?.y)
-  const yaw = Number(body?.theta ?? body?.yaw)
+  const rawX = Number(body?.x)
+  const rawY = Number(body?.y)
+  const rawYaw = Number(body?.theta ?? body?.yaw)
   const capturedAt = new Date().toISOString()
-  const map = frame === 'map' ? normalizeDogzillaMapMetadata(mapMetadata) : null
+  const map = rawFrame === 'map' ? normalizeDogzillaMapMetadata(mapMetadata) : null
 
-  if (!frame || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(yaw)) {
+  if (!rawFrame || !Number.isFinite(rawX) || !Number.isFinite(rawY) || !Number.isFinite(rawYaw)) {
     throw new Error('pose payload missing finite frame/x/y/yaw')
+  }
+
+  let frame = rawFrame
+  let x = rawX
+  let y = rawY
+  let yaw = rawYaw
+  let capturedMapPose = null
+
+  if (rawFrame === 'map' && mapOrigin) {
+    const appPose = mapPoseToAppPose({ frame: 'map', x: rawX, y: rawY, yaw: rawYaw }, mapOrigin)
+    if (appPose) {
+      capturedMapPose = { frame: 'map', x: rawX, y: rawY, yaw: rawYaw }
+      frame = appPose.frame
+      x = appPose.x
+      y = appPose.y
+      yaw = appPose.yaw
+    }
   }
 
   return {
@@ -50,7 +68,7 @@ export function poseToWaypoint(pose, {
     yaw,
     arrivalToleranceMeters,
     physicalSpot,
-    verified: frame === 'map' && !!map?.fingerprint,
+    verified: rawFrame === 'map' && !!map?.fingerprint,
     capturedAt,
     capturedFrom: source || 'dogzilla pose bridge',
     ...(map?.id ? { mapId: map.id } : {}),
@@ -68,18 +86,18 @@ export function poseToWaypoint(pose, {
         bounds: map.bounds,
       },
     } : {}),
-    ...(mapOrigin && frame === 'map' ? {
+    ...(mapOrigin && rawFrame === 'map' ? {
       mapOrigin: {
         label: mapOrigin.label,
         savedAt: mapOrigin.savedAt,
-        displayOnly: true,
       },
     } : {}),
+    ...(capturedMapPose ? { capturedMapPose } : {}),
     notes: [
       `Captured from ${source || 'dogzilla pose bridge'} at ${capturedAt}.`,
-      ...(frame === 'map' ? [`Captured map pose: x=${x}, y=${y}, yaw=${yaw}.`] : []),
+      ...(capturedMapPose ? [`Captured map pose: x=${capturedMapPose.x}, y=${capturedMapPose.y}, yaw=${capturedMapPose.yaw}.`] : []),
       ...(map ? [`Captured map identity: id=${map.id || 'unknown'}, fingerprint=${map.fingerprint || 'unknown'}.`] : []),
-      ...(mapOrigin && frame === 'map' ? [`Stored in raw map coordinates; saved ${APP_MAP_FRAME} origin is display-only.`] : []),
+      ...(frame === APP_MAP_FRAME ? [`Stored in ${APP_MAP_FRAME} frame; stable across Cartographer origin shifts.`] : []),
       'Use with command JSON: {"command":"move","waypoint":"<name>"}',
     ],
   }
@@ -124,10 +142,11 @@ export async function captureWaypoint({
   const mapOrigin = await loadDogzillaMapOrigin(originFile)
   const mapMetadata = await loadActiveMapMetadata(bridgeHealthUrl)
   const waypoint = poseToWaypoint(posePayload, { physicalSpot, arrivalToleranceMeters, mapOrigin, mapMetadata })
-  if (waypoint.frame !== 'map' && !allowOdom) {
-    throw new Error(`refusing to save non-map pose frame "${waypoint.frame}"; rerun with --allow-odom for temporary targets`)
+  const effectiveFrame = waypoint.capturedMapPose?.frame || waypoint.frame
+  if (effectiveFrame !== 'map' && !allowOdom) {
+    throw new Error(`refusing to save non-map pose frame "${effectiveFrame}"; rerun with --allow-odom for temporary targets`)
   }
-  if (waypoint.frame === 'map' && !waypoint.mapFingerprint && !allowMissingMapIdentity) {
+  if (effectiveFrame === 'map' && !waypoint.mapFingerprint && !allowMissingMapIdentity) {
     throw new Error('refusing to capture map waypoint without active map identity; start DOGZILLA Direct Bridge or rerun with --allow-missing-map-identity')
   }
 

@@ -36,7 +36,7 @@ export function createRobotMapRenderer({
       }
       marker.style.left = `${position.xPercent}%`
       marker.style.top = `${position.yPercent}%`
-      marker.style.setProperty('--waypoint-heading', `${waypoint.yaw || 0}rad`)
+      marker.style.setProperty('--waypoint-heading', `${headingRadiansToCssRotation(waypoint.yaw || 0)}rad`)
       marker.title = formatRobotMapWaypointTitle(waypoint)
 
       const label = document.createElement('span')
@@ -73,7 +73,7 @@ export function createRobotMapRenderer({
     elements.dot.style.left = `${position.xPercent}%`
     elements.dot.style.top = `${position.yPercent}%`
     elements.dot.style.opacity = '1'
-    elements.dot.style.setProperty('--robot-heading', `${robot.pose.theta}rad`)
+    elements.dot.style.setProperty('--robot-heading', `${headingRadiansToCssRotation(robot.pose.theta)}rad`)
     setPoseReadout(robot.pose, robot.pose.frame || 'map')
     setMeta(
       `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
@@ -370,6 +370,11 @@ export function poseToMapPosition(pose, rangeMeters = ROBOT_MAP_RANGE_METERS) {
     xPercent: 50 + (xRatio * 50),
     yPercent: 50 - (yRatio * 50),
   }
+}
+
+export function headingRadiansToCssRotation(theta) {
+  const heading = toFiniteNumber(theta)
+  return Number.isFinite(heading) ? (Math.PI / 2) - heading : 0
 }
 
 export function lidarPointToMapPose(point, robotPose) {
