@@ -41,6 +41,8 @@ DEFAULT_COLORS = [
 ]
 WAKE_COMMAND = "$010F040115#"
 DEFAULT_STALE_HEALTH_SECONDS = 2.0
+PERSON_BARK_COOLDOWN = 5.0  # minimum seconds between person-triggered barks
+PERSON_BARK_CONFIDENCE = 0.8  # confidence threshold to trigger bark
 
 
 @dataclass
@@ -66,6 +68,7 @@ class VisionState:
     model_loaded: bool = False
     labels: list[str] = field(default_factory=list)
     capture_restarts: int = 0
+    last_person_bark_at: float = 0.0
 
 
 class YoloOnnxDetector:
@@ -183,6 +186,15 @@ class VisionWorker(threading.Thread):
                     self.state.latest_detections = detections
                     self.state.inference_ms = inference_ms
                     self.state.inferences += 1
+                    # Person detection -> bark gate
+                    if self.args.audio_cue_url:
+                        now = time.time()
+                        if now - self.state.last_person_bark_at >= PERSON_BARK_COOLDOWN:
+                            for d in detections:
+                                if d.label.lower() == "person" and d.confidence >= PERSON_BARK_CONFIDENCE:
+                                    self.state.last_person_bark_at = now
+                                    threading.Thread(target=post_audio_cue, args=(self.args.audio_cue_url,), daemon=True).start()
+                                    break
 
                 time.sleep(self.args.infer_interval)
             except Exception as error:
@@ -641,6 +653,16 @@ def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
 
+def post_audio_cue(url: str) -> None:
+    """POST a bark cue to the Pi audio bridge from a daemon thread."""
+    try:
+        data = json.dumps({"cue": "bark"}).encode("utf-8")
+        req = Request(url, data=data, headers={"Content-Type": "application/json"})
+        urlopen(req, timeout=2.0)
+    except Exception:
+        pass  # audio failure must never break vision
+
+
 def positive_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed) or parsed <= 0:
@@ -673,6 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "65")))
     parser.add_argument("--restart-delay", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_RESTART_DELAY", "2")))
     parser.add_argument("--first-frame-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_FIRST_FRAME_TIMEOUT", "15")))
+    parser.add_argument("--audio-cue-url", default=os.getenv("DOGZILLA_YOLO_AUDIO_CUE_URL", "http://localhost:8895/cue"))
     return parser
 
 
