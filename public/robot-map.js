@@ -15,8 +15,8 @@ export function createRobotMapRenderer({
   let lastRenderedRobot = null
   let lastRenderedScan = null
   const accumulatedPoints = []
-  const ACCUMULATION_MS = 15_000
-  const MAX_ACCUMULATED_POINTS = 15_000
+  const ACCUMULATION_MS = 5_000
+  const MAX_ACCUMULATED_POINTS = 5_000
   let mapGrid = null
   let mapGridMeta = null
   let viewCenterX = 0
@@ -80,25 +80,27 @@ export function createRobotMapRenderer({
         const byteOffset = idx * 4
 
         if (col < 0 || col >= gridW || row < 0 || row >= gridH) {
-          data[byteOffset] = 200
-          data[byteOffset + 1] = 195
-          data[byteOffset + 2] = 190
+          // Outside map bounds — darker uniform gray
+          data[byteOffset] = 180
+          data[byteOffset + 1] = 176
+          data[byteOffset + 2] = 172
           data[byteOffset + 3] = 255
           continue
         }
 
         const cell = cells[row * gridW + col]
         if (cell === MAP_CELL_UNKNOWN) {
-          data[byteOffset] = 200
-          data[byteOffset + 1] = 195
-          data[byteOffset + 2] = 190
+          // Unexplored area — light neutral gray
+          data[byteOffset] = 215
+          data[byteOffset + 1] = 212
+          data[byteOffset + 2] = 208
         } else if (cell === MAP_CELL_FREE) {
           data[byteOffset] = 240
           data[byteOffset + 1] = 240
           data[byteOffset + 2] = 235
         } else {
           const occluded = Math.min(100, Math.max(0, cell))
-          const v = 240 - Math.round((occluded / 100) * 220)
+          const v = 248 - Math.round((occluded / 100) * 240)
           data[byteOffset] = v
           data[byteOffset + 1] = v
           data[byteOffset + 2] = v
@@ -370,8 +372,8 @@ export function createRobotMapRenderer({
     }
 
     context.save()
-    context.lineWidth = 1
-    context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
+    context.lineWidth = 0.5
+    context.strokeStyle = 'rgba(48, 43, 37, 0.12)'
     for (const ring of [0.25, 0.5, 0.75, 1]) {
       const ringMeters = displayRange * ring
       context.beginPath()
@@ -391,34 +393,13 @@ export function createRobotMapRenderer({
       if (px < 0 || px > width || py < 0 || py > height) {
         continue
       }
-      context.fillStyle = `rgba(0, 123, 132, ${(0.12 + (1 - ageRatio) * 0.55).toFixed(3)})`
+      context.fillStyle = `rgba(0, 123, 132, ${(0.03 + (1 - ageRatio) * 0.15).toFixed(3)})`
       context.beginPath()
-      context.arc(px, py, 1.4, 0, Math.PI * 2)
+      context.arc(px, py, 1, 0, Math.PI * 2)
       context.fill()
     }
 
-    context.strokeStyle = 'rgba(0, 180, 170, 0.10)'
-    context.lineWidth = 0.8
-    for (const point of points) {
-      const mapPoint = lidarPointToMapPose(point, robotPose)
-      if (!mapPoint) {
-        continue
-      }
-      const pointPosition = poseToMapPosition(mapPoint, mapRange, viewCenterMetersX, viewCenterMetersY)
-      if (!pointPosition) {
-        continue
-      }
-      const px = (pointPosition.xPercent / 100) * width
-      const py = (pointPosition.yPercent / 100) * height
-      if (px < 0 || px > width || py < 0 || py > height) {
-        continue
-      }
-      context.beginPath()
-      context.moveTo(centerX, centerY)
-      context.lineTo(px, py)
-      context.stroke()
-    }
-
+    // Current scan points (no rays — they obscure the map)
     for (const point of points) {
       const mapPoint = lidarPointToMapPose(point, robotPose)
       if (!mapPoint) {
@@ -434,9 +415,9 @@ export function createRobotMapRenderer({
         continue
       }
       const rangeNorm = clamp(point.range / maxSeen, 0, 1)
-      const pointSize = 1.3 + (1 - rangeNorm) * 2.2
-      const pointAlpha = 0.5 + (1 - rangeNorm) * 0.45
-      context.fillStyle = `rgba(0, 220, 200, ${pointAlpha.toFixed(3)})`
+      const pointSize = 1 + (1 - rangeNorm) * 1.2
+      const pointAlpha = 0.25 + (1 - rangeNorm) * 0.35
+      context.fillStyle = `rgba(0, 200, 180, ${pointAlpha.toFixed(3)})`
       context.beginPath()
       context.arc(px, py, pointSize, 0, Math.PI * 2)
       context.fill()
