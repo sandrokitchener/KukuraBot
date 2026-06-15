@@ -292,8 +292,8 @@ class DogzillaRuntime:
         if self.dry_run:
             return {"executed": False, "delivery": "dry-run", "kind": kind, "params": params}
 
-        if kind == "noop" and params.get("reason") == "emergency_stop":
-            return self._execute_emergency_stop()
+        if kind == "noop" and params.get("reason") in ("emergency_stop", "command_preempt"):
+            return self._execute_emergency_stop(reason=str(params.get("reason") or "emergency_stop"))
 
         if kind == "locomotion.goto":
             cancel_event = self._replace_navigation_cancel_event()
@@ -671,9 +671,9 @@ class DogzillaRuntime:
     def cancel_active_navigation(self) -> None:
         self._navigation_cancel_event().set()
 
-    def _execute_emergency_stop(self) -> dict[str, Any]:
+    def _execute_emergency_stop(self, *, reason: str = "emergency_stop") -> dict[str, Any]:
         self.cancel_active_navigation()
-        self._block_nav2_cmd_vel("emergency_stop")
+        self._block_nav2_cmd_vel(reason)
 
         performance_stopped = False
         stop_error: str | None = None

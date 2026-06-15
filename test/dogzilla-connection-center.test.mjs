@@ -193,6 +193,63 @@ test('buildDogzillaActionPlan starts waypoint navigation through the lidar conta
   assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '8896')
 })
 
+test('buildDogzillaActionPlan passes Nav2 yaw goal tolerance to navigation startup', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+    lidar: {
+      enabled: true,
+      port: 8896,
+    },
+  })
+  const plan = buildDogzillaActionPlan('start-navigation', config, {
+    obstacleAvoidance: {
+      nav2RobotRadius: 0.1,
+      nav2FootprintPadding: 0.01,
+      nav2InflationRadius: 0.16,
+      nav2CostScalingFactor: 10,
+      nav2ObstacleMinRange: 0.24,
+      nav2ObstacleMaxRange: 2.5,
+      nav2RaytraceMaxRange: 3.5,
+      nav2ScanFilterEnabled: true,
+      nav2ScanFilterMaskStartDeg: 120,
+      nav2ScanFilterMaskEndDeg: 260,
+      nav2ScanFilterMaskRangeM: 0.45,
+      yawGoalTolerance: 6.283185307179586,
+      nav2ControllerFrequency: 5,
+      nav2BtLoopDurationMs: 200,
+      nav2BtServerTimeoutMs: 10000,
+      nav2BtWaitForServiceTimeoutMs: 5000,
+      nav2PlannerFrequency: 1,
+      nav2SmootherFrequency: 5,
+      nav2RequiredMovementRadius: 0.08,
+      nav2MovementTimeAllowance: 45,
+      nav2FailureTolerance: 5,
+      nav2MinSpeedXy: 0.03,
+      nav2TransStoppedVelocity: 0.05,
+    },
+  })
+
+  assert.ok(plan.args.includes('-YawGoalTolerance'))
+  assert.equal(plan.args[plan.args.indexOf('-YawGoalTolerance') + 1], '6.283185307179586')
+  assert.ok(plan.args.includes('-Nav2ObstacleMinRange'))
+  assert.equal(plan.args[plan.args.indexOf('-Nav2ObstacleMinRange') + 1], '0.24')
+  assert.ok(plan.args.includes('-Nav2ScanFilterEnabled'))
+  assert.equal(plan.args[plan.args.indexOf('-Nav2ScanFilterEnabled') + 1], '1')
+  assert.ok(plan.args.includes('-Nav2ScanFilterMaskRangeM'))
+  assert.equal(plan.args[plan.args.indexOf('-Nav2ScanFilterMaskRangeM') + 1], '0.45')
+  assert.ok(plan.args.includes('-Nav2BtServerTimeoutMs'))
+  assert.equal(plan.args[plan.args.indexOf('-Nav2BtServerTimeoutMs') + 1], '10000')
+  assert.ok(plan.args.includes('-Nav2RequiredMovementRadius'))
+  assert.equal(plan.args[plan.args.indexOf('-Nav2RequiredMovementRadius') + 1], '0.08')
+  assert.ok(plan.args.includes('-Nav2TransStoppedVelocity'))
+  assert.equal(plan.args[plan.args.indexOf('-Nav2TransStoppedVelocity') + 1], '0.05')
+})
+
 test('buildDogzillaActionPlan exposes explicit map mapping and save actions', () => {
   const config = normalizeDogzillaConnectionConfig({
     ssh: {

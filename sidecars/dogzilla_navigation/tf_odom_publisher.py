@@ -107,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         rclpy.spin(node)
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
     return 0
 
 

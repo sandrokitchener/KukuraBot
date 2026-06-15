@@ -8,6 +8,7 @@ It intentionally does not start AMCL. Cartographer map localization already owns
 - Nav2 planner/controller/behavior/BT navigator/waypoint follower
 - Nav2 velocity smoother
 - Robo-Doge DOGZILLA `/cmd_vel` gait adapter by default
+- Cartographer map-pose localization repair when `odom -> base_link/base_footprint` TF is missing
 - A TF-derived `/odom` publisher when Cartographer exposes `odom -> base_link` TF but no `nav_msgs/Odometry` publisher
 
 Start from Windows:
@@ -25,7 +26,7 @@ ros2 topic info /odom
 ros2 topic info /map
 ```
 
-The `/odom` publisher does not invent map coordinates. It republishes the live `odom -> base_link` TF as `nav_msgs/Odometry` so Nav2's controller and velocity smoother get the odometry topic they require.
+The `/odom` publisher does not invent map coordinates. It republishes the live `odom -> base_link` or `odom -> base_footprint` TF as `nav_msgs/Odometry` so Nav2's controller and velocity smoother get the odometry topic they require. If that TF is missing, startup first runs the map-pose Cartographer localization script from `sidecars/dogzilla_map_pose`; only after TF exists does it start the TF-derived `/odom` helper.
 
 ## DOGZILLA gait adapter
 
@@ -58,6 +59,10 @@ Useful adapter knobs:
 - `DOGZILLA_NAV2_GAIT_MAX_TURN_RATE` - max DOGZILLA turn rate from Nav2. Default `24`.
 - `DOGZILLA_NAV2_GAIT_ALLOW_TROT=1` - allow Nav2 to request `trot`; default is walk-only for stability.
 
+## Final heading
+
+Waypoint navigation defaults to position-first arrival. `DOGZILLA_NAV2_YAW_GOAL_TOLERANCE` defaults to `6.283185307179586`, so Nav2 does not spin just to match a saved waypoint yaw. Lower it only when final facing direction matters.
+
 ## Indoor doorway tuning
 
 All obstacle avoidance parameters are now housed in `config/robot-obstacle-avoidance.json` on the host and are passed as environment variables at startup.
@@ -68,8 +73,14 @@ Startup generates `$REMOTE_ROOT/logs/robodoge_nav2_params.yaml` from the install
 - `nav2FootprintPadding` → `DOGZILLA_NAV2_FOOTPRINT_PADDING`
 - `nav2InflationRadius` → `DOGZILLA_NAV2_INFLATION_RADIUS`
 - `nav2CostScalingFactor` → `DOGZILLA_NAV2_COST_SCALING_FACTOR`
+- `nav2ObstacleMinRange` → `DOGZILLA_NAV2_OBSTACLE_MIN_RANGE`
 - `nav2ObstacleMaxRange` → `DOGZILLA_NAV2_OBSTACLE_MAX_RANGE`
 - `nav2RaytraceMaxRange` → `DOGZILLA_NAV2_RAYTRACE_MAX_RANGE`
+- `nav2ScanFilterEnabled` → `DOGZILLA_NAV2_SCAN_FILTER_ENABLED`
+- `nav2ScanFilterMaskStartDeg` → `DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG`
+- `nav2ScanFilterMaskEndDeg` → `DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG`
+- `nav2ScanFilterMaskRangeM` → `DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M`
+- `yawGoalTolerance` → `DOGZILLA_NAV2_YAW_GOAL_TOLERANCE`
 
 Bridge-side map navigation parameters are also sourced from the same config:
 
@@ -82,4 +93,6 @@ Bridge-side map navigation parameters are also sourced from the same config:
 - `mapNavigationYGain` → `DOGZILLA_MAP_NAVIGATION_Y_GAIN`
 - `mapNavigationTurnGain` → `DOGZILLA_MAP_NAVIGATION_TURN_GAIN`
 
-This keeps LiDAR obstacle avoidance in Nav2's costmaps instead of starting Yahboom's separate `laser_Avoidance_xgo_RS200` controller during waypoint navigation. If DOGZILLA still refuses wide doorways, lower `nav2InflationRadius` in `config/robot-obstacle-avoidance.json` in small steps. If he cuts corners too close, raise it back up.
+This keeps LiDAR obstacle avoidance in Nav2's costmaps instead of starting Yahboom's separate `laser_Avoidance_xgo_RS200` controller during waypoint navigation. Keep `nav2InflationRadius` at least as large as the robot radius plus padding; lowering below the body radius can make Nav2 plan through collisions.
+
+The DOGZILLA scan filter publishes `/scan_nav2` for Nav2 costmaps and masks the observed rear self-hit arc. The default mask is `120-260` degrees under `0.45 m`, which ignores close body/wire bounces behind the robot without hiding normal front obstacle data. Startup sets `inf_is_valid` on the filtered LaserScan source so masked rays can clear stale costmap cells instead of leaving old body hits behind.

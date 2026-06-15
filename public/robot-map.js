@@ -10,6 +10,9 @@ export function createRobotMapRenderer({
   let waypointReadinessSummary = ''
   let lidarSummary = ''
   let lastRenderedRobot = null
+  const accumulatedPoints = []
+  const ACCUMULATION_MS = 15_000
+  const MAX_ACCUMULATED_POINTS = 15_000
 
   function renderWaypoints(robot = null) {
     if (!elements.waypoints) {
@@ -179,20 +182,22 @@ export function createRobotMapRenderer({
       return
     }
 
-    context.clearRect(0, 0, width, height)
     const points = Array.isArray(scan.points) ? scan.points : []
     if (!points.length) {
       return
     }
 
-    const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
+    const now = Date.now()
     const robotPose = normalizeRobotMapPose(robot?.pose)
+    const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
 
     if (!robotPose) {
+      context.clearRect(0, 0, width, height)
       drawCenteredLidarScan(context, points, {
         width,
         height,
         displayRange: clamp(Math.max(1.5, maxSeen), 1.5, 6),
+        now,
       })
       return
     }
@@ -209,6 +214,29 @@ export function createRobotMapRenderer({
     const scaleX = width / (mapRange * 2)
     const scaleY = height / (mapRange * 2)
 
+    for (const point of points) {
+      const mapPoint = lidarPointToMapPose(point, robotPose)
+      if (!mapPoint) {
+        continue
+      }
+      const px = mapPoint.x
+      const py = mapPoint.y
+      if (!Number.isFinite(px) || !Number.isFinite(py)) {
+        continue
+      }
+      accumulatedPoints.push({ x: px, y: py, addedAt: now })
+    }
+
+    const cutoff = now - ACCUMULATION_MS
+    while (accumulatedPoints.length > 0 && accumulatedPoints[0].addedAt < cutoff) {
+      accumulatedPoints.shift()
+    }
+    if (accumulatedPoints.length > MAX_ACCUMULATED_POINTS) {
+      accumulatedPoints.splice(0, accumulatedPoints.length - MAX_ACCUMULATED_POINTS)
+    }
+
+    context.clearRect(0, 0, width, height)
+
     context.save()
     context.lineWidth = 1
     context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
@@ -219,7 +247,26 @@ export function createRobotMapRenderer({
       context.stroke()
     }
 
-    context.fillStyle = 'rgba(0, 123, 132, 0.78)'
+    for (const accPt of accumulatedPoints) {
+      const age = now - accPt.addedAt
+      const ageRatio = Math.min(age / ACCUMULATION_MS, 1)
+      const pointPosition = poseToMapPosition(accPt, mapRange)
+      if (!pointPosition) {
+        continue
+      }
+      const px = (pointPosition.xPercent / 100) * width
+      const py = (pointPosition.yPercent / 100) * height
+      if (px < 0 || px > width || py < 0 || py > height) {
+        continue
+      }
+      context.fillStyle = `rgba(0, 123, 132, ${(0.12 + (1 - ageRatio) * 0.55).toFixed(3)})`
+      context.beginPath()
+      context.arc(px, py, 1.4, 0, Math.PI * 2)
+      context.fill()
+    }
+
+    context.strokeStyle = 'rgba(0, 180, 170, 0.10)'
+    context.lineWidth = 0.8
     for (const point of points) {
       const mapPoint = lidarPointToMapPose(point, robotPose)
       if (!mapPoint) {
@@ -235,7 +282,31 @@ export function createRobotMapRenderer({
         continue
       }
       context.beginPath()
-      context.arc(px, py, 2.2, 0, Math.PI * 2)
+      context.moveTo(centerX, centerY)
+      context.lineTo(px, py)
+      context.stroke()
+    }
+
+    for (const point of points) {
+      const mapPoint = lidarPointToMapPose(point, robotPose)
+      if (!mapPoint) {
+        continue
+      }
+      const pointPosition = poseToMapPosition(mapPoint, mapRange)
+      if (!pointPosition) {
+        continue
+      }
+      const px = (pointPosition.xPercent / 100) * width
+      const py = (pointPosition.yPercent / 100) * height
+      if (px < 0 || px > width || py < 0 || py > height) {
+        continue
+      }
+      const rangeNorm = clamp(point.range / maxSeen, 0, 1)
+      const pointSize = 1.3 + (1 - rangeNorm) * 2.2
+      const pointAlpha = 0.5 + (1 - rangeNorm) * 0.45
+      context.fillStyle = `rgba(0, 220, 200, ${pointAlpha.toFixed(3)})`
+      context.beginPath()
+      context.arc(px, py, pointSize, 0, Math.PI * 2)
       context.fill()
     }
 
@@ -513,11 +584,12 @@ export function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : Number.NaN
 }
 
-function drawCenteredLidarScan(context, points, { width, height, displayRange }) {
+function drawCenteredLidarScan(context, points, { width, height, displayRange, now = Date.now() }) {
   const radius = Math.min(width, height) * 0.42
   const centerX = width / 2
   const centerY = height / 2
   const scale = radius / displayRange
+  const maxSeen = Math.max(...points.map((p) => toFiniteNumber(p.range)).filter(Number.isFinite), 1)
 
   context.save()
   context.lineWidth = 1
@@ -528,7 +600,8 @@ function drawCenteredLidarScan(context, points, { width, height, displayRange })
     context.stroke()
   }
 
-  context.fillStyle = 'rgba(0, 123, 132, 0.78)'
+  context.strokeStyle = 'rgba(0, 180, 170, 0.10)'
+  context.lineWidth = 0.8
   for (const point of points) {
     const x = toFiniteNumber(point.x)
     const y = toFiniteNumber(point.y)
@@ -541,7 +614,28 @@ function drawCenteredLidarScan(context, points, { width, height, displayRange })
       continue
     }
     context.beginPath()
-    context.arc(px, py, 2.2, 0, Math.PI * 2)
+    context.moveTo(centerX, centerY)
+    context.lineTo(px, py)
+    context.stroke()
+  }
+
+  for (const point of points) {
+    const x = toFiniteNumber(point.x)
+    const y = toFiniteNumber(point.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue
+    }
+    const px = centerX + x * scale
+    const py = centerY - y * scale
+    if (px < 0 || px > width || py < 0 || py > height) {
+      continue
+    }
+    const rangeNorm = clamp(point.range / maxSeen, 0, 1)
+    const pointSize = 1.3 + (1 - rangeNorm) * 2.2
+    const pointAlpha = 0.5 + (1 - rangeNorm) * 0.45
+    context.fillStyle = `rgba(0, 220, 200, ${pointAlpha.toFixed(3)})`
+    context.beginPath()
+    context.arc(px, py, pointSize, 0, Math.PI * 2)
     context.fill()
   }
 

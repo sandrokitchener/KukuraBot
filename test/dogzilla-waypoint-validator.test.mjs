@@ -94,6 +94,8 @@ test('validateDogzillaWaypoints trusts navigation nav2 sample when bridge health
       topic: '/odom',
       publisherCount: 1,
       available: true,
+      messageAvailable: false,
+      tfAvailable: false,
     },
   }
   health.runtime.navigation = {
@@ -109,6 +111,18 @@ test('validateDogzillaWaypoints trusts navigation nav2 sample when bridge health
       odom: {
         topic: '/odom',
         publisherCount: 1,
+        available: true,
+        messageAvailable: true,
+        tfAvailable: true,
+      },
+      lifecycle: {
+        active: true,
+        nodes: [{ name: 'controller_server', active: true, state: 'active' }],
+      },
+      scan: {
+        topic: '/scan_nav2',
+        publisherCount: 1,
+        subscriptionCount: 2,
         available: true,
       },
     },
@@ -137,6 +151,35 @@ test('validateDogzillaWaypoints trusts navigation nav2 sample when bridge health
 
   assert.equal(report.navigation.ready, true)
   assert.equal(report.readyForMapWaypoints, true)
+})
+
+test('validateDogzillaWaypoints reports operator blocker when filtered Nav2 scan is missing', () => {
+  const health = nav2HealthBody({
+    nav2: {
+      scan: {
+        topic: '/scan_nav2',
+        publisherCount: 1,
+        subscriptionCount: 0,
+        available: false,
+        error: 'No Nav2 costmap subscribers visible on /scan_nav2',
+      },
+    },
+  })
+  const report = validateDogzillaWaypoints({
+    waypointConfig: waypointConfig({
+      kitchen: mapWaypoint({
+        x: 1.2,
+        y: -0.4,
+        yaw: 0.75,
+      }),
+    }),
+    mapMetadata: health.runtime.map,
+    bridgeHealth: health,
+  })
+
+  assert.equal(report.readyForMapWaypoints, false)
+  assert.equal(report.navigation.scanReady, false)
+  assert.match(report.blockers.join('\n'), /No Nav2 costmap subscribers visible on \/scan_nav2/)
 })
 
 test('validateDogzillaWaypoints treats off-map trusted config as advisory only', () => {

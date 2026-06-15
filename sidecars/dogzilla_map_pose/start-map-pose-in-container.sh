@@ -99,6 +99,7 @@ import time
 import urllib.request
 
 url = f"http://127.0.0.1:{os.environ.get('POSE_PORT', '8896')}/pose"
+started_at = time.time()
 last = None
 for _ in range(24):
     time.sleep(0.75)
@@ -111,15 +112,20 @@ for _ in range(24):
                 .get("/tf", {})
                 .get("publisherCount", 0)
             )
+            map_pose = last.get("mapPose") or {}
+            received_at = float(map_pose.get("receivedAt") or last.get("receivedAt") or 0.0)
+            age_sec = float(map_pose.get("ageSec") or last.get("ageSec") or 999.0)
             if (
                 last.get("ok")
                 and last.get("waypointSafe")
-                and (last.get("mapPose") or {}).get("frame") == "map"
+                and map_pose.get("frame") == "map"
+                and received_at >= started_at - 1.0
+                and age_sec <= 2.0
                 and int(tf_publishers) > 0
             ):
                 print(json.dumps({
                     "status": "ok",
-                    "mapPose": last.get("mapPose"),
+                    "mapPose": map_pose,
                     "tfPublishers": tf_publishers,
                     "waypointSafe": last.get("waypointSafe"),
                 }, sort_keys=True))

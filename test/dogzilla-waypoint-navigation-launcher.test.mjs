@@ -23,6 +23,9 @@ test('isDogzillaWaypointNavigationReady accepts Nav2 health only', () => {
   assert.equal(isDogzillaWaypointNavigationReady(nav2Health()), true)
   assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ nav2Available: false })), false)
   assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ odomAvailable: false })), false)
+  assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ odomAvailable: false, odomPublisherCount: 1 })), false)
+  assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ lifecycleActive: false })), false)
+  assert.equal(isDogzillaWaypointNavigationReady(nav2Health({ scanAvailable: false })), false)
   assert.equal(isDogzillaWaypointNavigationReady({ status: 'error' }), false)
 })
 
@@ -130,7 +133,14 @@ function directRos2Config() {
   }
 }
 
-function nav2Health({ nav2Available = true, odomAvailable = true } = {}) {
+function nav2Health({
+  nav2Available = true,
+  odomAvailable = true,
+  odomPublisherCount = odomAvailable ? 1 : 0,
+  lifecycleActive = nav2Available,
+  scanAvailable = nav2Available,
+} = {}) {
+  const waypointReady = nav2Available && odomAvailable && lifecycleActive && scanAvailable
   return {
     status: 'ok',
     destination: 'http://10.0.4.32:8893/healthz',
@@ -139,19 +149,35 @@ function nav2Health({ nav2Available = true, odomAvailable = true } = {}) {
         available: true,
         nav2: {
           available: nav2Available,
-          waypointReady: nav2Available && odomAvailable,
+          waypointReady,
           serverAvailable: nav2Available,
           odom: {
             topic: '/odom',
-            publisherCount: odomAvailable ? 1 : 0,
+            publisherCount: odomPublisherCount,
             available: odomAvailable,
+            messageAvailable: odomAvailable,
+            tfAvailable: odomAvailable,
+          },
+          lifecycle: {
+            active: lifecycleActive,
+            nodes: [
+              { name: 'controller_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
+            ],
+            error: lifecycleActive ? null : 'Nav2 lifecycle nodes are not active: controller_server',
+          },
+          scan: {
+            topic: '/scan_nav2',
+            publisherCount: scanAvailable ? 1 : 0,
+            subscriptionCount: scanAvailable ? 2 : 0,
+            available: scanAvailable,
+            error: scanAvailable ? null : 'No LaserScan publishers visible on /scan_nav2',
           },
         },
         navigation: {
-          available: nav2Available && odomAvailable,
-          primary: nav2Available && odomAvailable ? 'nav2' : 'unavailable',
+          available: waypointReady,
+          primary: waypointReady ? 'nav2' : 'unavailable',
           actionServerAvailable: nav2Available,
-          waypointReady: nav2Available && odomAvailable,
+          waypointReady,
         },
       },
     },

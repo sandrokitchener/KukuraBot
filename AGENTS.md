@@ -60,3 +60,49 @@ Waypoints are stored in `app_map` frame (not raw `map` frame) to decouple from C
 - The origin file is at `output/app-cache/dogzilla-map-origin.json`
 - If deleted or stale, `resolveNavigationPose()` will reject `app_map` waypoints with a clear warning
 - Re-run `set-dogzilla-map-origin.mjs` or restart the app (auto-save triggers on startup)
+
+## SSH Deploy & Nav2 Prerequisites
+
+### SSH setup
+- SSH config: `output/pi-ssh/config`, alias `dogzilla`, host `10.0.4.32`, user `pi`, key `$HOME\.ssh\robodoge_pi_ed25519`
+- SSH command: `ssh -F output/pi-ssh/config dogzilla <command>`
+- SCP command: `scp -F output/pi-ssh/config <local> dogzilla:<remote>`
+
+### Deploying sidecar file changes
+1. Copy file to robot: `scp -F output/pi-ssh/config sidecars/dogzilla_lib_bridge/nav2_client.py dogzilla:/home/pi/robodoge/sidecars/dogzilla_lib_bridge/nav2_client.py`
+2. Clear bytecache: `ssh -F output/pi-ssh/config dogzilla "rm -f /home/pi/robodoge/sidecars/dogzilla_lib_bridge/__pycache__/nav2_client.cpython-311.pyc"`
+3. Restart direct bridge: `ssh -F output/pi-ssh/config dogzilla "sudo systemctl stop robodoge-direct-bridge.service; sleep 2; sudo systemctl start robodoge-direct-bridge.service; sleep 5"`
+4. Verify: `node scripts/probe-dogzilla-nav-readiness.mjs`
+
+### Nav2 prerequisite fix (ros-humble-nav2-msgs missing in container)
+The `robodoge-lidar-bridge` container uses image `yahboomtechnology/ros-humble:3.6` which lacks `nav2_msgs`. This causes `importError: "No module named 'nav2_msgs'"` and blocks all waypoint dispatch.
+
+**To fix inside container:**
+```powershell
+# Copy install script
+scp -F output/pi-ssh/config scripts/install-nav2-msgs-in-container.sh dogzilla:/home/pi/robodoge/
+# Run inside container
+ssh -F output/pi-ssh/config dogzilla "docker exec robodoge-lidar-bridge sudo bash /home/pi/robodoge/install-nav2-msgs-in-container.sh"
+# Restart direct bridge
+ssh -F output/pi-ssh/config dogzilla "sudo systemctl restart robodoge-direct-bridge.service; sleep 5"
+```
+
+The bridge also has auto-install fallback in `nav2_client.py:_try_install_docker_nav2_msgs()` that tries `apt-get install ros-humble-nav2-msgs` when the Docker import fails. If the ROS GPG key is expired it falls through to the manual fix above.
+
+### Starting navigation after Nav2 packages are installed
+```powershell
+npm run dogzilla:start-navigation
+```
+Then verify with: `node scripts/probe-dogzilla-nav-readiness.mjs`
+
+### Diagnosing nav readiness
+```powershell
+node scripts/probe-dogzilla-nav-readiness.mjs
+```
+Expected progression:
+1. `importError` gone, `backend: "docker-rclpy"`, `clientAvailable: true` → rclpy/nav2_msgs import works
+2. `actionAvailable: true` → Nav2 `/navigate_to_pose` action server running
+3. `nav2.odom.available: true` + `messageAvailable: true` + `tfAvailable: true` → odometry live
+4. `nav2.lifecycle.active: true` → all lifecycle nodes active
+5. `nav2.scan.available: true` → `/scan_nav2` wired to Nav2 costmaps
+6. `ready: true` → waypoints safe to send

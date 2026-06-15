@@ -18,6 +18,37 @@ sys.modules[spec.name] = dogzilla_lib_bridge
 spec.loader.exec_module(dogzilla_lib_bridge)
 
 
+def ready_nav2_status_stdout() -> str:
+    return json.dumps({
+        "available": True,
+        "action": "navigate_to_pose",
+        "odom": {
+            "topic": "/odom",
+            "publisherCount": 1,
+            "available": True,
+            "messageAvailable": True,
+            "tfAvailable": True,
+            "frameId": "odom",
+            "childFrameId": "base_link",
+        },
+        "lifecycle": {
+            "active": True,
+            "nodes": [
+                {"name": "controller_server", "active": True, "state": "active"},
+                {"name": "planner_server", "active": True, "state": "active"},
+                {"name": "bt_navigator", "active": True, "state": "active"},
+                {"name": "behavior_server", "active": True, "state": "active"},
+            ],
+        },
+        "scan": {
+            "topic": "/scan_nav2",
+            "publisherCount": 1,
+            "subscriptionCount": 2,
+            "available": True,
+        },
+    }) + "\n"
+
+
 class DogzillaLibBridgeTests(unittest.TestCase):
     def setUp(self):
         self.map_tmp = tempfile.TemporaryDirectory()
@@ -500,15 +531,19 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client.host_import_error = "No module named 'rclpy'"
         client.import_error = "No module named 'rclpy'"
         client.docker_import_error = None
+        client.server_error = None
         client.backend = "host-rclpy"
         client.available = False
+        client.client_available = False
+        client.server_available = False
+        client._last_status_check = 0.0
         client.docker_container = "robodoge-lidar-bridge"
         calls = []
 
         def fake_run_docker_python(script, *, timeout):
             calls.append({"script": script, "timeout": timeout})
             if "dogzilla_direct_nav2_status_client" in script:
-                stdout = '{"available": true, "action": "navigate_to_pose"}\n'
+                stdout = ready_nav2_status_stdout()
             else:
                 stdout = "ok\n"
             return dogzilla_lib_bridge.subprocess.CompletedProcess(
@@ -521,17 +556,85 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client._run_docker_python = fake_run_docker_python
         client._try_enable_docker_backend()
 
-        self.assertTrue(client.available)
+        self.assertFalse(client.available)
         self.assertTrue(client.client_available)
-        self.assertTrue(client.server_available)
+        self.assertFalse(client.server_available)
         self.assertEqual(client.backend, "docker-rclpy")
         self.assertIsNone(client.import_error)
         self.assertEqual(calls[0]["timeout"], 6)
         self.assertIn("nav2_msgs.action", calls[0]["script"])
+
+        snapshot = client.snapshot()
+
+        self.assertTrue(snapshot["available"])
+        self.assertTrue(snapshot["clientAvailable"])
+        self.assertTrue(snapshot["serverAvailable"])
         self.assertIn("dogzilla_direct_nav2_status_client", calls[1]["script"])
         self.assertEqual(calls[1]["timeout"], dogzilla_lib_bridge.DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT)
-        self.assertIn("wait_for_publishers", calls[1]["script"])
+        self.assertIn("probe_live_odom", calls[1]["script"])
+        self.assertIn("probe_nav2_lifecycle", calls[1]["script"])
+        self.assertIn("probe_scan_topic", calls[1]["script"])
         self.assertIn("odomWaitTimeout", calls[1]["script"])
+
+    def test_nav2_client_rejects_publisher_only_odom(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+
+        client._set_odom_status_from_payload({
+            "topic": "/odom",
+            "publisherCount": 1,
+            "available": False,
+            "messageAvailable": False,
+            "tfAvailable": False,
+        })
+        snapshot = client._odom_snapshot()
+
+        self.assertFalse(client.odom_available)
+        self.assertFalse(snapshot["available"])
+        self.assertEqual(snapshot["publisherCount"], 1)
+        self.assertFalse(snapshot["messageAvailable"])
+        self.assertFalse(snapshot["tfAvailable"])
+        self.assertIn("no live odometry samples", snapshot["error"])
+
+    def test_nav2_client_snapshot_requires_lifecycle_and_filtered_scan(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        client.action_name = "navigate_to_pose"
+        client.wait_timeout = 2.0
+        client.goal_response_timeout = 3.0
+        client.backend = "docker-rclpy"
+        client.docker_container = "robodoge-lidar-bridge"
+        client.client_available = True
+        client.server_available = True
+        client.available = True
+        client.import_error = None
+        client.host_import_error = None
+        client.docker_import_error = None
+        client.server_error = None
+        client._refresh_status = lambda force=False: None
+        client._set_odom_status_from_payload({
+            "topic": "/odom",
+            "publisherCount": 1,
+            "available": True,
+            "messageAvailable": True,
+            "tfAvailable": True,
+        })
+        client._set_lifecycle_status_from_payload({
+            "active": True,
+            "nodes": [{"name": "controller_server", "active": True, "state": "active"}],
+        })
+        client._set_scan_status_from_payload({
+            "topic": "/scan_nav2",
+            "publisherCount": 1,
+            "subscriptionCount": 0,
+            "available": False,
+        })
+
+        snapshot = client.snapshot()
+
+        self.assertFalse(snapshot["waypointReady"])
+        self.assertTrue(snapshot["odom"]["available"])
+        self.assertTrue(snapshot["lifecycle"]["active"])
+        self.assertFalse(snapshot["scan"]["available"])
+        self.assertIn("No Nav2 costmap subscribers visible on /scan_nav2", snapshot["blockers"])
 
     def test_nav2_client_reports_docker_action_server_missing(self):
         client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
@@ -570,13 +673,42 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(client.client_available)
         self.assertFalse(client.server_available)
         self.assertEqual(client.backend, "docker-rclpy")
-        self.assertIn("action server is not running", client.import_error)
-        self.assertIn("dogzilla_direct_nav2_status_client", calls[1]["script"])
+        self.assertIsNone(client.import_error)
+        self.assertEqual(len(calls), 1)
         snapshot = client.snapshot()
         self.assertFalse(snapshot["available"])
         self.assertTrue(snapshot["clientAvailable"])
         self.assertFalse(snapshot["serverAvailable"])
+        self.assertIn("action server is not running", snapshot["importError"])
+        self.assertIn("dogzilla_direct_nav2_status_client", calls[1]["script"])
         self.assertEqual(calls[1]["timeout"], dogzilla_lib_bridge.DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT)
+
+    def test_nav2_client_docker_import_timeout_does_not_raise(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        client.action_name = "navigate_to_pose"
+        client.wait_timeout = 2.0
+        client.goal_response_timeout = 3.0
+        client.host_import_error = "No module named 'rclpy'"
+        client.import_error = "No module named 'rclpy'"
+        client.docker_import_error = None
+        client.server_error = None
+        client.client_available = False
+        client.server_available = False
+        client._last_status_check = 0.0
+        client.backend = "host-rclpy"
+        client.available = False
+        client.docker_container = "robodoge-lidar-bridge"
+
+        def fake_run_docker_python(script, *, timeout):
+            raise dogzilla_lib_bridge.subprocess.TimeoutExpired(cmd=["docker"], timeout=timeout)
+
+        client._run_docker_python = fake_run_docker_python
+        client._try_enable_docker_backend()
+
+        self.assertFalse(client.available)
+        self.assertFalse(client.client_available)
+        self.assertIn("docker import probe timed out", client.docker_import_error)
+        self.assertIn("docker import probe timed out", client.import_error)
 
     def test_nav2_client_retries_docker_backend_after_container_boots(self):
         client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
@@ -598,7 +730,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         def fake_run_docker_python(script, *, timeout):
             calls.append({"script": script, "timeout": timeout})
             if "dogzilla_direct_nav2_status_client" in script:
-                stdout = '{"available": true, "action": "navigate_to_pose"}\n'
+                stdout = ready_nav2_status_stdout()
             else:
                 stdout = "ok\n"
             return dogzilla_lib_bridge.subprocess.CompletedProcess(
@@ -615,6 +747,9 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(snapshot["available"])
         self.assertTrue(snapshot["clientAvailable"])
         self.assertTrue(snapshot["serverAvailable"])
+        self.assertTrue(snapshot["waypointReady"])
+        self.assertTrue(snapshot["lifecycle"]["active"])
+        self.assertTrue(snapshot["scan"]["available"])
         self.assertEqual(snapshot["backend"], "docker-rclpy")
         self.assertIsNone(snapshot["dockerImportError"])
         self.assertIsNone(snapshot["importError"])
@@ -647,10 +782,30 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["delivery"], "Nav2 NavigateToPose")
         self.assertEqual(result["backend"], "docker-rclpy")
         self.assertEqual(result["container"], "robodoge-lidar-bridge")
-        self.assertEqual(calls[0]["timeout"], 11.0)
+        self.assertEqual(calls[0]["timeout"], 20.0)
         self.assertIn("dogzilla_direct_nav2_docker_client", calls[0]["script"])
         self.assertIn('\\"x\\": 1.25', calls[0]["script"])
-        self.assertIn("wait_for_publishers", calls[0]["script"])
+        self.assertIn("probe_live_odom", calls[0]["script"])
+
+    def test_docker_nav2_goal_timeout_returns_structured_error(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        client.action_name = "navigate_to_pose"
+        client.wait_timeout = 2.0
+        client.goal_response_timeout = 3.0
+        client.backend = "docker-rclpy"
+        client.available = True
+        client.docker_container = "robodoge-lidar-bridge"
+
+        def fake_run_docker_python(script, *, timeout):
+            raise dogzilla_lib_bridge.subprocess.TimeoutExpired(cmd=["docker"], timeout=timeout)
+
+        client._run_docker_python = fake_run_docker_python
+        result = client.send_goal(frame="map", x=1.25, y=-0.5, yaw=0.2)
+
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["delivery"], "nav2-docker-timeout")
+        self.assertIn("20.0s", result["error"])
+        self.assertEqual(result["backend"], "docker-rclpy")
 
     def test_action_loop_calls_dogzilla_perform_mode(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -750,6 +905,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertGreater(params["x_step"], 0)
+        self.assertEqual(params["mapping"]["maxXStep"], 14.0)
         self.assertEqual(params["y_step"], 0.0)
         self.assertEqual(params["gait"], "walk")
         self.assertEqual(params["pace"], "slow")
@@ -875,6 +1031,35 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.robot.calls[-3][0], "move")
         self.assertEqual(runtime.robot.calls[-3][1], "x")
         self.assertGreater(runtime.robot.calls[-3][2], 0)
+
+    def test_command_preempt_cancels_nav2_and_blocks_gait_adapter(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+        runtime.navigation_cancel = threading.Event()
+        runtime.nav2_client = FakeCancelableNav2Client()
+
+        stop = runtime.execute({"kind": "noop", "params": {"reason": "command_preempt"}})
+
+        self.assertTrue(stop["executed"])
+        self.assertTrue(runtime.navigation_cancel.is_set())
+        self.assertTrue(runtime.nav2_cmd_vel_blocked)
+        self.assertEqual(runtime.nav2_cmd_vel_blocked_reason, "command_preempt")
+        self.assertEqual(stop["nav2Cancel"]["goalsCanceling"], 1)
+        self.assertEqual(runtime.nav2_client.cancel_calls, 1)
+
+        blocked = runtime.execute_nav2_cmd_vel({
+            "linear": {"x": 0.13, "y": 0.0},
+            "angular": {"z": 0.2},
+        })
+
+        self.assertFalse(blocked["executed"])
+        self.assertEqual(blocked["delivery"], "nav2-gait-adapter-blocked")
+        self.assertEqual(blocked["blockedReason"], "command_preempt")
+        self.assertEqual(runtime.robot.calls, [("perform", 0), ("stop",)])
 
 
 class FakeRobot:

@@ -20,6 +20,7 @@ import {
   formatWaypointReadinessSummary,
   getRenderableRobotMapWaypoints,
   getRobotMapRangeMeters,
+  headingRadiansToCssRotation,
   lidarPointToMapPose,
   poseToMapPosition,
 } from '../public/robot-map.js'
@@ -405,6 +406,12 @@ test('lidar points transform around the current robot map pose', () => {
   })
   assert(Math.abs(rotatedLeft.x - 1) < 0.000001)
   assert(Math.abs(rotatedLeft.y - 3) < 0.000001)
+})
+
+test('robot map heading converts ROS yaw to CSS arrow rotation', () => {
+  assert.equal(headingRadiansToCssRotation(0), Math.PI / 2)
+  assert.equal(headingRadiansToCssRotation(Math.PI / 2), 0)
+  assert.equal(headingRadiansToCssRotation(Number.NaN), 0)
 })
 
 test('formatWaypointReadinessSummary distinguishes ready and blocked map waypoint state', () => {

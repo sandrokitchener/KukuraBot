@@ -96,6 +96,22 @@ export function waypointGotoPreview(overrides = {}) {
   }
 }
 
+export function dogzillaMapPoseBody(overrides = {}) {
+  return {
+    ok: true,
+    waypointSafe: true,
+    pose: {
+      frame: 'map',
+      source: 'tf:map->base_link',
+      x: 1.25,
+      y: -0.5,
+      theta: 0.2,
+      ...(overrides.pose ?? {}),
+    },
+    ...withoutKey(overrides, 'pose'),
+  }
+}
+
 export function actionOncePreview(params = {}) {
   return {
     status: 'ready',
@@ -116,9 +132,13 @@ export function nav2HealthBody(overrides = {}) {
   const nav2Available = nav2Override.available !== undefined ? nav2Override.available === true : true
   const odomOverride = nav2Override.odom && typeof nav2Override.odom === 'object' ? nav2Override.odom : {}
   const odomAvailable = odomOverride.available !== undefined ? odomOverride.available === true : nav2Available
+  const lifecycleOverride = nav2Override.lifecycle && typeof nav2Override.lifecycle === 'object' ? nav2Override.lifecycle : {}
+  const lifecycleActive = lifecycleOverride.active !== undefined ? lifecycleOverride.active === true : nav2Available
+  const scanOverride = nav2Override.scan && typeof nav2Override.scan === 'object' ? nav2Override.scan : {}
+  const scanAvailable = scanOverride.available !== undefined ? scanOverride.available === true : nav2Available
   const waypointReady = nav2Override.waypointReady !== undefined
     ? nav2Override.waypointReady === true
-    : nav2Available && odomAvailable
+    : nav2Available && odomAvailable && lifecycleActive && scanAvailable
   return {
     ok: true,
     runtime: {
@@ -140,12 +160,34 @@ export function nav2HealthBody(overrides = {}) {
       nav2: {
         available: nav2Available,
         waypointReady,
-        ...withoutKey(nav2Override, 'odom'),
+        ...withoutKeys(nav2Override, ['odom', 'lifecycle', 'scan']),
         odom: {
           topic: '/odom',
           publisherCount: odomAvailable ? 1 : 0,
           available: odomAvailable,
+          messageAvailable: odomAvailable,
+          tfAvailable: odomAvailable,
           ...odomOverride,
+        },
+        lifecycle: {
+          active: lifecycleActive,
+          requiredNodes: ['controller_server', 'planner_server', 'bt_navigator', 'behavior_server'],
+          nodes: [
+            { name: 'controller_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
+            { name: 'planner_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
+            { name: 'bt_navigator', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
+            { name: 'behavior_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
+          ],
+          error: lifecycleActive ? null : 'Nav2 lifecycle nodes are not active: controller_server',
+          ...lifecycleOverride,
+        },
+        scan: {
+          topic: '/scan_nav2',
+          publisherCount: scanAvailable ? 1 : 0,
+          subscriptionCount: scanAvailable ? 2 : 0,
+          available: scanAvailable,
+          error: scanAvailable ? null : 'No LaserScan publishers visible on /scan_nav2',
+          ...scanOverride,
         },
       },
       navigation: {

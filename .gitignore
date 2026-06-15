@@ -1,4 +1,6 @@
 .omx/
+.omo/
+.codex-remote-attachments/
 node_modules/
 models/
 output/
