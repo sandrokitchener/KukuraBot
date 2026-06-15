@@ -53,15 +53,17 @@
         "garage": {
           "kind": "map_pose",
           "frame": "map",
-          "x": 0.51,
-          "y": 3.06,
+          "map_id": "robodoge_home",
+          "x": 3.05,
+          "y": 2.44,
           "yaw": 0.25,
-          "arrivalToleranceMeters": 0.05,
+          "arrivalToleranceMeters": 0.25,
           "physicalSpot": "Clear parking zone just inside the garage threshold",
           "anchorHint": "Measure from a wall corner or storage rack post, not from a car position",
           "verified": true,
           "notes": [
-            "Dummy pose. Replace with a real mapped pose later.",
+            "Approx 10ft forward, 8ft left from charger in robodoge_home SLAM map.",
+            "Recapture more precisely after first successful run.",
             "Use a wider tolerance if the floor transition at the threshold is uneven."
           ]
         },
