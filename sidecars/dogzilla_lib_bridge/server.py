@@ -103,6 +103,7 @@ DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID
 DEFAULT_INCLUDE_ATTITUDE_STATE = os.environ.get("DOGZILLA_INCLUDE_ATTITUDE_STATE", "0") == "1"
 DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") == "1"
 DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "0") == "1"
+DEFAULT_NAV2_MIN_BATTERY_PCT = float(os.environ.get("DOGZILLA_NAV2_MIN_BATTERY_PCT", "25"))
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
 ROS_SETUP_COMMAND = (
     "source /opt/ros/humble/setup.bash 2>/dev/null || true; "
@@ -579,6 +580,21 @@ class DogzillaRuntime:
                 "nav2Prerequisites": nav_prerequisites,
                 "fallback": "disabled",
                 "fallbackError": "Refusing DOGZILLALib map-pose movement fallback; Nav2 with live odometry is required for waypoint navigation.",
+            }
+
+        battery_state = self.read_state()
+        battery_pct = battery_state.get("battery") if isinstance(battery_state, dict) else None
+        min_battery = DEFAULT_NAV2_MIN_BATTERY_PCT
+        if isinstance(battery_pct, (int, float)) and battery_pct >= 0 and battery_pct < min_battery:
+            return {
+                "executed": False,
+                "delivery": "battery-too-low",
+                "kind": "locomotion.goto",
+                "waypoint": params.get("waypoint") or "",
+                "waypointSafe": frame == "map",
+                "error": f"Battery {battery_pct}% below minimum {min_battery}% for navigation",
+                "battery": battery_pct,
+                "minimumBatteryPercent": min_battery,
             }
 
         avoidance_request = get_lidar_avoidance_request(params)
