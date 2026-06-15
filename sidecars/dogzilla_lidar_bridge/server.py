@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
 import os
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -30,10 +32,11 @@ except Exception as error:  # pragma: no cover - exercised on Pi startup
     raise
 
 try:
-    from nav_msgs.msg import Odometry
+    from nav_msgs.msg import Odometry, OccupancyGrid
     from tf2_msgs.msg import TFMessage
 except Exception as error:  # pragma: no cover - pose remains disabled if optional ROS messages are unavailable
     Odometry = None
+    OccupancyGrid = None
     TFMessage = None
     POSE_DEPENDENCY_ERROR = f"Missing ROS2 pose dependency: {error}"
 else:
@@ -104,6 +107,8 @@ class LidarState:
     pose_topic_graph: dict[str, dict[str, Any]] = field(default_factory=dict)
     pose_topic_graph_at: float | None = None
     scan_odom: ScanOdomState = field(default_factory=ScanOdomState)
+    latest_map: Any | None = None
+    map_received_at: float = 0.0
 
 
 class LidarHandler(BaseHTTPRequestHandler):
@@ -126,6 +131,11 @@ class LidarHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/pose":
             payload = pose_payload(self.server.state, self.server.args)
+            status = HTTPStatus.OK if payload.get("ok") else HTTPStatus.SERVICE_UNAVAILABLE
+            self.send_json(status, payload)
+            return
+        if parsed.path == "/map":
+            payload = map_payload(self.server.state, self.server.args)
             status = HTTPStatus.OK if payload.get("ok") else HTTPStatus.SERVICE_UNAVAILABLE
             self.send_json(status, payload)
             return
@@ -209,6 +219,11 @@ def scan_loop(state: LidarState, args: argparse.Namespace) -> None:
             state.latest_error = ""
         update_scan_odom_snapshot(state, snapshot, args)
 
+    def on_map(message: Any) -> None:
+        with state.lock:
+            state.latest_map = message
+            state.map_received_at = time.time()
+
     def on_tf(message: Any) -> None:
         if TFMessage is None:
             return
@@ -269,6 +284,13 @@ def scan_loop(state: LidarState, args: argparse.Namespace) -> None:
         node.create_subscription(TFMessage, args.static_tf_topic, on_tf, static_tf_qos())
     if Odometry is not None:
         node.create_subscription(Odometry, args.odom_topic, on_odom, qos_profile_sensor_data)
+    if OccupancyGrid is not None:
+        map_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        node.create_subscription(OccupancyGrid, args.map_topic, on_map, map_qos)
     if POSE_DEPENDENCY_ERROR:
         with state.lock:
             state.pose_error = POSE_DEPENDENCY_ERROR
@@ -746,6 +768,46 @@ def pose_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def map_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
+    with state.lock:
+        grid = state.latest_map
+
+    if grid is None or OccupancyGrid is None:
+        return {
+            "ok": False,
+            "status": "no-map",
+            "error": "No occupancy grid available. Start Cartographer mapping first.",
+        }
+
+    try:
+        width = int(grid.info.width)
+        height = int(grid.info.height)
+        resolution = float(grid.info.resolution)
+        origin_x = float(grid.info.origin.position.x)
+        origin_y = float(grid.info.origin.position.y)
+        origin_theta = float(grid.info.origin.orientation.z)
+
+        raw = struct.pack(f"<{len(grid.data)}b", *grid.data)
+        encoded = base64.b64encode(raw).decode("ascii")
+
+        return {
+            "ok": True,
+            "status": "ok",
+            "width": width,
+            "height": height,
+            "resolution": resolution,
+            "origin": {"x": origin_x, "y": origin_y, "theta": origin_theta},
+            "cells": encoded,
+            "cellCount": len(grid.data),
+        }
+    except Exception as error:
+        return {
+            "ok": False,
+            "status": "error",
+            "error": f"Failed to encode occupancy grid: {error}",
+        }
+
+
 def pose_source_available(pose: PoseSnapshot, pose_graph: dict[str, Any], args: argparse.Namespace) -> bool:
     topics = pose_graph.get("topics", {}) if isinstance(pose_graph, dict) else {}
     source = str(pose.source or "")
@@ -1110,6 +1172,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tf-topic", default=os.getenv("DOGZILLA_TF_TOPIC", "/tf"))
     parser.add_argument("--static-tf-topic", default=os.getenv("DOGZILLA_STATIC_TF_TOPIC", "/tf_static"))
     parser.add_argument("--odom-topic", default=os.getenv("DOGZILLA_ODOM_TOPIC", "/odom"))
+    parser.add_argument("--map-topic", default=os.getenv("DOGZILLA_MAP_TOPIC", "/map"))
     parser.add_argument("--map-frame", default=os.getenv("DOGZILLA_MAP_FRAME", "map"))
     parser.add_argument("--odom-frame", default=os.getenv("DOGZILLA_ODOM_FRAME", "odom"))
     parser.add_argument("--default-base-frame", default=os.getenv("DOGZILLA_DEFAULT_BASE_FRAME", "base_link"))
