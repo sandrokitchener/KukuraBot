@@ -80,30 +80,31 @@ export function createRobotMapRenderer({
         const byteOffset = idx * 4
 
         if (col < 0 || col >= gridW || row < 0 || row >= gridH) {
-          // Outside map bounds — darker uniform gray
-          data[byteOffset] = 180
-          data[byteOffset + 1] = 176
-          data[byteOffset + 2] = 172
+          // Outside map bounds — darker blue-gray
+          data[byteOffset] = 130
+          data[byteOffset + 1] = 150
+          data[byteOffset + 2] = 170
           data[byteOffset + 3] = 255
           continue
         }
 
         const cell = cells[row * gridW + col]
         if (cell === MAP_CELL_UNKNOWN) {
-          // Unexplored area — light neutral gray
-          data[byteOffset] = 215
-          data[byteOffset + 1] = 212
-          data[byteOffset + 2] = 208
+          // Unexplored area — muted blue-gray
+          data[byteOffset] = 170
+          data[byteOffset + 1] = 190
+          data[byteOffset + 2] = 210
         } else if (cell === MAP_CELL_FREE) {
-          data[byteOffset] = 240
-          data[byteOffset + 1] = 240
-          data[byteOffset + 2] = 235
+          // Free space — light cyan-blue
+          data[byteOffset] = 210
+          data[byteOffset + 1] = 235
+          data[byteOffset + 2] = 245
         } else {
-          const occluded = Math.min(100, Math.max(0, cell))
-          const v = 248 - Math.round((occluded / 100) * 240)
-          data[byteOffset] = v
-          data[byteOffset + 1] = v
-          data[byteOffset + 2] = v
+          // Occupied — gradient from light cyan to dark navy
+          const t = Math.min(100, Math.max(0, cell)) / 100
+          data[byteOffset] = Math.round(210 - t * 200)
+          data[byteOffset + 1] = Math.round(235 - t * 205)
+          data[byteOffset + 2] = Math.round(245 - t * 175)
         }
         data[byteOffset + 3] = 255
       }
