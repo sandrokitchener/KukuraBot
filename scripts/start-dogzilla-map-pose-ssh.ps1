@@ -10,7 +10,7 @@ param(
   [string]$ContainerName = "robodoge-lidar-bridge",
   [int]$RosDomainId = 16,
   [int]$PosePort = 8896,
-  [ValidateSet("auto", "localization", "mapping")]
+  [ValidateSet("auto", "localization", "mapping", "continue_mapping")]
   [string]$Mode = "auto",
   [string]$MapPath = "",
   [switch]$AllowMapping,

@@ -59,8 +59,14 @@ case "$mode" in
     ;;
   mapping)
     ;;
+  continue_mapping)
+    if [ ! -s "$DOGZILLA_MAP_PBSTREAM" ]; then
+      echo "Saved Cartographer map missing: $DOGZILLA_MAP_PBSTREAM. Cannot continue mapping without an existing pbstream." >&2
+      exit 2
+    fi
+    ;;
   *)
-    echo "Unknown DOGZILLA_MAP_POSE_MODE=$DOGZILLA_MAP_POSE_MODE. Use auto, localization, or mapping." >&2
+    echo "Unknown DOGZILLA_MAP_POSE_MODE=$DOGZILLA_MAP_POSE_MODE. Use auto, localization, mapping, or continue_mapping." >&2
     exit 2
     ;;
 esac
@@ -80,6 +86,12 @@ if [ "$mode" = "localization" ]; then
     -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
     -load_frozen_state true
   )
+elif [ "$mode" = "continue_mapping" ]; then
+  cartographer_args+=(
+    -configuration_basename robodoge_dogzilla_laser_only.lua
+    -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
+    -load_frozen_state false
+  )
 else
   cartographer_args+=(
     -configuration_basename robodoge_dogzilla_laser_only.lua
@@ -91,6 +103,13 @@ cartographer_args+=(
 
 printf '{"mode":"%s","pbstream":"%s","startedAt":"%s"}\n' "$mode" "$DOGZILLA_MAP_PBSTREAM" "$(date -Iseconds)" > "$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
 nohup "${cartographer_args[@]}" > "$REMOTE_ROOT/logs/map-pose-cartographer.log" 2>&1 &
+
+sleep 2
+
+nohup ros2 run cartographer_ros cartographer_occupancy_grid_node \
+  -resolution "${DOGZILLA_MAP_POSE_RESOLUTION:-0.05}" \
+  -publish_period_sec "${DOGZILLA_MAP_POSE_PUBLISH_PERIOD:-2.0}" \
+  > "$REMOTE_ROOT/logs/map-occupancy-grid.log" 2>&1 &
 
 python3 - <<'PY'
 import json
