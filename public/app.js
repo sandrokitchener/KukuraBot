@@ -76,6 +76,7 @@ const robotMapWaypoints = document.querySelector('#robot-map-waypoints')
 const robotMapDot = document.querySelector('#robot-map-dot')
 const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
+const robotMapGridMeta = document.querySelector('#robot-map-grid-meta')
 const robotPoseReadout = document.querySelector('#robot-pose-readout')
 const robotMapPanel = document.querySelector('.robot-map-panel')
 const robotCameraPanel = document.querySelector('#robot-camera-panel')
@@ -194,6 +195,7 @@ let thinkingState = null
 let robotFeedbackTimerId = null
 let robotStateTimerId = null
 let robotLidarTimerId = null
+let robotMapTimerId = null
 let robotCameraLoadTimerId = null
 let activeThinkingCue = null
 let thinkingCueToken = 0
@@ -339,6 +341,15 @@ reconSnapshotList.addEventListener('click', handleReconSnapshotListClick)
 for (const button of connectionActionButtons) {
   button.addEventListener('click', handleDogzillaConnectionAction)
 }
+
+const waypointCaptureButton = document.getElementById('waypoint-capture-button')
+const waypointCaptureInput = document.getElementById('waypoint-capture-name')
+const waypointCaptureStatus = document.getElementById('waypoint-capture-status')
+waypointCaptureButton?.addEventListener('click', handleWaypointCapture)
+
+const mapViewToggle = document.getElementById('map-view-toggle')
+const mapViewModeLabel = document.querySelector('.map-view-mode-label')
+mapViewToggle?.addEventListener('click', handleMapViewToggle)
 
 for (const tab of robotTabs) {
   tab.addEventListener('click', handleRobotTabClick)
@@ -487,6 +498,7 @@ async function boot() {
     startRobotFeedbackPolling()
     startRobotStatePolling()
     startRobotLidarPolling()
+    startRobotMapPolling()
 
     try {
       await initializeSpeechController()
@@ -798,6 +810,7 @@ async function handleRobotTargetSave() {
     startRobotFeedbackPolling()
     startRobotStatePolling()
     startRobotLidarPolling()
+    startRobotMapPolling()
     await refreshRobotFeedback()
     robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
     setStatus(`Runtime target changed to ${runtimeConfig.robotRuntime.activeTarget.label}.`)
@@ -930,6 +943,7 @@ async function saveBackendUrl(value) {
   startRobotFeedbackPolling()
   startRobotStatePolling()
   startRobotLidarPolling()
+  startRobotMapPolling()
 
   try {
     await initializeSpeechController()
@@ -1075,6 +1089,51 @@ async function refreshRobotState() {
     robotMap.renderWaypoints()
     robotMap.clearPoseTrack()
     robotMap.setMeta(formatError(error))
+  }
+}
+
+function startRobotMapPolling() {
+  if (robotMapTimerId) {
+    window.clearInterval(robotMapTimerId)
+    robotMapTimerId = null
+  }
+
+  robotMap.setMapData(null)
+
+  if (!isRealRobotTargetActive()) {
+    return
+  }
+
+  void refreshDogzillaMap()
+  robotMapTimerId = window.setInterval(() => {
+    void refreshDogzillaMap()
+  }, 3000)
+}
+
+async function refreshDogzillaMap() {
+  const mapPath = '/api/dogzilla/map'
+
+  try {
+    const response = await apiFetch(mapPath)
+    const payload = await response.json()
+
+    if (!response.ok || payload.ok !== true) {
+      robotMap.setMapData(null)
+      if (robotMapGridMeta) {
+        robotMapGridMeta.textContent = payload?.status === 'no-map' ? 'No map' : 'Map unavailable'
+      }
+      return
+    }
+
+    robotMap.setMapData(payload)
+    if (robotMapGridMeta) {
+      robotMapGridMeta.textContent = robotMap.getMapGridMeta() || `Map ${payload.width}x${payload.height}`
+    }
+  } catch {
+    robotMap.setMapData(null)
+    if (robotMapGridMeta) {
+      robotMapGridMeta.textContent = 'Map unavailable'
+    }
   }
 }
 
@@ -1446,6 +1505,54 @@ async function handleDogzillaConnectionAction(event) {
     setStatus(formatError(error), 'error')
   } finally {
     setConnectionActionsDisabled(false)
+  }
+}
+
+async function handleWaypointCapture() {
+  const name = (waypointCaptureInput?.value || '').trim()
+  if (!name) {
+    waypointCaptureStatus.textContent = 'Enter a name'
+    waypointCaptureStatus.className = 'waypoint-capture-status error'
+    return
+  }
+
+  waypointCaptureButton.disabled = true
+  waypointCaptureStatus.textContent = 'Capturing...'
+  waypointCaptureStatus.className = 'waypoint-capture-status'
+
+  try {
+    const response = await apiFetch('/api/dogzilla/waypoints', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    const payload = await response.json()
+
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(payload.error || payload.status || 'Waypoint capture failed')
+    }
+
+    waypointCaptureStatus.textContent = `Saved "${name}" at (${payload.waypoint?.x?.toFixed?.(2) || '?'}, ${payload.waypoint?.y?.toFixed?.(2) || '?'})`
+    waypointCaptureStatus.className = 'waypoint-capture-status success'
+    waypointCaptureInput.value = ''
+    // Refresh waypoints on the map immediately
+    void refreshDogzillaWaypointReadiness()
+  } catch (error) {
+    waypointCaptureStatus.textContent = formatError(error)
+    waypointCaptureStatus.className = 'waypoint-capture-status error'
+  } finally {
+    waypointCaptureButton.disabled = false
+  }
+}
+
+function handleMapViewToggle() {
+  const currentMode = robotMap.getViewMode()
+  const newMode = currentMode === 'follow' ? 'map' : 'follow'
+  robotMap.setViewMode(newMode)
+  mapViewToggle.textContent = newMode === 'follow' ? 'Top-down map' : 'Follow robot'
+  mapViewToggle.dataset.viewMode = newMode
+  if (mapViewModeLabel) {
+    mapViewModeLabel.textContent = robotMap.getViewModeLabel()
   }
 }
 

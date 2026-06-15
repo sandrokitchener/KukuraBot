@@ -209,7 +209,21 @@
               <h2>Mini Map</h2>
               <div class="robot-map-actions">
                 <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Reset charger origin: save current pose as 0,0</button>
+                <div class="waypoint-capture-row">
+                  <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name (e.g. garage)" maxlength="40" />
+                  <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Capture current robot pose as a waypoint">Capture</button>
+                  <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
+                </div>
+                <div class="map-view-toggle-row">
+                  <button type="button" id="map-view-toggle" class="map-view-toggle" data-view-mode="follow">Top-down map</button>
+                  <span class="map-view-mode-label">Follow</span>
+                </div>
+                <button type="button" class="map-slam-button" data-connection-action="start-map-pose-mapping">Start SLAM mapping</button>
+                <button type="button" class="map-slam-button" data-connection-action="save-map-pose">Save SLAM map</button>
                 <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
+              </div>
+              <div class="robot-map-meta-row">
+                <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
               </div>
             </div>
             <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
