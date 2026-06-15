@@ -16,6 +16,7 @@ DOGZILLA_NAV2_OBSTACLE_MIN_RANGE="${DOGZILLA_NAV2_OBSTACLE_MIN_RANGE:-0.24}"
 DOGZILLA_NAV2_OBSTACLE_MAX_RANGE="${DOGZILLA_NAV2_OBSTACLE_MAX_RANGE:-2.5}"
 DOGZILLA_NAV2_RAYTRACE_MAX_RANGE="${DOGZILLA_NAV2_RAYTRACE_MAX_RANGE:-3.5}"
 DOGZILLA_NAV2_YAW_GOAL_TOLERANCE="${DOGZILLA_NAV2_YAW_GOAL_TOLERANCE:-6.283185307179586}"
+DOGZILLA_NAV2_XY_GOAL_TOLERANCE="${DOGZILLA_NAV2_XY_GOAL_TOLERANCE:-0.25}"
 DOGZILLA_NAV2_CONTROLLER_FREQUENCY="${DOGZILLA_NAV2_CONTROLLER_FREQUENCY:-5.0}"
 DOGZILLA_NAV2_BT_LOOP_DURATION_MS="${DOGZILLA_NAV2_BT_LOOP_DURATION_MS:-200}"
 DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS="${DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS:-10000}"
@@ -42,7 +43,7 @@ export ROS_DOMAIN_ID
 export DOGZILLA_NAV2_ROBOT_RADIUS DOGZILLA_NAV2_FOOTPRINT_PADDING
 export DOGZILLA_NAV2_INFLATION_RADIUS DOGZILLA_NAV2_COST_SCALING_FACTOR
 export DOGZILLA_NAV2_OBSTACLE_MIN_RANGE DOGZILLA_NAV2_OBSTACLE_MAX_RANGE DOGZILLA_NAV2_RAYTRACE_MAX_RANGE
-export DOGZILLA_NAV2_YAW_GOAL_TOLERANCE
+export DOGZILLA_NAV2_YAW_GOAL_TOLERANCE DOGZILLA_NAV2_XY_GOAL_TOLERANCE
 export DOGZILLA_NAV2_CONTROLLER_FREQUENCY DOGZILLA_NAV2_BT_LOOP_DURATION_MS
 export DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS
 export DOGZILLA_NAV2_PLANNER_FREQUENCY DOGZILLA_NAV2_SMOOTHER_FREQUENCY
@@ -111,6 +112,7 @@ obstacle_min_range = env_float("DOGZILLA_NAV2_OBSTACLE_MIN_RANGE", 0.24)
 obstacle_max_range = env_float("DOGZILLA_NAV2_OBSTACLE_MAX_RANGE", 2.5)
 raytrace_max_range = env_float("DOGZILLA_NAV2_RAYTRACE_MAX_RANGE", 3.5)
 yaw_goal_tolerance = env_float("DOGZILLA_NAV2_YAW_GOAL_TOLERANCE", 6.283185307179586)
+xy_goal_tolerance = env_float("DOGZILLA_NAV2_XY_GOAL_TOLERANCE", 0.25)
 controller_frequency = env_float("DOGZILLA_NAV2_CONTROLLER_FREQUENCY", 5.0)
 bt_loop_duration_ms = int(env_float("DOGZILLA_NAV2_BT_LOOP_DURATION_MS", 200.0))
 bt_server_timeout_ms = int(env_float("DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS", 10000.0))
@@ -173,6 +175,7 @@ progress_checker["movement_time_allowance"] = movement_time_allowance
 goal_checker = controller.setdefault("general_goal_checker", {})
 goal_checker.setdefault("plugin", "nav2_controller::SimpleGoalChecker")
 goal_checker["yaw_goal_tolerance"] = yaw_goal_tolerance
+goal_checker["xy_goal_tolerance"] = xy_goal_tolerance
 
 follow_path = controller.get("FollowPath")
 if isinstance(follow_path, dict):
@@ -200,7 +203,7 @@ print(
     f"inflation_radius={inflation_radius}, cost_scaling_factor={cost_scaling_factor}, "
     f"obstacle_min_range={obstacle_min_range}, obstacle_max_range={obstacle_max_range}, "
     f"raytrace_max_range={raytrace_max_range}, "
-    f"yaw_goal_tolerance={yaw_goal_tolerance}, "
+    f"yaw_goal_tolerance={yaw_goal_tolerance}, xy_goal_tolerance={xy_goal_tolerance}, "
     f"controller_frequency={controller_frequency}, "
     f"bt_loop_duration_ms={bt_loop_duration_ms}, "
     f"bt_server_timeout_ms={bt_server_timeout_ms}, "

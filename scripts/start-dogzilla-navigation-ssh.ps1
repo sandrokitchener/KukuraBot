@@ -34,7 +34,8 @@ param(
   [double]$Nav2ScanFilterMaskStartDeg = -9999,
   [double]$Nav2ScanFilterMaskEndDeg = -9999,
   [double]$Nav2ScanFilterMaskRangeM = 0,
-  [double]$YawGoalTolerance = 0
+  [double]$YawGoalTolerance = 0,
+  [double]$Nav2XyGoalTolerance = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -171,6 +172,7 @@ $Nav2ScanFilterMaskStartDeg = Use-ConfigDoubleWhenUnset -Current $Nav2ScanFilter
 $Nav2ScanFilterMaskEndDeg = Use-ConfigDoubleWhenUnset -Current $Nav2ScanFilterMaskEndDeg -UnsetValue -9999 -Config $avoidanceConfig -PropertyName "nav2ScanFilterMaskEndDeg"
 $Nav2ScanFilterMaskRangeM = Use-PositiveConfigDouble -Current $Nav2ScanFilterMaskRangeM -Config $avoidanceConfig -PropertyName "nav2ScanFilterMaskRangeM"
 $YawGoalTolerance = Use-PositiveConfigDouble -Current $YawGoalTolerance -Config $avoidanceConfig -PropertyName "yawGoalTolerance"
+$Nav2XyGoalTolerance = Use-PositiveConfigDouble -Current $Nav2XyGoalTolerance -Config $avoidanceConfig -PropertyName "nav2XyGoalTolerance"
 $configPath = Ensure-DogzillaSshConfig `
   -Host $PiIp `
   -User $User `
@@ -227,6 +229,7 @@ if ($Nav2ScanFilterMaskStartDeg -gt -9999) { $nav2Env += " -e DOGZILLA_NAV2_SCAN
 if ($Nav2ScanFilterMaskEndDeg -gt -9999) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG=$Nav2ScanFilterMaskEndDeg" }
 if ($Nav2ScanFilterMaskRangeM -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M=$Nav2ScanFilterMaskRangeM" }
 if ($YawGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_YAW_GOAL_TOLERANCE=$YawGoalTolerance" }
+if ($Nav2XyGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_XY_GOAL_TOLERANCE=$Nav2XyGoalTolerance" }
 $remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$nav2Env $ContainerName bash $containerScript"
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
