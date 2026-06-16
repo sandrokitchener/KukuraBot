@@ -71,9 +71,22 @@ case "$mode" in
     ;;
 esac
 
+MODE_FILE="$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
+SHOULD_RESTART=false
+
 if pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1; then
-  echo "Cartographer already running for this robot configuration. Skipping restart." >&2
+  CURRENT_MODE="$(python3 -c "import json; print(json.load(open('$MODE_FILE')).get('mode',''))" 2>/dev/null || true)"
+  if [ "$CURRENT_MODE" != "$mode" ]; then
+    echo "Cartographer running in '${CURRENT_MODE:-unknown}' mode, '$mode' requested. Forcing restart." >&2
+    SHOULD_RESTART=true
+  else
+    echo "Cartographer already running in '$mode' mode. Skipping restart." >&2
+  fi
 else
+  SHOULD_RESTART=true
+fi
+
+if [ "$SHOULD_RESTART" = "true" ]; then
   pkill -f "[c]artographer_node" 2>/dev/null || true
   pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true
 
@@ -104,7 +117,7 @@ else
     --ros-args -p use_sim_time:=false -r scan:=/scan
   )
 
-  printf '{"mode":"%s","pbstream":"%s","startedAt":"%s"}\n' "$mode" "$DOGZILLA_MAP_PBSTREAM" "$(date -Iseconds)" > "$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
+  printf '{"mode":"%s","pbstream":"%s","startedAt":"%s"}\n' "$mode" "$DOGZILLA_MAP_PBSTREAM" "$(date -Iseconds)" > "$MODE_FILE"
   nohup "${cartographer_args[@]}" > "$REMOTE_ROOT/logs/map-pose-cartographer.log" 2>&1 &
 
   sleep 2
