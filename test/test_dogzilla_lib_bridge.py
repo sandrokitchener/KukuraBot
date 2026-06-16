@@ -229,7 +229,6 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         runtime.vendor_paths = []
         runtime.import_attempts = []
         runtime.nav2_client = AlternatingNav2Client()
-        runtime.map_navigation = FakeMapNavigation()
         runtime.lidar_avoidance = FakeLidarAvoidance()
 
         snapshot = runtime.snapshot()
@@ -404,113 +403,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["delivery"], "nav2-unavailable")
         self.assertEqual(result["error"], "Nav2 NavigateToPose action server unavailable")
 
-    def test_goto_refuses_map_pose_navigation_fallback_when_nav2_server_missing(self):
-        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
-        runtime.import_error = None
-        runtime.robot_error = None
-        runtime.robot = FakeActionRobot()
-        runtime.dry_run = False
-        runtime.nav2_client = FakeUnavailableNav2Client()
-        runtime.map_navigation = FakeMapNavigation()
-        runtime.navigation_cancel = threading.Event()
 
-        result = runtime.execute({
-            "kind": "locomotion.goto",
-            "params": {
-                "frame": "map",
-                "x": 1,
-                "y": 2,
-                "yaw": 0,
-                "waypoint": "living_room",
-            },
-        })
-
-        self.assertFalse(result["executed"])
-        self.assertEqual(result["delivery"], "nav2-unavailable")
-        self.assertEqual(result["fallback"], "disabled")
-        self.assertIn("Nav2 NavigateToPose is required", result["fallbackError"])
-        self.assertEqual(runtime.map_navigation.calls, [])
-
-    def test_map_pose_navigation_default_waits_until_arrival_without_command_timeout(self):
-        robot = FakeActionRobot()
-        executor = dogzilla_lib_bridge.MapPoseNavigationExecutor(enabled=True, timeout=0.0, poll_sec=0.0)
-        poses = iter([
-            {"ok": True, "pose": {"frame": "map", "x": 0.0, "y": 0.0, "theta": 0.0}},
-            {"ok": True, "pose": {"frame": "map", "x": 1.0, "y": 0.0, "theta": 0.0}},
-        ])
-        executor._read_pose = lambda: next(poses)
-        executor._read_obstacle = lambda: {"ok": True, "blocked": False}
-        original_monotonic = dogzilla_lib_bridge.time.monotonic
-        original_sleep = dogzilla_lib_bridge.time.sleep
-        times = iter([0.0, 25.0])
-
-        try:
-            dogzilla_lib_bridge.time.monotonic = lambda: next(times)
-            dogzilla_lib_bridge.time.sleep = lambda _seconds: None
-            result = executor.goto(
-                robot,
-                frame="map",
-                x=1.0,
-                y=0.0,
-                yaw=0.0,
-                params={"waypoint": "kitchen"},
-            )
-        finally:
-            dogzilla_lib_bridge.time.monotonic = original_monotonic
-            dogzilla_lib_bridge.time.sleep = original_sleep
-
-        self.assertTrue(result["executed"])
-        self.assertTrue(result["arrived"])
-        self.assertEqual(result["elapsedSec"], 25.0)
-        self.assertNotEqual(result.get("delivery"), "map-pose-navigation-timeout")
-
-    def test_map_pose_navigation_still_honors_explicit_timeout(self):
-        robot = FakeActionRobot()
-        executor = dogzilla_lib_bridge.MapPoseNavigationExecutor(enabled=True, timeout=0.0, poll_sec=0.0)
-        executor._read_pose = lambda: {"ok": True, "pose": {"frame": "map", "x": 0.0, "y": 0.0, "theta": 0.0}}
-        executor._read_obstacle = lambda: {"ok": True, "blocked": False}
-        original_monotonic = dogzilla_lib_bridge.time.monotonic
-        original_sleep = dogzilla_lib_bridge.time.sleep
-        times = iter([0.0, 0.0, 1.1, 1.2])
-
-        try:
-            dogzilla_lib_bridge.time.monotonic = lambda: next(times)
-            dogzilla_lib_bridge.time.sleep = lambda _seconds: None
-            result = executor.goto(
-                robot,
-                frame="map",
-                x=5.0,
-                y=0.0,
-                yaw=0.0,
-                params={"waypoint": "kitchen", "timeoutSec": 1.0},
-            )
-        finally:
-            dogzilla_lib_bridge.time.monotonic = original_monotonic
-            dogzilla_lib_bridge.time.sleep = original_sleep
-
-        self.assertFalse(result["executed"])
-        self.assertEqual(result["delivery"], "map-pose-navigation-timeout")
-        self.assertIn("timed out after 1.0s", result["error"])
-
-    def test_map_pose_navigation_can_be_cancelled_by_stop_command(self):
-        robot = FakeActionRobot()
-        executor = dogzilla_lib_bridge.MapPoseNavigationExecutor(enabled=True, timeout=0.0, poll_sec=0.0)
-        cancel_event = threading.Event()
-        cancel_event.set()
-
-        result = executor.goto(
-            robot,
-            frame="map",
-            x=1.0,
-            y=0.0,
-            yaw=0.0,
-            params={"waypoint": "kitchen"},
-            cancel_event=cancel_event,
-        )
-
-        self.assertFalse(result["executed"])
-        self.assertEqual(result["delivery"], "map-pose-navigation-cancelled")
-        self.assertIn(("stop",), robot.calls)
 
     def test_replacing_navigation_cancel_event_cancels_previous_goto(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -1196,31 +1089,6 @@ class FakeFailedLidarAvoidance:
             "required": True,
             "ok": False,
             "error": "avoidance node unavailable",
-        }
-
-
-class FakeMapNavigation:
-    def __init__(self):
-        self.calls = []
-
-    def snapshot(self):
-        return {"available": False}
-
-    def goto(self, robot, *, frame, x, y, yaw, params, cancel_event=None):
-        self.calls.append({
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "yaw": yaw,
-            "params": params,
-            "cancel_event": cancel_event,
-        })
-        return {
-            "executed": True,
-            "delivery": "DOGZILLALib map-pose navigation",
-            "kind": "locomotion.goto",
-            "waypoint": params.get("waypoint"),
-            "waypointSafe": frame == "map",
         }
 
 

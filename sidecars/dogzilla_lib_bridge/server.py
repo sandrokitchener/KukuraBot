@@ -17,6 +17,90 @@ from pathlib import Path
 from typing import Any
 
 
+_SLEEP_LOCK = threading.Lock()
+_SLEEP_ACTIVE = False
+_AUTO_SLEEP_TIMER: threading.Timer | None = None
+_AUTO_SLEEP_DELAY_SEC = 300.0  # 5 min idle → auto sleep
+CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-lidar-bridge")
+YOLO_SERVICE = "robodoge-yolo-vision.service"
+NAV2_LIFECYCLE_NODE = "lifecycle_manager_navigation"
+CARTOGRAPHER_NODE = "cartographer_node"
+
+
+def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout + r.stderr
+    except subprocess.TimeoutExpired as e:
+        return -1, f"timed out after {timeout}s: {e.output or ''} {e.stderr or ''}"
+    except OSError as e:
+        return -1, str(e)
+
+
+def sleep_pi() -> dict[str, Any]:
+    global _SLEEP_ACTIVE
+    with _SLEEP_LOCK:
+        if _SLEEP_ACTIVE:
+            return {"ok": True, "sleeping": True, "note": "already sleeping"}
+        stopped: list[dict[str, Any]] = []
+
+        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {CARTOGRAPHER_NODE}")
+        stopped.append({"service": "cartographer", "stopped": code == 0 or code == 1, "output": out.strip()})
+
+        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {NAV2_LIFECYCLE_NODE}")
+        stopped.append({"service": "nav2", "stopped": code == 0 or code == 1, "output": out.strip()})
+
+        code, out = _run(f"sudo systemctl stop {YOLO_SERVICE}")
+        stopped.append({"service": "yolo-vision", "stopped": code == 0, "output": out.strip()})
+
+        _cancel_auto_sleep()
+        _SLEEP_ACTIVE = True
+        return {"ok": True, "sleeping": True, "stopped": stopped, "stoppedCount": len([s for s in stopped if s["stopped"]])}
+
+
+def wake_pi() -> dict[str, Any]:
+    global _SLEEP_ACTIVE
+    with _SLEEP_LOCK:
+        started: list[dict[str, Any]] = []
+
+        code, out = _run(f"docker exec {CONTAINER_NAME} bash /home/pi/robodoge/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh", timeout=30.0)
+        started.append({"service": "cartographer", "started": code == 0, "output": out.strip()[:200]})
+
+        code, out = _run(f"sudo systemctl start {YOLO_SERVICE}")
+        started.append({"service": "yolo-vision", "started": code == 0, "output": out.strip()})
+
+        _schedule_auto_sleep(restart=True)
+        _SLEEP_ACTIVE = False
+        return {"ok": True, "sleeping": False, "started": started, "startedCount": len([s for s in started if s["started"]])}
+
+
+def sleep_status() -> dict[str, Any]:
+    with _SLEEP_LOCK:
+        return {"ok": True, "sleeping": _SLEEP_ACTIVE}
+
+
+def _schedule_auto_sleep(restart: bool = False) -> None:
+    global _AUTO_SLEEP_TIMER
+    if restart:
+        _cancel_auto_sleep()
+    if _AUTO_SLEEP_TIMER is None:
+        _AUTO_SLEEP_TIMER = threading.Timer(_AUTO_SLEEP_DELAY_SEC, _auto_sleep_callback)
+        _AUTO_SLEEP_TIMER.daemon = True
+        _AUTO_SLEEP_TIMER.start()
+
+
+def _cancel_auto_sleep() -> None:
+    global _AUTO_SLEEP_TIMER
+    if _AUTO_SLEEP_TIMER is not None:
+        _AUTO_SLEEP_TIMER.cancel()
+        _AUTO_SLEEP_TIMER = None
+
+
+def _auto_sleep_callback() -> None:
+    result = sleep_pi()
+    print(f"[auto-sleep] {json.dumps(result)}")
+
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BRIDGE_DIR = Path(__file__).resolve().parent
 if str(BRIDGE_DIR) not in sys.path:
@@ -45,24 +129,8 @@ from map_metadata import (
     read_ros_map_yaml,
     sha256_file,
 )
-from map_pose_navigation import (
-    DEFAULT_MAP_NAVIGATION_ENABLED,
-    DEFAULT_MAP_NAVIGATION_MAX_TURN_RATE,
-    DEFAULT_MAP_NAVIGATION_MAX_X_STEP,
-    DEFAULT_MAP_NAVIGATION_MAX_Y_STEP,
-    DEFAULT_MAP_NAVIGATION_OBSTACLE_DISTANCE,
-    DEFAULT_MAP_NAVIGATION_OBSTACLE_STOP_COUNT,
-    DEFAULT_MAP_NAVIGATION_POLL_SEC,
-    DEFAULT_MAP_NAVIGATION_TIMEOUT,
-    DEFAULT_MAP_NAVIGATION_TURN_GAIN,
-    DEFAULT_MAP_NAVIGATION_X_GAIN,
-    DEFAULT_MAP_NAVIGATION_YAW_TOLERANCE,
-    DEFAULT_MAP_NAVIGATION_Y_GAIN,
-    DEFAULT_MAP_POSE_URL,
-    DEFAULT_MAP_SCAN_URL,
-    MapPoseNavigationExecutor,
-)
-from motion_utils import clamp, normalize_angle, resolve_map_navigation_timeout, scan_obstacle_counts
+
+from motion_utils import clamp, normalize_angle
 from nav2_gait_adapter import (
     get_speed_config,
     nav2_cmd_vel_to_locomotion,
@@ -205,7 +273,6 @@ class DogzillaRuntime:
         self.import_attempts: list[dict[str, str]] = []
         self.nav2_client = Nav2NavigateClient(DEFAULT_NAV2_ACTION)
         self.lidar_avoidance = LidarAvoidanceSupervisor()
-        self.map_navigation = MapPoseNavigationExecutor()
         self.navigation_cancel = threading.Event()
         self.navigation_event_lock = threading.Lock()
         self.last_locomotion_gait: str | None = None
@@ -257,7 +324,6 @@ class DogzillaRuntime:
 
     def navigation_snapshot(self, nav2: dict[str, Any] | None = None) -> dict[str, Any]:
         nav2 = nav2 if isinstance(nav2, dict) else self.nav2_client.snapshot()
-        fallback = self.map_navigation.snapshot() if hasattr(self, "map_navigation") else {"available": False}
         nav2_available = nav2.get("available") is True
         waypoint_ready = nav2.get("waypointReady") is True
         return {
@@ -267,11 +333,6 @@ class DogzillaRuntime:
             "waypointReady": waypoint_ready,
             "blockers": nav2.get("blockers") or [],
             "nav2": nav2,
-            "fallback": {
-                **fallback,
-                "automaticDispatch": False,
-                "reason": "DOGZILLALib map-pose movement is not used for waypoint dispatch; Nav2 is required.",
-            },
         }
 
     def execute(self, canonical_plan: dict[str, Any]) -> dict[str, Any]:
@@ -808,6 +869,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/nav2/speed_config":
             self._send_json(200, {"ok": True, "config": get_speed_config()})
             return
+        if self.path == "/sleep":
+            self._send_json(200, sleep_status())
+            return
+        if self.path == "/wake":
+            self._send_json(200, sleep_status())
+            return
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -817,6 +884,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "Expected JSON cmd_vel payload"})
                 return
 
+            _schedule_auto_sleep(restart=True)
             result = self.server.runtime.execute_nav2_cmd_vel(payload)
             accepted = result.get("executed") or result.get("delivery") in ("dry-run", "nav2-gait-adapter-blocked")
             self._send_json(
@@ -827,6 +895,17 @@ class Handler(BaseHTTPRequestHandler):
                     **identity_payload(),
                 },
             )
+            return
+
+        if self.path == "/sleep":
+            result = sleep_pi()
+            self._send_json(200, result)
+            _schedule_auto_sleep(restart=True)
+            return
+
+        if self.path == "/wake":
+            result = wake_pi()
+            self._send_json(200, result)
             return
 
         if self.path == "/nav2/speed_config":
@@ -855,6 +934,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self.server.received_count += 1
         command_id = f"dogzilla-lib-{self.server.received_count:04d}"
+        _schedule_auto_sleep(restart=True)
         if canonical_plan.get("kind") == "locomotion.goto" and DEFAULT_ASYNC_HTTP_GOTO:
             result = {
                 "executed": True,
@@ -889,6 +969,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        _schedule_auto_sleep(restart=True)
         result = self.server.runtime.execute(canonical_plan)
         record = {
             "commandId": command_id,
@@ -1085,6 +1166,7 @@ def main() -> None:
 
     runtime = DogzillaRuntime(serial_port=args.serial_port, dry_run=DEFAULT_DRY_RUN and not args.live)
     server = BridgeServer((args.host, args.port), Handler, runtime)
+    _schedule_auto_sleep()
     print(f"DOGZILLALib bridge listening on http://{args.host}:{args.port}")
     print(json.dumps(runtime.snapshot()))
     server.serve_forever()

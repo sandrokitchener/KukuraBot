@@ -1151,7 +1151,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-points", type=int, default=int(os.getenv("DOGZILLA_LIDAR_MAX_POINTS", "720")))
     parser.add_argument("--stale-after", type=positive_float, default=float(os.getenv("DOGZILLA_LIDAR_STALE_AFTER", "3")))
     parser.add_argument("--pose-stale-after", type=positive_float, default=float(os.getenv("DOGZILLA_POSE_STALE_AFTER", "2")))
-    parser.add_argument("--pose-poll-interval", type=positive_float, default=float(os.getenv("DOGZILLA_POSE_POLL_INTERVAL", "0.2")))
+    parser.add_argument("--pose-poll-interval", type=positive_float, default=float(os.getenv("DOGZILLA_POSE_POLL_INTERVAL", "1.0")))
     parser.add_argument(
         "--scan-odom",
         dest="scan_odom",

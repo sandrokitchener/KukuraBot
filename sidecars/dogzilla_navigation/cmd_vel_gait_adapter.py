@@ -54,7 +54,7 @@ class CmdVelGaitAdapter(Node):
         self._last_ramp_log_at = 0.0
 
         self.subscription = self.create_subscription(Twist, args.input_topic, self._on_twist, 10)
-        self.timer = self.create_timer(0.1, self._stop_if_stale)
+        self.timer = self.create_timer(0.5, self._stop_if_stale)
         if self._speed_ramp_enabled:
             self._ramp_timer = self.create_timer(args.speed_ramp_interval, self._compute_and_apply_ramp)
         self.get_logger().info(

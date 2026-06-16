@@ -116,12 +116,12 @@ obstacle_max_range = env_float("DOGZILLA_NAV2_OBSTACLE_MAX_RANGE", 2.5)
 raytrace_max_range = env_float("DOGZILLA_NAV2_RAYTRACE_MAX_RANGE", 3.5)
 yaw_goal_tolerance = env_float("DOGZILLA_NAV2_YAW_GOAL_TOLERANCE", 6.283185307179586)
 xy_goal_tolerance = env_float("DOGZILLA_NAV2_XY_GOAL_TOLERANCE", 0.25)
-controller_frequency = env_float("DOGZILLA_NAV2_CONTROLLER_FREQUENCY", 5.0)
-bt_loop_duration_ms = int(env_float("DOGZILLA_NAV2_BT_LOOP_DURATION_MS", 200.0))
+controller_frequency = env_float("DOGZILLA_NAV2_CONTROLLER_FREQUENCY", 3.0)
+bt_loop_duration_ms = int(env_float("DOGZILLA_NAV2_BT_LOOP_DURATION_MS", 500.0))
 bt_server_timeout_ms = int(env_float("DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS", 10000.0))
 bt_wait_for_service_timeout_ms = int(env_float("DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS", 5000.0))
 planner_frequency = env_float("DOGZILLA_NAV2_PLANNER_FREQUENCY", 1.0)
-smoother_frequency = env_float("DOGZILLA_NAV2_SMOOTHER_FREQUENCY", 5.0)
+smoother_frequency = env_float("DOGZILLA_NAV2_SMOOTHER_FREQUENCY", 2.0)
 required_movement_radius = env_float("DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS", 0.08)
 movement_time_allowance = env_float("DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE", 45.0)
 failure_tolerance = env_float("DOGZILLA_NAV2_FAILURE_TOLERANCE", 5.0)
@@ -207,7 +207,7 @@ print(
     f"obstacle_min_range={obstacle_min_range}, obstacle_max_range={obstacle_max_range}, "
     f"raytrace_max_range={raytrace_max_range}, "
     f"yaw_goal_tolerance={yaw_goal_tolerance}, xy_goal_tolerance={xy_goal_tolerance}, "
-    f"controller_frequency={controller_frequency}, "
+    f"controller_frequency={controller_frequency} Hz, "
     f"bt_loop_duration_ms={bt_loop_duration_ms}, "
     f"bt_server_timeout_ms={bt_server_timeout_ms}, "
     f"required_movement_radius={required_movement_radius}, "

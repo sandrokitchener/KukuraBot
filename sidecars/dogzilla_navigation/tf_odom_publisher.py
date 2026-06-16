@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--odom-frame", default="odom")
     parser.add_argument("--base-frame", default="base_link")
     parser.add_argument("--topic", default="/odom")
-    parser.add_argument("--rate", type=float, default=20.0)
+    parser.add_argument("--rate", type=float, default=10.0)
     args = parser.parse_args(argv)
 
     import rclpy
