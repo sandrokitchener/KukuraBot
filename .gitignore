@@ -1,12 +1,15 @@
 .omx/
 .omo/
 .codex-remote-attachments/
+.playwright-mcp/
 node_modules/
 models/
 output/
 dist-electron/
 npm-debug.log*
 dogzilla_flash_work_*/
+map-page-snapshot.md
+perception-view*.png
 __pycache__/
 *.pyc
 sidecars/isaac_bridge/command_log.ndjson

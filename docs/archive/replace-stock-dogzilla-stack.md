@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/ARCHITECTURE.md. -->
+
 # Replacing Stock DOGZILLA Control Stack with Robo-Doge
 
 Last validated: April 24, 2026.

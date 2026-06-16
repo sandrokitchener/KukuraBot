@@ -81,7 +81,7 @@ if (existingAppConfig && reuseExistingApp) {
     startupStatus.update('Starting services')
     const [
       ,
-      ,
+      directBridgeStartup,
       managedIsaacEnvironment,
       managedRobotEnvironment,
       managedSpeechEnvironment,
@@ -132,13 +132,14 @@ if (existingAppConfig && reuseExistingApp) {
     ])
 
     startupStatus.update('Checking waypoint navigator')
-    await forceDogzillaWaypointNavigationOnStartup({
+    const waypointNavigationStartup = await forceDogzillaWaypointNavigationOnStartup({
       runtimeConfig: robotRuntimeConfig,
       ros2Config: robotRos2Config,
       logger: console,
       replaceExisting: replaceManagedSidecars,
     }).catch((error) => {
       console.warn(`DOGZILLA waypoint navigator startup failed: ${error instanceof Error ? error.message : String(error)}`)
+      return null
     })
 
     startupStatus.update('Running robot startup sequence')
@@ -146,6 +147,10 @@ if (existingAppConfig && reuseExistingApp) {
       runtimeConfig: robotRuntimeConfig,
       ros2Config: robotRos2Config,
       logger: console,
+      existingDirectBridgeHealth: pickFreshDirectBridgeHealth([
+        waypointNavigationStartup?.health,
+        directBridgeStartup?.health,
+      ]),
     })
 
     startupStatus.stop('Starting Questing Beast server')
@@ -594,4 +599,13 @@ function createNoopManagedEnvironment(label, error = '') {
     error,
     async stop() {},
   }
+}
+
+function pickFreshDirectBridgeHealth(candidates = []) {
+  for (const candidate of candidates) {
+    if (candidate && candidate.status === 'ok' && candidate.body?.runtime?.dryRun === false) {
+      return candidate
+    }
+  }
+  return null
 }

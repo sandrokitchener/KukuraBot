@@ -168,11 +168,13 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(kitchenWaypoint.navigable, true)
   assert.doesNotMatch(kitchenWaypoint.verificationProblem, /captured-pose note|notes still|dummy|stored pose does not match/i)
   assert.match(payload.robotRuntime.mapOrigin.status, /ready|stale-missing-map-identity|missing/)
-  assert.equal(kitchenWaypoint.frame, 'map')
+  assert.equal(kitchenWaypoint.frame, 'app_map')
+  assert.equal(kitchenWaypoint.capturedMapPose?.frame, 'map')
   if (payload.robotRuntime.mapOrigin.configured) {
     assert.equal(kitchenWaypoint.appMapPose?.frame, 'app_map')
     assert.equal(kitchenWaypoint.appMapPose?.sourceFrame, 'map')
-    assert.equal(kitchenWaypoint.appMapPose?.originLabel, payload.robotRuntime.mapOrigin.origin.label)
+    assert.equal(kitchenWaypoint.appMapPose?.storedFrame, 'app_map')
+    assert.equal(payload.robotRuntime.mapOrigin.origin.label, 'charger_origin')
   }
   const garageWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'garage')
   if (garageWaypoint?.frame === 'app_map') {

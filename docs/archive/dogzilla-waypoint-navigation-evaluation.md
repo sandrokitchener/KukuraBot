@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/NAVIGATION.md and docs/KNOWN_ISSUES.md. -->
+
 # DOGZILLA Waypoint Navigation Evaluation
 
 Date: 2026-06-07

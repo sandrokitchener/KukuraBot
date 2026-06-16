@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/ANDROID_APP.md. -->
+
 # Android Side Quest
 
 Robo-Doge now has a Tauri Android shell around the existing `public/` console.

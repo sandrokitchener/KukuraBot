@@ -181,6 +181,47 @@ test('runRobotStartupSequence restarts dry-run direct bridge live before gesture
   ])
 })
 
+test('runRobotStartupSequence skips redundant bridge probe when existingDirectBridgeHealth is live', async () => {
+  let probeCalls = 0
+  let actionCalls = 0
+  const result = await runRobotStartupSequence({
+    runtimeConfig: runtimeConfig(),
+    ros2Config: ros2Config(),
+    waypointConfig: emptyWaypointConfig(),
+    actionConfig: handshakeActionConfig(),
+    motionConfig: emptyMotionConfig(),
+    env: {
+      ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
+    },
+    logger: quietLogger(),
+    existingDirectBridgeHealth: {
+      status: 'ok',
+      body: {
+        runtime: {
+          dryRun: false,
+        },
+      },
+    },
+    sendDogzillaAudioCueImpl: async () => ({ status: 'ok', ok: true, cue: 'bark' }),
+    probeRobotSidecarHealthImpl: async () => {
+      probeCalls += 1
+      return { status: 'ok', body: { runtime: { dryRun: false } } }
+    },
+    runDogzillaConnectionActionImpl: async () => {
+      actionCalls += 1
+      return { status: 'ok' }
+    },
+    sendRobotCommandImpl: async () => ({ status: 'sent' }),
+    sleepImpl: async () => {},
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.liveBridge.status, 'ok')
+  assert.equal(result.liveBridge.probeReused, true)
+  assert.equal(probeCalls, 0)
+  assert.equal(actionCalls, 0)
+})
+
 test('runRobotStartupSequence retries transient live bridge restart failures', async () => {
   const calls = []
   const healthSequence = [

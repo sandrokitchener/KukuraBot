@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/NAVIGATION.md. -->
+
 # Raspberry Pi SSH and ROS2 Bring-Up
 
 Last validated: May 5, 2026.

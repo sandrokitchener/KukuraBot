@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/ARCHITECTURE.md. -->
+
 # Robo-Doge API Architecture
 
 This document describes the app architecture, runtime modes, local HTTP API, robot telemetry stream, and config surfaces.

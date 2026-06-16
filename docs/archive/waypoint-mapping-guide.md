@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/NAVIGATION.md. -->
+
 # Waypoint Mapping Guide
 
 ## Goal

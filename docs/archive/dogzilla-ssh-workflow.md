@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/NAVIGATION.md and docs/COMMANDS.md. -->
+
 # DOGZILLA SSH Workflow
 
 Goal: avoid SD-card guessing. Use the stock DOGZILLA image, get its IP, then do inspection, code sync, and bridge startup over SSH.

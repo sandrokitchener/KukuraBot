@@ -6,7 +6,7 @@ Local control console for Questing Beast / DOGZILLA. The desktop backend owns mo
 
 - Sends chat commands through configurable local or OpenAI-compatible model profiles.
 - Dispatches real DOGZILLA actions through DOGZILLA Direct Bridge.
-- Shows live robot state, LiDAR scan, grid-only map pose, and verified `map`-frame waypoints.
+- Shows live robot state, LiDAR scan, grid-only map pose, and verified `app_map` waypoints.
 - Plays bark/thinking/confirm sounds on the DOGZILLA Pi speaker, including app-side volume control.
 - Supports Android as a mobile control surface for the same backend.
 - Keeps Isaac Sim support available as a separate runtime target.
@@ -43,7 +43,7 @@ Skip Pi SSH steps while the dog is offline or low battery. Local app, tests, And
 
 ## Full Setup
 
-The detailed setup guide is in [docs/setup-guide.md](docs/setup-guide.md). It covers:
+The compact command index is in [docs/COMMANDS.md](docs/COMMANDS.md). Archived detailed setup notes live in [docs/archive/setup-guide.md](docs/archive/setup-guide.md). They cover:
 
 - desktop backend setup
 - DOGZILLA robot-side boot services
@@ -78,12 +78,13 @@ Test-NetConnection -ComputerName 100.89.71.113 -Port 3037
 - `config/robot-runtime.json` - active runtime target
 - `config/robot-waypoints.json` - verified real-world waypoints
 - `sidecars/dogzilla_*` - robot support sidecars
-- `docs/setup-guide.md` - full setup and operation guide
+- `docs/COMMANDS.md` - compact command index
+- `docs/archive/setup-guide.md` - archived full setup and operation guide
 
 ## More Docs
 
-- [docs/api-architecture.md](docs/api-architecture.md)
-- [docs/android-sidequest.md](docs/android-sidequest.md)
-- [docs/dogzilla-real-map-pose.md](docs/dogzilla-real-map-pose.md)
-- [docs/waypoint-mapping-guide.md](docs/waypoint-mapping-guide.md)
-- [docs/sim-vs-real-runtime.md](docs/sim-vs-real-runtime.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/NAVIGATION.md](docs/NAVIGATION.md)
+- [docs/ANDROID_APP.md](docs/ANDROID_APP.md)
+- [docs/ELECTRON_APP.md](docs/ELECTRON_APP.md)
+- [docs/ISAAC_SIM.md](docs/ISAAC_SIM.md)

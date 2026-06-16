@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/COMMANDS.md and docs/ARCHITECTURE.md. -->
+
 # Robo-Doge Setup Guide
 
 This guide expands the short quick-start in the repository README.

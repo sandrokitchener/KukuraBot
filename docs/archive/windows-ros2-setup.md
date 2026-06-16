@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/COMMANDS.md. -->
+
 # Windows ROS 2 Setup for Robo-Doge
 
 Last validated: April 24, 2026.

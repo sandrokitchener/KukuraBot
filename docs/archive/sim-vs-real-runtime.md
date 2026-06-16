@@ -1,3 +1,5 @@
+<!-- Archive detail doc. Do not read by default. Current summary lives in docs/ARCHITECTURE.md. -->
+
 # Sim Vs Real Runtime
 
 ## Goal

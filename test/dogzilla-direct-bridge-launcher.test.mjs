@@ -33,7 +33,7 @@ test('shouldForceDogzillaDirectBridge follows active DOGZILLA Direct target', ()
   }), false)
 })
 
-test('forceDogzillaDirectBridgeOnStartup reuses healthy direct bridge', async () => {
+test('forceDogzillaDirectBridgeOnStartup reuses healthy direct bridge without stopping vendor app', async () => {
   const actionCalls = []
   const result = await forceDogzillaDirectBridgeOnStartup({
     runtimeConfig: directRuntimeConfig(),
@@ -51,11 +51,11 @@ test('forceDogzillaDirectBridgeOnStartup reuses healthy direct bridge', async ()
 
   assert.equal(result.status, 'ok')
   assert.equal(result.reusedBridge, true)
-  assert.deepEqual(actionCalls, ['stop-vendor-app'])
-  assert.equal(result.vendorStopResult.action, 'stop-vendor-app')
+  assert.deepEqual(actionCalls, [])
+  assert.equal(result.vendorStopResult, undefined)
 })
 
-test('forceDogzillaDirectBridgeOnStartup starts and waits for missing direct bridge', async () => {
+test('forceDogzillaDirectBridgeOnStartup stops vendor app then starts and waits for missing direct bridge', async () => {
   const healthSequence = [
     { status: 'error', error: 'fetch failed (ECONNREFUSED 10.0.4.32:8893)' },
     { status: 'ok', destination: 'http://10.0.4.32:8893/healthz' },
@@ -116,7 +116,7 @@ test('forceDogzillaDirectBridgeOnStartup reuses bridge when only Nav2 is unavail
 
   assert.equal(result.status, 'ok')
   assert.equal(result.reusedBridge, true)
-  assert.deepEqual(actionCalls, ['stop-vendor-app'])
+  assert.deepEqual(actionCalls, [])
 })
 
 test('forceDogzillaDirectBridgeOnStartup restarts bridge when DOGZILLALib runtime is unavailable', async () => {
