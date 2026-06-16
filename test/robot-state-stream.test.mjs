@@ -45,6 +45,37 @@ test('normalizeRobotStateMessage allows null pose', () => {
   assert.equal(normalized.pose, null)
 })
 
+test('normalizeRobotStateMessage preserves pose frame metadata', () => {
+  const normalized = normalizeRobotStateMessage({
+    ...VALID_STATE,
+    pose: {
+      frame: '/app_map',
+      x: 0,
+      y: -0.008,
+      theta: -0.011,
+      mapFramePose: {
+        frame: '/map',
+        x: -5.07624,
+        y: -2.9796,
+        theta: -0.85922,
+      },
+    },
+  })
+
+  assert.deepEqual(normalized.pose, {
+    frame: 'app_map',
+    x: 0,
+    y: -0.008,
+    theta: -0.011,
+    mapFramePose: {
+      frame: 'map',
+      x: -5.07624,
+      y: -2.9796,
+      theta: -0.85922,
+    },
+  })
+})
+
 test('normalizeRobotStateMessage rejects missing fields and unknown tasks', () => {
   assert.throws(
     () => normalizeRobotStateMessage({

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   APP_MAP_FRAME,
+  buildDogzillaMapOriginSnapshot,
   DEFAULT_MAP_ORIGIN_FILE,
   loadDogzillaMapOrigin,
   mapPoseToAppPose,
@@ -48,6 +49,12 @@ export function poseToWaypoint(pose, {
   let y = rawY
   let yaw = rawYaw
   let capturedMapPose = null
+  const mapOriginSnapshot = rawFrame === 'map' && mapOrigin
+    ? buildDogzillaMapOriginSnapshot({
+      ...mapOrigin,
+      ...(map && !mapOrigin.map ? { map } : {}),
+    })
+    : null
 
   if (rawFrame === 'map' && mapOrigin) {
     const appPose = mapPoseToAppPose({ frame: 'map', x: rawX, y: rawY, yaw: rawYaw }, mapOrigin)
@@ -86,12 +93,7 @@ export function poseToWaypoint(pose, {
         bounds: map.bounds,
       },
     } : {}),
-    ...(mapOrigin && rawFrame === 'map' ? {
-      mapOrigin: {
-        label: mapOrigin.label,
-        savedAt: mapOrigin.savedAt,
-      },
-    } : {}),
+    ...(mapOriginSnapshot ? { mapOrigin: mapOriginSnapshot } : {}),
     ...(capturedMapPose ? { capturedMapPose } : {}),
     notes: [
       `Captured from ${source || 'dogzilla pose bridge'} at ${capturedAt}.`,

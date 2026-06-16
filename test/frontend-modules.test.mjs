@@ -18,6 +18,7 @@ import {
   formatLidarFailureSummary,
   formatRobotMapWaypointTitle,
   formatWaypointReadinessSummary,
+  getMapGridView,
   getRenderableRobotMapWaypoints,
   getRobotMapRangeMeters,
   headingRadiansToCssRotation,
@@ -344,9 +345,56 @@ test('robot map renders numeric map/app-map waypoints and marks config-disabled 
     formatRobotMapWaypointTitle(waypoints[4]),
     'draft: map x 3.00m, y 3.00m, yaw 0.00rad. disabled not verified.',
   )
-  assert.equal(getRobotMapRangeMeters(waypoints, { pose: { x: 3.2, y: 0 } }), 4)
+  assert.equal(getRobotMapRangeMeters(waypoints, { pose: { x: 3.2, y: 0 } }), 5.5)
   assert.deepEqual(poseToMapPosition({ x: 0, y: 0 }, 4), { xPercent: 50, yPercent: 50 })
   assert.deepEqual(poseToMapPosition({ x: 4, y: -4 }, 4), { xPercent: 100, yPercent: 100 })
+})
+
+test('robot map view centers on occupancy-grid bounds', () => {
+  assert.deepEqual(getMapGridView({
+    width: 260,
+    height: 140,
+    resolution: 0.05,
+    originX: -5.522548,
+    originY: -4.717458,
+  }), {
+    centerX: 0.9774520000000004,
+    centerY: -1.2174579999999997,
+    rangeMeters: 6.5,
+  })
+})
+
+test('robot map range prefers map-frame render coordinates over app_map display coordinates', () => {
+  const waypoints = getRenderableRobotMapWaypoints([{
+    id: 'garage',
+    x: -3.105,
+    y: -2.389,
+    frame: 'app_map',
+    verified: true,
+    capturedMapPose: {
+      frame: 'map',
+      x: 4,
+      y: 1,
+      yaw: 0,
+    },
+  }])
+
+  const range = getRobotMapRangeMeters(waypoints, {
+    pose: {
+      frame: 'app_map',
+      x: -20,
+      y: -20,
+      theta: 0,
+      mapFramePose: {
+        frame: 'map',
+        x: 1,
+        y: 1,
+        theta: 0,
+      },
+    },
+  })
+
+  assert.equal(range, 4.5)
 })
 
 test('formatLidarFailureSummary keeps serial diagnostics visible', () => {

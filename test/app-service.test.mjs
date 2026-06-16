@@ -174,6 +174,10 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
     assert.equal(kitchenWaypoint.appMapPose?.sourceFrame, 'map')
     assert.equal(kitchenWaypoint.appMapPose?.originLabel, payload.robotRuntime.mapOrigin.origin.label)
   }
+  const garageWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'garage')
+  if (garageWaypoint?.frame === 'app_map') {
+    assert.equal(garageWaypoint.capturedMapPose?.frame, 'map')
+  }
   assert.equal(payload.app.appName, 'Questing Beast')
 })
 

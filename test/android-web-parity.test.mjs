@@ -83,7 +83,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(html, /data-connection-action="start-navigation"/)
   assert.match(html, /Start waypoint navigator/)
   assert.match(html, /data-connection-action="capture-map-origin"/)
-  assert.match(html, /Reset charger origin: save current pose as 0,0/)
+  assert.match(html, /Calibrate charger origin for new captures/)
   assert.match(html, /data-connection-action="save-map-pose"/)
   assert.match(html, /data-connection-action="start-map-pose-mapping"/)
   assert.match(html, /id="run-dogzilla-preflight-button"/)

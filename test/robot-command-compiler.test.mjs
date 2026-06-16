@@ -148,6 +148,102 @@ test('compileRobotRuntimePreview converts app_map waypoint through saved origin'
   assert.equal(preview.canonicalPlan.params.mapFingerprint, 'test-map-fingerprint')
 })
 
+test('compileRobotRuntimePreview keeps app_map waypoint fixed when current origin is reset', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'kitchen',
+      },
+    },
+    waypoints: {
+      kitchen: mapWaypoint({
+        frame: 'app_map',
+        x: 1,
+        y: 0,
+        yaw: Math.PI / 2,
+        mapOrigin: {
+          frame: 'app_map',
+          sourceFrame: 'map',
+          label: 'charger_origin',
+          x: 10,
+          y: 20,
+          yaw: Math.PI / 2,
+          savedAt: '2026-06-15T19:25:00.000Z',
+          map: {
+            id: 'test_map',
+            fingerprint: 'test-map-fingerprint',
+          },
+        },
+      }),
+    },
+    mapOrigin: {
+      x: -5,
+      y: -3,
+      yaw: -0.8,
+      label: 'charger_origin',
+      savedAt: '2026-06-15T19:55:00.000Z',
+      map: {
+        id: 'test_map',
+        fingerprint: 'test-map-fingerprint',
+      },
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.canonicalPlan.params.frame, 'map')
+  assert.equal(preview.canonicalPlan.params.sourceFrame, 'app_map')
+  assert.equal(preview.canonicalPlan.params.appMapResolution, 'waypoint-origin')
+  assert.equal(preview.canonicalPlan.params.x, 10)
+  assert.equal(preview.canonicalPlan.params.y, 21)
+  assert.equal(preview.canonicalPlan.params.yaw, 3.14159)
+})
+
+test('compileRobotRuntimePreview uses captured map pose for legacy app_map waypoint after origin reset', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'garage',
+      },
+    },
+    waypoints: {
+      garage: mapWaypoint({
+        frame: 'app_map',
+        x: -3.10505,
+        y: -2.38933,
+        yaw: -1.77342,
+        capturedMapPose: {
+          frame: 'map',
+          x: -0.51338,
+          y: 0.60067,
+          yaw: 1.14547,
+        },
+      }),
+    },
+    mapOrigin: {
+      x: -5.07624,
+      y: -2.9796,
+      yaw: -0.85922,
+      label: 'charger_origin',
+      savedAt: '2026-06-15T19:55:13.969Z',
+      map: {
+        id: 'test_map',
+        fingerprint: 'test-map-fingerprint',
+      },
+    },
+  }))
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.canonicalPlan.params.frame, 'map')
+  assert.equal(preview.canonicalPlan.params.sourceFrame, 'app_map')
+  assert.equal(preview.canonicalPlan.params.appMapResolution, 'captured-map-pose')
+  assert.equal(preview.canonicalPlan.params.x, -0.51338)
+  assert.equal(preview.canonicalPlan.params.y, 0.60067)
+  assert.equal(preview.canonicalPlan.params.yaw, 1.14547)
+  assert.match(preview.warnings.join('\n'), /using its captured map pose/)
+})
+
 test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {

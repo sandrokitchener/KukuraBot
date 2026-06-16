@@ -71,45 +71,52 @@ case "$mode" in
     ;;
 esac
 
-pkill -f "[c]artographer_node.*robodoge_dogzilla_laser_only" 2>/dev/null || true
-pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true
-
-nohup ros2 run tf2_ros static_transform_publisher 0 0 0.18 0 0 0 base_link laser_frame > "$REMOTE_ROOT/logs/map-pose-static-tf.log" 2>&1 &
-
-cartographer_args=(
-  ros2 run cartographer_ros cartographer_node
-  -configuration_directory "$REMOTE_ROOT/maps"
-)
-if [ "$mode" = "localization" ]; then
-  cartographer_args+=(
-    -configuration_basename robodoge_dogzilla_laser_only_localization.lua
-    -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
-    -load_frozen_state true
-  )
-elif [ "$mode" = "continue_mapping" ]; then
-  cartographer_args+=(
-    -configuration_basename robodoge_dogzilla_laser_only.lua
-    -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
-    -load_frozen_state false
-  )
+if pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1; then
+  echo "Cartographer already running for this robot configuration. Skipping restart." >&2
 else
-  cartographer_args+=(
-    -configuration_basename robodoge_dogzilla_laser_only.lua
+  pkill -f "[c]artographer_node" 2>/dev/null || true
+  pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true
+
+  nohup ros2 run tf2_ros static_transform_publisher 0 0 0.18 0 0 0 base_link laser_frame > "$REMOTE_ROOT/logs/map-pose-static-tf.log" 2>&1 &
+
+  cartographer_args=(
+    ros2 run cartographer_ros cartographer_node
+    -configuration_directory "$REMOTE_ROOT/maps"
   )
+  if [ "$mode" = "localization" ]; then
+    cartographer_args+=(
+      -configuration_basename robodoge_dogzilla_laser_only_localization.lua
+      -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
+      -load_frozen_state true
+    )
+  elif [ "$mode" = "continue_mapping" ]; then
+    cartographer_args+=(
+      -configuration_basename robodoge_dogzilla_laser_only.lua
+      -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
+      -load_frozen_state false
+    )
+  else
+    cartographer_args+=(
+      -configuration_basename robodoge_dogzilla_laser_only.lua
+    )
+  fi
+  cartographer_args+=(
+    --ros-args -p use_sim_time:=false -r scan:=/scan
+  )
+
+  printf '{"mode":"%s","pbstream":"%s","startedAt":"%s"}\n' "$mode" "$DOGZILLA_MAP_PBSTREAM" "$(date -Iseconds)" > "$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
+  nohup "${cartographer_args[@]}" > "$REMOTE_ROOT/logs/map-pose-cartographer.log" 2>&1 &
+
+  sleep 2
 fi
-cartographer_args+=(
-  --ros-args -p use_sim_time:=false -r scan:=/scan
-)
 
-printf '{"mode":"%s","pbstream":"%s","startedAt":"%s"}\n' "$mode" "$DOGZILLA_MAP_PBSTREAM" "$(date -Iseconds)" > "$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
-nohup "${cartographer_args[@]}" > "$REMOTE_ROOT/logs/map-pose-cartographer.log" 2>&1 &
-
-sleep 2
-
-nohup ros2 run cartographer_ros cartographer_occupancy_grid_node \
-  -resolution "${DOGZILLA_MAP_POSE_RESOLUTION:-0.05}" \
-  -publish_period_sec "${DOGZILLA_MAP_POSE_PUBLISH_PERIOD:-2.0}" \
-  > "$REMOTE_ROOT/logs/map-occupancy-grid.log" 2>&1 &
+if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
+  nohup ros2 run cartographer_ros cartographer_occupancy_grid_node \
+    -resolution "${DOGZILLA_MAP_POSE_RESOLUTION:-0.05}" \
+    -publish_period_sec "${DOGZILLA_MAP_POSE_PUBLISH_PERIOD:-2.0}" \
+    --ros-args -r /map:=/map_cartographer \
+    > "$REMOTE_ROOT/logs/map-occupancy-grid.log" 2>&1 &
+fi
 
 python3 - <<'PY'
 import json

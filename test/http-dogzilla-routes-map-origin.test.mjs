@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 
 import { tryHandleDogzillaRoute } from '../lib/http-dogzilla-routes.mjs'
 import { nav2HealthBody } from '../test-support/robot-http-fixtures.mjs'
@@ -73,6 +76,97 @@ test('map-origin capture refuses to save when active map identity is missing', a
     assert.match(sent[0].payload.error, /active map identity unavailable/)
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('waypoint capture route stores app_map provenance without touching source config outside target file', async () => {
+  const originalFetch = globalThis.fetch
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-route-waypoint-'))
+  const waypointFile = path.join(tempDir, 'robot-waypoints.json')
+  const originalConfig = {
+    activeSet: 'home',
+    sets: {
+      home: {
+        waypoints: {},
+      },
+    },
+  }
+  await writeFile(waypointFile, `${JSON.stringify(originalConfig, null, 2)}\n`, 'utf-8')
+
+  const health = nav2HealthBody()
+  const sent = []
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/pose')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          waypointSafe: true,
+          pose: {
+            frame: 'map',
+            x: 10,
+            y: 21,
+            theta: Math.PI,
+            source: 'tf:map->base_link',
+          },
+        }),
+      }
+    }
+
+    throw new Error(`unexpected fetch ${url}`)
+  }
+
+  try {
+    const handled = await tryHandleDogzillaRoute({
+      request: { method: 'POST' },
+      requestUrl: new URL('http://localhost/api/dogzilla/waypoints'),
+      response: {},
+      readJsonBody: async () => ({ name: 'Garage', label: 'garage' }),
+      sendJson: async (_response, statusCode, payload) => {
+        sent.push({ statusCode, payload })
+        return true
+      },
+      getDogzillaPoseTrack: () => [],
+      waypointFile,
+      getRobotSidecarHealthImpl: async () => ({ body: { runtime: { map: health.runtime.map } } }),
+      loadDogzillaMapOriginImpl: async () => ({
+        frame: 'app_map',
+        sourceFrame: 'map',
+        label: 'charger_origin',
+        x: 10,
+        y: 20,
+        yaw: Math.PI / 2,
+        savedAt: '2026-06-15T19:25:00.000Z',
+        map: health.runtime.map,
+      }),
+    })
+
+    const saved = JSON.parse(await readFile(waypointFile, 'utf-8'))
+    const waypoint = saved.sets.home.waypoints.garage
+
+    assert.equal(handled, true)
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].statusCode, 200)
+    assert.equal(sent[0].payload.file, waypointFile)
+    assert.equal(waypoint.frame, 'app_map')
+    assert.equal(waypoint.x, 1)
+    assert.equal(waypoint.y, 0)
+    assert.equal(waypoint.yaw, 1.5708)
+    assert.equal(waypoint.mapId, 'test_map')
+    assert.equal(waypoint.mapFingerprint, 'test-map-fingerprint')
+    assert.equal(waypoint.mapOrigin.label, 'charger_origin')
+    assert.equal(waypoint.mapOrigin.x, 10)
+    assert.equal(waypoint.mapOrigin.y, 20)
+    assert.equal(waypoint.mapOrigin.yaw, Math.PI / 2)
+    assert.equal(waypoint.mapOrigin.mapFingerprint, 'test-map-fingerprint')
+    assert.equal(waypoint.capturedMapPose.frame, 'map')
+    assert.equal(waypoint.capturedMapPose.x, 10)
+    assert.equal(waypoint.capturedMapPose.y, 21)
+    assert.equal(waypoint.capturedMapPose.yaw, Math.PI)
+  } finally {
+    globalThis.fetch = originalFetch
+    await rm(tempDir, { recursive: true, force: true })
   }
 })
 

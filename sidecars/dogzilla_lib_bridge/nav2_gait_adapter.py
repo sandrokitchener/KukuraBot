@@ -2,24 +2,51 @@ from __future__ import annotations
 
 import math
 import os
+from copy import deepcopy
 from typing import Any
 
 
-DEFAULT_NAV2_GAIT_LINEAR_FULL_SCALE = float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE", "0.26"))
-DEFAULT_NAV2_GAIT_LATERAL_FULL_SCALE = float(os.environ.get("DOGZILLA_NAV2_GAIT_LATERAL_FULL_SCALE", "0.20"))
-DEFAULT_NAV2_GAIT_ANGULAR_FULL_SCALE = float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_FULL_SCALE", "1.0"))
-DEFAULT_NAV2_GAIT_MAX_X_STEP = float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_X_STEP", "14"))
-DEFAULT_NAV2_GAIT_MAX_Y_STEP = float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_Y_STEP", "3"))
-DEFAULT_NAV2_GAIT_MAX_TURN_RATE = float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_TURN_RATE", "24"))
-DEFAULT_NAV2_GAIT_FORWARD_TURN_SCALE = float(os.environ.get("DOGZILLA_NAV2_GAIT_FORWARD_TURN_SCALE", "0.25"))
-DEFAULT_NAV2_GAIT_LINEAR_DEADBAND = float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_DEADBAND", "0.025"))
-DEFAULT_NAV2_GAIT_ANGULAR_DEADBAND = float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_DEADBAND", "0.12"))
-DEFAULT_NAV2_GAIT_TROT_LINEAR = float(os.environ.get("DOGZILLA_NAV2_GAIT_TROT_LINEAR", "0.11"))
-DEFAULT_NAV2_GAIT_HIGH_LINEAR = float(os.environ.get("DOGZILLA_NAV2_GAIT_HIGH_LINEAR", "0.20"))
-DEFAULT_NAV2_GAIT_ALLOW_TROT = os.environ.get("DOGZILLA_NAV2_GAIT_ALLOW_TROT", "0") == "1"
+# --- Dynamic speed config ---
+# Start from env defaults, updatable at runtime via update_speed_config().
+
+_SPEED_CONFIG: dict[str, Any] = {
+    "linearFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE", "0.26")),
+    "lateralFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_LATERAL_FULL_SCALE", "0.20")),
+    "angularFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_FULL_SCALE", "1.0")),
+    "maxXStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_X_STEP", "14")),
+    "maxYStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_Y_STEP", "3")),
+    "maxTurnRate": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_TURN_RATE", "24")),
+    "forwardTurnScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_FORWARD_TURN_SCALE", "0.25")),
+    "linearDeadband": float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_DEADBAND", "0.025")),
+    "angularDeadband": float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_DEADBAND", "0.12")),
+    "trotLinear": float(os.environ.get("DOGZILLA_NAV2_GAIT_TROT_LINEAR", "0.11")),
+    "highLinear": float(os.environ.get("DOGZILLA_NAV2_GAIT_HIGH_LINEAR", "0.20")),
+    "allowTrot": os.environ.get("DOGZILLA_NAV2_GAIT_ALLOW_TROT", "0") == "1",
+}
+
+
+def get_speed_config() -> dict[str, Any]:
+    """Return a copy of the current dynamic speed config."""
+    return deepcopy(_SPEED_CONFIG)
+
+
+def update_speed_config(overrides: dict[str, Any]) -> dict[str, Any]:
+    """Apply overrides to the dynamic speed config. Returns the updated config."""
+    allowed = {
+        "linearFullScale", "lateralFullScale", "angularFullScale",
+        "maxXStep", "maxYStep", "maxTurnRate", "forwardTurnScale",
+        "linearDeadband", "angularDeadband",
+        "trotLinear", "highLinear", "allowTrot",
+    }
+    for key, value in overrides.items():
+        if key in allowed:
+            _SPEED_CONFIG[key] = value
+    return get_speed_config()
 
 
 def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
+    cfg = _SPEED_CONFIG
+
     linear = payload.get("linear") if isinstance(payload.get("linear"), dict) else {}
     angular = payload.get("angular") if isinstance(payload.get("angular"), dict) else {}
     twist = payload.get("twist") if isinstance(payload.get("twist"), dict) else {}
@@ -48,32 +75,20 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
         0.0,
     )
 
-    linear_x = zero_deadband(linear_x, DEFAULT_NAV2_GAIT_LINEAR_DEADBAND)
-    linear_y = zero_deadband(linear_y, DEFAULT_NAV2_GAIT_LINEAR_DEADBAND)
-    angular_z = zero_deadband(angular_z, DEFAULT_NAV2_GAIT_ANGULAR_DEADBAND)
+    linear_x = zero_deadband(linear_x, cfg["linearDeadband"])
+    linear_y = zero_deadband(linear_y, cfg["linearDeadband"])
+    angular_z = zero_deadband(angular_z, cfg["angularDeadband"])
 
-    x_step = scale_symmetric(
-        linear_x,
-        DEFAULT_NAV2_GAIT_LINEAR_FULL_SCALE,
-        DEFAULT_NAV2_GAIT_MAX_X_STEP,
-    )
-    y_step = scale_symmetric(
-        linear_y,
-        DEFAULT_NAV2_GAIT_LATERAL_FULL_SCALE,
-        DEFAULT_NAV2_GAIT_MAX_Y_STEP,
-    )
+    x_step = scale_symmetric(linear_x, cfg["linearFullScale"], cfg["maxXStep"])
+    y_step = scale_symmetric(linear_y, cfg["lateralFullScale"], cfg["maxYStep"])
     translating = abs(x_step) > 0 or abs(y_step) > 0
-    turn_scale = DEFAULT_NAV2_GAIT_FORWARD_TURN_SCALE if translating and abs(x_step) > 0 else 1.0
-    turn_rate = scale_symmetric(
-        angular_z,
-        DEFAULT_NAV2_GAIT_ANGULAR_FULL_SCALE,
-        DEFAULT_NAV2_GAIT_MAX_TURN_RATE * turn_scale,
-    )
+    turn_scale = cfg["forwardTurnScale"] if translating and abs(x_step) > 0 else 1.0
+    turn_rate = scale_symmetric(angular_z, cfg["angularFullScale"], cfg["maxTurnRate"] * turn_scale)
 
     abs_linear = max(abs(linear_x), abs(linear_y))
-    if DEFAULT_NAV2_GAIT_ALLOW_TROT and abs_linear >= DEFAULT_NAV2_GAIT_TROT_LINEAR:
+    if cfg["allowTrot"] and abs_linear >= cfg["trotLinear"]:
         gait = "trot"
-        pace = "high" if abs_linear >= DEFAULT_NAV2_GAIT_HIGH_LINEAR else "normal"
+        pace = "high" if abs_linear >= cfg["highLinear"] else "normal"
     elif translating:
         gait = "walk"
         pace = "slow"
@@ -101,12 +116,12 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
             },
         },
         "mapping": {
-            "linearFullScale": DEFAULT_NAV2_GAIT_LINEAR_FULL_SCALE,
-            "angularFullScale": DEFAULT_NAV2_GAIT_ANGULAR_FULL_SCALE,
-            "maxXStep": DEFAULT_NAV2_GAIT_MAX_X_STEP,
-            "maxTurnRate": DEFAULT_NAV2_GAIT_MAX_TURN_RATE,
-            "forwardTurnScale": DEFAULT_NAV2_GAIT_FORWARD_TURN_SCALE,
-            "allowTrot": DEFAULT_NAV2_GAIT_ALLOW_TROT,
+            "linearFullScale": cfg["linearFullScale"],
+            "angularFullScale": cfg["angularFullScale"],
+            "maxXStep": cfg["maxXStep"],
+            "maxTurnRate": cfg["maxTurnRate"],
+            "forwardTurnScale": cfg["forwardTurnScale"],
+            "allowTrot": cfg["allowTrot"],
         },
     }
 

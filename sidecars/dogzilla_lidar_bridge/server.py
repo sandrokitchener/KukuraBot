@@ -785,7 +785,7 @@ def map_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
         resolution = float(grid.info.resolution)
         origin_x = float(grid.info.origin.position.x)
         origin_y = float(grid.info.origin.position.y)
-        origin_theta = float(grid.info.origin.orientation.z)
+        origin_yaw = quaternion_to_yaw(grid.info.origin.orientation) or 0.0
 
         raw = struct.pack(f"<{len(grid.data)}b", *grid.data)
         encoded = base64.b64encode(raw).decode("ascii")
@@ -796,7 +796,7 @@ def map_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
             "width": width,
             "height": height,
             "resolution": resolution,
-            "origin": {"x": origin_x, "y": origin_y, "theta": origin_theta},
+            "origin": {"x": origin_x, "y": origin_y, "yaw": origin_yaw, "theta": origin_yaw},
             "cells": encoded,
             "cellCount": len(grid.data),
         }

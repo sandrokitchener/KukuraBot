@@ -3,6 +3,23 @@ const ROBOT_MAP_RANGE_METERS = 3
 const MAP_CELL_FREE = 0
 const MAP_CELL_UNKNOWN = -1
 
+function rangeToRGBA(rangeNorm, alpha = 1) {
+  const t = clamp(rangeNorm, 0, 1)
+  let r, g, b
+  if (t <= 0.5) {
+    const u = t / 0.5
+    r = 255
+    g = Math.round(50 + u * 170)
+    b = Math.round(u * 50)
+  } else {
+    const u = (t - 0.5) / 0.5
+    r = Math.round(255 - u * 255)
+    g = 220
+    b = Math.round(50 + u * 205)
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`
+}
+
 export function createRobotMapRenderer({
   elements,
   getRuntimeConfig,
@@ -14,15 +31,93 @@ export function createRobotMapRenderer({
   let lidarSummary = ''
   let lastRenderedRobot = null
   let lastRenderedScan = null
+  let lastPoseTrack = []
   const accumulatedPoints = []
-  const ACCUMULATION_MS = 5_000
-  const MAX_ACCUMULATED_POINTS = 5_000
+  const ACCUMULATION_MS = 1_500
+  const MAX_ACCUMULATED_POINTS = 2_000
   let mapGrid = null
   let mapGridMeta = null
   let viewCenterX = 0
   let viewCenterY = 0
   let mapViewMode = 'follow'
+  // Cached app_map→map origin derived from rawPose.mapFramePose
+  let appMapOriginCache = null
 
+  function getCurrentMapView(mapRangeFallback, robotPose = null) {
+    if (mapViewMode === 'map' && mapGrid) {
+      return getMapGridView(mapGrid)
+    }
+
+    const centerX = toFiniteNumber(robotPose?.x)
+    const centerY = toFiniteNumber(robotPose?.y)
+    return {
+      centerX: Number.isFinite(centerX) ? centerX : 0,
+      centerY: Number.isFinite(centerY) ? centerY : 0,
+      rangeMeters: mapRangeFallback,
+    }
+  }
+
+  // Derive the map origin from a robot pose that has mapFramePose attached
+  function deriveAppMapOrigin(pose) {
+    if (!pose || !pose.mapFramePose || pose.frame !== 'app_map') {
+      return
+    }
+    const mapX = toFiniteNumber(pose.mapFramePose.x)
+    const mapY = toFiniteNumber(pose.mapFramePose.y)
+    const appPose = normalizeRobotMapPose(pose)
+    if (!appPose) { return }
+    const oyaw = toFiniteNumber(pose.mapFramePose.yaw - appPose.theta)
+    if (!Number.isFinite(mapX) || !Number.isFinite(mapY) || !Number.isFinite(oyaw)) {
+      return
+    }
+    const cy = Math.cos(oyaw)
+    const sy = Math.sin(oyaw)
+    // origin = reverse of mapPoseToAppPose transform
+    appMapOriginCache = {
+      ox: mapX - cy * appPose.x + sy * appPose.y,
+      oy: mapY - sy * appPose.x - cy * appPose.y,
+      cy,
+      sy,
+    }
+  }
+
+  // Convert an app_map pose to map frame using cached origin
+  function appMapToMapPose(pose) {
+    if (!appMapOriginCache || !pose) { return pose }
+    const x = toFiniteNumber(pose.x)
+    const y = toFiniteNumber(pose.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) { return null }
+    const { ox, oy, cy, sy } = appMapOriginCache
+    const theta = toFiniteNumber(pose.theta ?? pose.yaw)
+    return {
+      x: ox + cy * x - sy * y,
+      y: oy + sy * x + cy * y,
+      theta,
+      yaw: theta,
+      frame: 'map',
+    }
+  }
+
+  // Get robot pose in map frame for canvas rendering (converts from app_map if needed)
+  function getCanvasRobotPose(robot) {
+    const raw = robot?.pose
+    if (!raw) { return null }
+    // If already map frame, use directly
+    if (raw.frame === 'map' || !raw.frame) {
+      return normalizeRobotMapPose(raw)
+    }
+    // If app_map with mapFramePose, derive origin and use map-frame coords
+    if (raw.frame === 'app_map' && raw.mapFramePose) {
+      deriveAppMapOrigin(raw)
+      const mapPose = normalizeRobotMapPose(raw.mapFramePose)
+      if (mapPose) {
+        mapPose.frame = 'map'
+        return mapPose
+      }
+    }
+    // Fallback: return normalized as-is
+    return normalizeRobotMapPose(raw)
+  }
   function setMapData(mapPayload) {
     if (!mapPayload || mapPayload.ok !== true || !mapPayload.cells) {
       mapGrid = null
@@ -63,8 +158,6 @@ export function createRobotMapRenderer({
     }
 
     const xMin = centerX - mapRange
-    const yMin = centerY - mapRange
-    const xMax = centerX + mapRange
     const yMax = centerY + mapRange
     const scale = (width) / (mapRange * 2)
     const imageData = context.createImageData(width, height)
@@ -72,8 +165,13 @@ export function createRobotMapRenderer({
 
     for (let py = 0; py < height; py++) {
       for (let px = 0; px < width; px++) {
-        const mapX = xMin + px / scale
-        const mapY = yMax - py / scale
+        const viewX = xMin + px / scale
+        const viewY = yMax - py / scale
+
+        // Map frame is the native frame for the grid — no coordinate transform needed
+        const mapX = viewX
+        const mapY = viewY
+
         const col = Math.floor((mapX - originX) / resolution)
         const row = Math.floor((mapY - originY) / resolution)
         const idx = py * width + px
@@ -118,14 +216,21 @@ export function createRobotMapRenderer({
       return
     }
 
-    const rangeMeters = getRobotMapRangeMeters(getWaypoints(), robot)
-    const robotPose = normalizeRobotMapPose(robot?.pose)
-    const centerX = robotPose ? robotPose.x : 0
-    const centerY = robotPose ? robotPose.y : 0
+    // Initialize appMapOriginCache via getCanvasRobotPose so app_map waypoints can convert
+    const canvasPose = robot ? getCanvasRobotPose(robot) : null
+    const centerPose = canvasPose || normalizeRobotMapPose(robot?.pose)
+    const view = getCurrentMapView(getRobotMapRangeMeters(getWaypoints(), robot), centerPose)
     const markers = []
 
     getRenderableRobotMapWaypoints(getWaypoints()).forEach((waypoint) => {
-      const position = poseToMapPosition(waypoint, rangeMeters, centerX, centerY)
+      // Convert app_map waypoints to map frame so they align with grid.
+      // Prefer capturedMapPose (always map frame) over live conversion via appMapToMapPose,
+      // because appMapToMapPose depends on the saved origin which may not match the capture
+      // session's Cartographer origin.
+      const mapWaypoint = waypoint.frame === 'app_map'
+        ? (waypoint.capturedMapPose || appMapToMapPose(waypoint) || waypoint)
+        : waypoint
+      const position = poseToMapPosition(mapWaypoint, view.rangeMeters, view.centerX, view.centerY)
       if (!position) {
         return
       }
@@ -133,7 +238,7 @@ export function createRobotMapRenderer({
       const marker = document.createElement('span')
       marker.className = 'robot-map-waypoint'
       marker.dataset.waypointId = waypoint.id
-      marker.dataset.frame = waypoint.frame
+      marker.dataset.frame = mapWaypoint.frame
       marker.dataset.verified = waypoint.verified ? 'true' : 'false'
       marker.dataset.enabled = waypoint.enabled ? 'true' : 'false'
       if (waypoint.sourceFrame) {
@@ -141,7 +246,7 @@ export function createRobotMapRenderer({
       }
       marker.style.left = `${position.xPercent}%`
       marker.style.top = `${position.yPercent}%`
-      marker.style.setProperty('--waypoint-heading', `${headingRadiansToCssRotation(waypoint.yaw || 0)}rad`)
+      marker.style.setProperty('--waypoint-heading', `${headingRadiansToCssRotation(mapWaypoint.yaw || 0)}rad`)
       marker.title = formatRobotMapWaypointTitle(waypoint)
 
       const label = document.createElement('span')
@@ -164,7 +269,8 @@ export function createRobotMapRenderer({
       return
     }
 
-    const robotPose = normalizeRobotMapPose(robot.pose)
+    const canvasPose = getCanvasRobotPose(robot)
+    const robotPose = canvasPose || normalizeRobotMapPose(robot.pose)
     if (!robotPose) {
       lastRenderedRobot = null
       hideDot()
@@ -174,7 +280,8 @@ export function createRobotMapRenderer({
       return
     }
 
-    const position = poseToMapPosition(robot.pose, getRobotMapRangeMeters(getWaypoints(), robot), robotPose.x, robotPose.y)
+    const view = getCurrentMapView(getRobotMapRangeMeters(getWaypoints(), robot), robotPose)
+    const position = poseToMapPosition(robotPose, view.rangeMeters, view.centerX, view.centerY)
     if (!position) {
       lastRenderedRobot = null
       hideDot()
@@ -188,10 +295,10 @@ export function createRobotMapRenderer({
     elements.dot.style.left = `${position.xPercent}%`
     elements.dot.style.top = `${position.yPercent}%`
     elements.dot.style.opacity = '1'
-    elements.dot.style.setProperty('--robot-heading', `${headingRadiansToCssRotation(robot.pose.theta)}rad`)
-    setPoseReadout(robot.pose, robot.pose.frame || 'map')
+    elements.dot.style.setProperty('--robot-heading', `${headingRadiansToCssRotation(robotPose.theta)}rad`)
+    setPoseReadout(robotPose, robotPose.frame || 'map')
     setMeta(
-      `x ${robot.pose.x.toFixed(2)}m, y ${robot.pose.y.toFixed(2)}m, theta ${robot.pose.theta.toFixed(2)}rad. ` +
+      `x ${robotPose.x.toFixed(2)}m, y ${robotPose.y.toFixed(2)}m, theta ${robotPose.theta.toFixed(2)}rad. ` +
       `Updated ${formatEventTimestamp(robot.receivedAt)}.`,
     )
   }
@@ -202,6 +309,9 @@ export function createRobotMapRenderer({
   }
 
   function renderPoseTrack(track, robot) {
+    // Store track for canvas route drawing (raw map-frame poses)
+    lastPoseTrack = Array.isArray(track) ? track.slice(-60) : []
+
     if (!elements.track) {
       return
     }
@@ -211,16 +321,20 @@ export function createRobotMapRenderer({
       return
     }
 
-    const robotPose = normalizeRobotMapPose(robot.pose)
-    const centerX = robotPose ? robotPose.x : 0
-    const centerY = robotPose ? robotPose.y : 0
+    const canvasPose = getCanvasRobotPose(robot)
+    const centerPose = canvasPose || normalizeRobotMapPose(robot.pose)
+    const view = getCurrentMapView(getRobotMapRangeMeters(getWaypoints(), robot), centerPose)
     const samples = Array.isArray(track) ? track.slice(-40) : []
     const dots = []
     samples.forEach((pose, index) => {
       if (!isRenderableRobotMapFrame(pose?.frame)) {
         return
       }
-      const position = poseToMapPosition(pose, getRobotMapRangeMeters(getWaypoints(), robot), centerX, centerY)
+      // Convert app_map track poses to map frame so track dots align with grid
+      const mapPose = (pose.frame === 'app_map' || !pose.frame)
+        ? (appMapToMapPose(pose) || pose)
+        : pose
+      const position = poseToMapPosition(mapPose, view.rangeMeters, view.centerX, view.centerY)
       if (!position) {
         return
       }
@@ -230,7 +344,7 @@ export function createRobotMapRenderer({
       dot.style.left = `${position.xPercent}%`
       dot.style.top = `${position.yPercent}%`
       dot.style.opacity = String(0.18 + ageRatio * 0.55)
-      dot.title = `${pose.frame || 'map'} ${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}`
+      dot.title = `${mapPose.frame || 'map'} ${mapPose.x.toFixed(2)}, ${mapPose.y.toFixed(2)}`
       dots.push(dot)
     })
 
@@ -303,44 +417,70 @@ export function createRobotMapRenderer({
 
     const now = Date.now()
     const robotPose = normalizeRobotMapPose(robot?.pose)
+    // Use map-frame pose for canvas rendering so robot aligns with occupancy grid
+    const canvasPose = getCanvasRobotPose(robot)
 
-    let mapRange
-    if (mapViewMode === 'map' && mapGrid) {
-      const halfWidth = (mapGrid.width * mapGrid.resolution) / 2
-      const halfHeight = (mapGrid.height * mapGrid.resolution) / 2
-      mapRange = Math.ceil(Math.max(Math.abs(mapGrid.originX) + halfWidth, Math.abs(mapGrid.originY) + halfHeight) * 2) / 2
-    } else {
-      mapRange = getRobotMapRangeMeters(getWaypoints(), robot)
-    }
+    const fallbackRange = getRobotMapRangeMeters(getWaypoints(), robot)
+    const view = getCurrentMapView(fallbackRange, canvasPose)
+    const mapRange = view.rangeMeters
 
     const points = Array.isArray(scan.points) ? scan.points : []
-
-    context.clearRect(0, 0, width, height)
-
     const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
+    const viewCenterMetersX = view.centerX
+    const viewCenterMetersY = view.centerY
 
-    const viewCenterMetersX = robotPose && mapViewMode !== 'map' ? robotPose.x : 0
-    const viewCenterMetersY = robotPose && mapViewMode !== 'map' ? robotPose.y : 0
+    // Layer 1: Dark background
+    context.fillStyle = '#161618'
+    context.fillRect(0, 0, width, height)
 
-    if (mapGrid) {
-      drawMapGrid(context, width, height, mapRange, viewCenterMetersX, viewCenterMetersY)
+    // Layer 2: Subtle 1m grid
+    if (robotPose) {
+      const scaleX = width / (mapRange * 2)
+      const scaleY = height / (mapRange * 2)
+      const originPx = width / 2
+      const originPy = height / 2
+      context.strokeStyle = 'rgba(255, 255, 255, 0.045)'
+      context.lineWidth = 0.5
+      const firstMeterX = Math.ceil(-mapRange)
+      const lastMeterX = Math.floor(mapRange)
+      for (let mx = firstMeterX; mx <= lastMeterX; mx++) {
+        const px = originPx + mx * scaleX
+        context.beginPath()
+        context.moveTo(px, 0)
+        context.lineTo(px, height)
+        context.stroke()
+      }
+      const firstMeterY = Math.ceil(-mapRange)
+      const lastMeterY = Math.floor(mapRange)
+      for (let my = firstMeterY; my <= lastMeterY; my++) {
+        const py = originPy - my * scaleY
+        context.beginPath()
+        context.moveTo(0, py)
+        context.lineTo(width, py)
+        context.stroke()
+      }
     }
 
-    if (!points.length) {
-      return
+    // Layer 3: Occupancy grid dimmed behind route and points (grid is in map frame)
+    if (mapGrid) {
+      drawMapGrid(context, width, height, mapRange, viewCenterMetersX, viewCenterMetersY)
+      context.fillStyle = 'rgba(22, 22, 24, 0.55)'
+      context.fillRect(0, 0, width, height)
     }
 
     if (!robotPose) {
-      drawCenteredLidarScan(context, points, {
-        width,
-        height,
-        displayRange: clamp(Math.max(1.5, maxSeen), 1.5, 6),
-        now,
-      })
+      if (points.length) {
+        drawCenteredLidarScan(context, points, {
+          width,
+          height,
+          displayRange: clamp(Math.max(1.5, maxSeen), 1.5, 6),
+          now,
+        })
+      }
       return
     }
 
-    const robotPosition = poseToMapPosition(robotPose, mapRange, viewCenterMetersX, viewCenterMetersY)
+    const robotPosition = poseToMapPosition(canvasPose || robotPose, mapRange, viewCenterMetersX, viewCenterMetersY)
     if (!robotPosition) {
       return
     }
@@ -351,17 +491,11 @@ export function createRobotMapRenderer({
     const scaleX = width / (mapRange * 2)
     const scaleY = height / (mapRange * 2)
 
+    // Accumulate LiDAR points (use canvasPose so points align with grid in map frame)
     for (const point of points) {
-      const mapPoint = lidarPointToMapPose(point, robotPose)
-      if (!mapPoint) {
-        continue
-      }
-      const px = mapPoint.x
-      const py = mapPoint.y
-      if (!Number.isFinite(px) || !Number.isFinite(py)) {
-        continue
-      }
-      accumulatedPoints.push({ x: px, y: py, addedAt: now })
+      const mapPoint = lidarPointToMapPose(point, canvasPose || robotPose)
+      if (!mapPoint) { continue }
+      accumulatedPoints.push({ x: mapPoint.x, y: mapPoint.y, addedAt: now })
     }
 
     const cutoff = now - ACCUMULATION_MS
@@ -373,8 +507,38 @@ export function createRobotMapRenderer({
     }
 
     context.save()
+
+    // Layer 4: Route polyline (red, drawn before points so points sit on top)
+    if (Array.isArray(lastPoseTrack) && lastPoseTrack.length >= 2) {
+      const routePoses = lastPoseTrack.filter((p) => isRenderableRobotMapFrame(p?.frame))
+      context.beginPath()
+      let started = false
+      for (const tp of routePoses) {
+        // Convert app_map track poses to map frame so route aligns with grid
+        const mapPose = appMapOriginCache && (tp.frame === 'app_map' || tp.frame === undefined)
+          ? appMapToMapPose(tp)
+          : tp
+        const pos = poseToMapPosition(mapPose, mapRange, viewCenterMetersX, viewCenterMetersY)
+        if (!pos) { continue }
+        const px = (pos.xPercent / 100) * width
+        const py = (pos.yPercent / 100) * height
+        if (!started) {
+          context.moveTo(px, py)
+          started = true
+        } else {
+          context.lineTo(px, py)
+        }
+      }
+      context.strokeStyle = '#ff4444'
+      context.lineWidth = 3
+      context.lineCap = 'round'
+      context.lineJoin = 'round'
+      context.stroke()
+    }
+
+    // Layer 5: Range rings (very transparent)
     context.lineWidth = 0.5
-    context.strokeStyle = 'rgba(48, 43, 37, 0.12)'
+    context.strokeStyle = 'rgba(255, 255, 255, 0.04)'
     for (const ring of [0.25, 0.5, 0.75, 1]) {
       const ringMeters = displayRange * ring
       context.beginPath()
@@ -382,47 +546,62 @@ export function createRobotMapRenderer({
       context.stroke()
     }
 
+    // Layer 6: Accumulated points (white ghosts)
     for (const accPt of accumulatedPoints) {
       const age = now - accPt.addedAt
       const ageRatio = Math.min(age / ACCUMULATION_MS, 1)
       const pointPosition = poseToMapPosition(accPt, mapRange, viewCenterMetersX, viewCenterMetersY)
-      if (!pointPosition) {
-        continue
-      }
+      if (!pointPosition) { continue }
       const px = (pointPosition.xPercent / 100) * width
       const py = (pointPosition.yPercent / 100) * height
-      if (px < 0 || px > width || py < 0 || py > height) {
-        continue
-      }
-      context.fillStyle = `rgba(0, 123, 132, ${(0.03 + (1 - ageRatio) * 0.15).toFixed(3)})`
+      if (px < 0 || px > width || py < 0 || py > height) { continue }
+      context.fillStyle = `rgba(255, 255, 255, ${(0.08 + (1 - ageRatio) * 0.18).toFixed(3)})`
       context.beginPath()
       context.arc(px, py, 1, 0, Math.PI * 2)
       context.fill()
     }
 
-    // Current scan points (no rays — they obscure the map)
+    // Layer 7: Live scan points (colored by distance — near red/orange, mid yellow, far cyan)
     for (const point of points) {
-      const mapPoint = lidarPointToMapPose(point, robotPose)
-      if (!mapPoint) {
-        continue
-      }
+      const mapPoint = lidarPointToMapPose(point, canvasPose || robotPose)
+      if (!mapPoint) { continue }
       const pointPosition = poseToMapPosition(mapPoint, mapRange, viewCenterMetersX, viewCenterMetersY)
-      if (!pointPosition) {
-        continue
-      }
+      if (!pointPosition) { continue }
       const px = (pointPosition.xPercent / 100) * width
       const py = (pointPosition.yPercent / 100) * height
-      if (px < 0 || px > width || py < 0 || py > height) {
-        continue
-      }
+      if (px < 0 || px > width || py < 0 || py > height) { continue }
       const rangeNorm = clamp(point.range / maxSeen, 0, 1)
-      const pointSize = 1 + (1 - rangeNorm) * 1.2
-      const pointAlpha = 0.25 + (1 - rangeNorm) * 0.35
-      context.fillStyle = `rgba(0, 200, 180, ${pointAlpha.toFixed(3)})`
+      const pointSize = 1.5 + (1 - rangeNorm) * 2.5
+      const pointAlpha = 0.30 + (1 - rangeNorm) * 0.45
+      context.fillStyle = rangeToRGBA(rangeNorm, pointAlpha)
       context.beginPath()
       context.arc(px, py, pointSize, 0, Math.PI * 2)
       context.fill()
     }
+
+    // Layer 8: Heading cone (maroon, behind center dot)
+    const coneLen = Math.min(width, height) * 0.055
+    const headingTheta = (canvasPose || robotPose).theta
+    const dirX = Math.cos(headingTheta)
+    const dirY = -Math.sin(headingTheta)
+    const perpX = Math.sin(headingTheta)
+    const perpY = Math.cos(headingTheta)
+    const halfBase = coneLen * 0.35
+    const baseCx = centerX + coneLen * dirX
+    const baseCy = centerY + coneLen * dirY
+    context.fillStyle = 'rgba(180, 40, 30, 0.55)'
+    context.beginPath()
+    context.moveTo(centerX, centerY)
+    context.lineTo(baseCx + perpX * halfBase, baseCy + perpY * halfBase)
+    context.lineTo(baseCx - perpX * halfBase, baseCy - perpY * halfBase)
+    context.closePath()
+    context.fill()
+
+    // Layer 9: Robot center dot (sits on top of everything)
+    context.fillStyle = 'rgba(255, 255, 255, 0.9)'
+    context.beginPath()
+    context.arc(centerX, centerY, 3, 0, Math.PI * 2)
+    context.fill()
 
     context.restore()
   }
@@ -500,6 +679,7 @@ export function normalizeRobotMapWaypoint(waypoint) {
   const disabledReason = String(waypoint.disabledReason || waypoint.disabled_reason || '').trim()
   const advisoryProblems = normalizeRobotMapWaypointAdvisories(waypoint.advisoryProblems || waypoint.advisory_problems)
   const mapFramePose = normalizeRobotMapWaypointSourcePose(waypoint.mapFramePose)
+  const capturedMapPose = normalizeRobotMapWaypointSourcePose(waypoint.capturedMapPose)
   const enabled = waypoint.enabled !== false && waypoint.navigable !== false
 
   return {
@@ -517,6 +697,7 @@ export function normalizeRobotMapWaypoint(waypoint) {
     ...(disabledReason ? { disabledReason } : {}),
     ...(advisoryProblems.length ? { advisoryProblems } : {}),
     ...(mapFramePose ? { mapFramePose } : {}),
+    ...(capturedMapPose ? { capturedMapPose } : {}),
   }
 }
 
@@ -577,6 +758,30 @@ export function poseToMapPosition(pose, rangeMeters = ROBOT_MAP_RANGE_METERS, ce
   }
 }
 
+export function getMapGridView(mapGrid) {
+  const width = toFiniteNumber(mapGrid?.width)
+  const height = toFiniteNumber(mapGrid?.height)
+  const resolution = toFiniteNumber(mapGrid?.resolution)
+  const originX = toFiniteNumber(mapGrid?.originX ?? mapGrid?.origin?.x)
+  const originY = toFiniteNumber(mapGrid?.originY ?? mapGrid?.origin?.y)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(resolution) ||
+      !Number.isFinite(originX) || !Number.isFinite(originY) || width <= 0 || height <= 0 || resolution <= 0) {
+    return {
+      centerX: 0,
+      centerY: 0,
+      rangeMeters: ROBOT_MAP_RANGE_METERS,
+    }
+  }
+
+  const widthMeters = width * resolution
+  const heightMeters = height * resolution
+  return {
+    centerX: originX + widthMeters / 2,
+    centerY: originY + heightMeters / 2,
+    rangeMeters: Math.ceil((Math.max(widthMeters, heightMeters) / 2) * 2) / 2,
+  }
+}
+
 export function headingRadiansToCssRotation(theta) {
   const heading = toFiniteNumber(theta)
   return Number.isFinite(heading) ? (Math.PI / 2) - heading : 0
@@ -601,7 +806,7 @@ export function lidarPointToMapPose(point, robotPose) {
 
 export function getRobotMapRangeMeters(waypoints, robot = null) {
   const extents = [ROBOT_MAP_RANGE_METERS]
-  const robotPose = robot?.pose
+  const robotPose = robot?.pose?.frame === 'app_map' && robot.pose.mapFramePose ? robot.pose.mapFramePose : robot?.pose
   const robotX = toFiniteNumber(robotPose?.x)
   const robotY = toFiniteNumber(robotPose?.y)
   if (Number.isFinite(robotX)) {
@@ -612,7 +817,13 @@ export function getRobotMapRangeMeters(waypoints, robot = null) {
   }
 
   getRenderableRobotMapWaypoints(waypoints).forEach((waypoint) => {
-    extents.push(Math.abs(waypoint.x), Math.abs(waypoint.y))
+    const renderPose = waypoint.frame === 'app_map'
+      ? (waypoint.capturedMapPose || waypoint.mapFramePose || null)
+      : waypoint
+    if (!renderPose) {
+      return
+    }
+    extents.push(Math.abs(renderPose.x), Math.abs(renderPose.y))
   })
 
   return Math.ceil((Math.max(...extents) + 0.5) * 2) / 2
@@ -726,33 +937,17 @@ function drawCenteredLidarScan(context, points, { width, height, displayRange, n
   const maxSeen = Math.max(...points.map((p) => toFiniteNumber(p.range)).filter(Number.isFinite), 1)
 
   context.save()
-  context.lineWidth = 1
-  context.strokeStyle = 'rgba(48, 43, 37, 0.22)'
+
+  // Range rings
+  context.strokeStyle = 'rgba(255, 255, 255, 0.05)'
+  context.lineWidth = 0.5
   for (const ring of [0.25, 0.5, 0.75, 1]) {
     context.beginPath()
     context.arc(centerX, centerY, radius * ring, 0, Math.PI * 2)
     context.stroke()
   }
 
-  context.strokeStyle = 'rgba(0, 180, 170, 0.10)'
-  context.lineWidth = 0.8
-  for (const point of points) {
-    const x = toFiniteNumber(point.x)
-    const y = toFiniteNumber(point.y)
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      continue
-    }
-    const px = centerX + x * scale
-    const py = centerY - y * scale
-    if (px < 0 || px > width || py < 0 || py > height) {
-      continue
-    }
-    context.beginPath()
-    context.moveTo(centerX, centerY)
-    context.lineTo(px, py)
-    context.stroke()
-  }
-
+  // Distance-colored points
   for (const point of points) {
     const x = toFiniteNumber(point.x)
     const y = toFiniteNumber(point.y)
@@ -765,17 +960,18 @@ function drawCenteredLidarScan(context, points, { width, height, displayRange, n
       continue
     }
     const rangeNorm = clamp(point.range / maxSeen, 0, 1)
-    const pointSize = 1.3 + (1 - rangeNorm) * 2.2
-    const pointAlpha = 0.5 + (1 - rangeNorm) * 0.45
-    context.fillStyle = `rgba(0, 220, 200, ${pointAlpha.toFixed(3)})`
+    const pointSize = 1.5 + (1 - rangeNorm) * 2.5
+    const pointAlpha = 0.35 + (1 - rangeNorm) * 0.40
+    context.fillStyle = rangeToRGBA(rangeNorm, pointAlpha)
     context.beginPath()
     context.arc(px, py, pointSize, 0, Math.PI * 2)
     context.fill()
   }
 
-  context.fillStyle = 'rgba(255, 114, 79, 0.95)'
+  // Center dot
+  context.fillStyle = 'rgba(255, 255, 255, 0.9)'
   context.beginPath()
-  context.arc(centerX, centerY, 4, 0, Math.PI * 2)
+  context.arc(centerX, centerY, 3, 0, Math.PI * 2)
   context.fill()
   context.restore()
 }

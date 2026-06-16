@@ -166,6 +166,7 @@ def validate_goal_inside_active_map(
     frame: str,
     x: float,
     y: float,
+    source_frame: str = "",
     metadata_path: Path = DEFAULT_MAP_METADATA_FILE,
     default_yaml_path: Path = DEFAULT_MAP_YAML_FILE,
 ) -> dict[str, Any]:

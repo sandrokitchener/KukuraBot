@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  buildDogzillaMapOriginSnapshot,
   DEFAULT_MAP_ORIGIN_FILE,
   loadDogzillaMapOrigin,
   mapPoseToAppPose,
@@ -78,6 +79,7 @@ export async function migrateMapFrameWaypoints({
     wp.y = appPose.y
     wp.yaw = appPose.yaw
     wp.capturedMapPose = { frame: 'map', x: oldCoords.x, y: oldCoords.y, yaw: oldCoords.yaw }
+    wp.mapOrigin = buildDogzillaMapOriginSnapshot(mapOrigin)
     wp.verified = false
     wp.notes = wp.notes || []
     wp.notes.push(`Migrated from map frame at ${new Date().toISOString()}. Capture origin: x=${mapOrigin.x}, y=${mapOrigin.y}, yaw=${mapOrigin.yaw}. RECAPTURE REQUIRED if SLAM origin has changed since original capture.`)

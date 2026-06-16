@@ -64,19 +64,9 @@ from map_pose_navigation import (
 )
 from motion_utils import clamp, normalize_angle, resolve_map_navigation_timeout, scan_obstacle_counts
 from nav2_gait_adapter import (
-    DEFAULT_NAV2_GAIT_ALLOW_TROT,
-    DEFAULT_NAV2_GAIT_ANGULAR_DEADBAND,
-    DEFAULT_NAV2_GAIT_ANGULAR_FULL_SCALE,
-    DEFAULT_NAV2_GAIT_FORWARD_TURN_SCALE,
-    DEFAULT_NAV2_GAIT_HIGH_LINEAR,
-    DEFAULT_NAV2_GAIT_LATERAL_FULL_SCALE,
-    DEFAULT_NAV2_GAIT_LINEAR_DEADBAND,
-    DEFAULT_NAV2_GAIT_LINEAR_FULL_SCALE,
-    DEFAULT_NAV2_GAIT_MAX_TURN_RATE,
-    DEFAULT_NAV2_GAIT_MAX_X_STEP,
-    DEFAULT_NAV2_GAIT_MAX_Y_STEP,
-    DEFAULT_NAV2_GAIT_TROT_LINEAR,
+    get_speed_config,
     nav2_cmd_vel_to_locomotion,
+    update_speed_config,
 )
 from nav2_client import (
     DEFAULT_NAV2_ACTION,
@@ -164,11 +154,12 @@ def read_active_map_metadata() -> dict[str, Any]:
     return map_metadata_module.read_active_map_metadata(DEFAULT_MAP_METADATA_FILE, DEFAULT_MAP_YAML_FILE)
 
 
-def validate_goal_inside_active_map(frame: str, x: float, y: float) -> dict[str, Any]:
+def validate_goal_inside_active_map(frame: str, x: float, y: float, source_frame: str = "") -> dict[str, Any]:
     return map_metadata_module.validate_goal_inside_active_map(
         frame,
         x,
         y,
+        source_frame,
         DEFAULT_MAP_METADATA_FILE,
         DEFAULT_MAP_YAML_FILE,
     )
@@ -556,7 +547,8 @@ class DogzillaRuntime:
         if not all(math.isfinite(value) for value in (x, y, yaw)):
             return {"executed": False, "error": "invalid_navigation_pose:non_finite"}
 
-        map_validation = validate_goal_inside_active_map(frame, x, y)
+        source_frame = str(params.get("sourceFrame") or "")
+        map_validation = validate_goal_inside_active_map(frame, x, y, source_frame=source_frame)
         if not map_validation.get("ok"):
             return {
                 "executed": False,
@@ -813,6 +805,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/preflight":
             self._send_json(200, {"runtime": self.server.runtime.snapshot(), "checks": build_preflight_checks()})
             return
+        if self.path == "/nav2/speed_config":
+            self._send_json(200, {"ok": True, "config": get_speed_config()})
+            return
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -832,6 +827,15 @@ class Handler(BaseHTTPRequestHandler):
                     **identity_payload(),
                 },
             )
+            return
+
+        if self.path == "/nav2/speed_config":
+            payload = self._read_json_body()
+            if not isinstance(payload, dict):
+                self._send_json(400, {"error": "Expected JSON object with speed config overrides"})
+                return
+            updated = update_speed_config(payload)
+            self._send_json(200, {"ok": True, "config": updated})
             return
 
         if self.path != "/commands":

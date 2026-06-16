@@ -1463,7 +1463,7 @@ async function handleDogzillaConnectionAction(event) {
       const payload = await response.json()
 
       if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || 'DOGZILLA charger origin reset failed.')
+        throw new Error(payload.error || 'DOGZILLA charger origin calibration failed.')
       }
 
       await loadPublicConfig()
@@ -1498,6 +1498,16 @@ async function handleDogzillaConnectionAction(event) {
 
     if (action === 'probe-bridges' || action === 'probe-support') {
       renderServiceProbe(payload)
+    }
+
+    // Show capture/save buttons when mapping starts, hide when map is saved
+    const mapPanel = document.querySelector('.robot-map-head')
+    if (mapPanel) {
+      if (action === 'start-map-pose-mapping') {
+        mapPanel.classList.add('is-slam-mode')
+      } else if (action === 'save-map-pose') {
+        mapPanel.classList.remove('is-slam-mode')
+      }
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
@@ -1758,7 +1768,7 @@ function formatConnectionAction(action) {
     case 'start-map-pose-mapping':
       return 'SLAM mapping mode start'
     case 'capture-map-origin':
-      return 'charger origin reset'
+      return 'charger origin calibration'
     case 'save-map-pose':
       return 'SLAM map save'
     case 'stop-vendor-app':
@@ -1775,7 +1785,7 @@ function formatMapOriginCapture(origin = {}) {
   const y = toFiniteNumber(origin.y)
   const yaw = toFiniteNumber(origin.yaw)
   const parts = [
-    'Charger origin reset. Current verified map pose is now app 0,0.',
+    'Charger origin calibrated for new captures. Existing app_map waypoints keep their stored capture anchor.',
   ]
   if (Number.isFinite(x) && Number.isFinite(y)) {
     parts.push(`Raw map anchor x ${formatTelemetryNumber(x)}, y ${formatTelemetryNumber(y)}.`)

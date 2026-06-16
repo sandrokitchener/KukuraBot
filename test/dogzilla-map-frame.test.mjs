@@ -8,10 +8,12 @@ import {
   APP_MAP_FRAME,
   applyMapOriginToPose,
   appPoseToMapPose,
+  buildDogzillaMapOriginSnapshot,
   getDogzillaMapOriginIdentity,
   getDogzillaMapOriginStatus,
   hasDogzillaMapOriginIdentity,
   mapPoseToAppPose,
+  resolveAppMapPoseToMapPose,
   saveDogzillaMapOriginFromPose,
 } from '../lib/dogzilla-map-frame.mjs'
 
@@ -60,6 +62,79 @@ test('appPoseToMapPose converts app frame targets back to ROS map frame', () => 
   assert.equal(mapPose.yaw, 3.14159)
   assert.equal(mapPose.theta, 3.14159)
   assert.equal(mapPose.originMap.id, 'test_map')
+})
+
+test('resolveAppMapPoseToMapPose uses waypoint origin snapshot instead of reset current origin', () => {
+  const capturedOrigin = {
+    x: 10,
+    y: 20,
+    yaw: Math.PI / 2,
+    label: 'dock',
+    savedAt: '2026-06-04T00:00:00.000Z',
+    map: {
+      id: 'test_map',
+      fingerprint: 'test-map-fingerprint',
+    },
+  }
+  const resetOrigin = {
+    x: -5,
+    y: -3,
+    yaw: -0.8,
+    label: 'dock',
+    savedAt: '2026-06-15T19:55:13.969Z',
+    map: {
+      id: 'test_map',
+      fingerprint: 'test-map-fingerprint',
+    },
+  }
+
+  const waypointOrigin = buildDogzillaMapOriginSnapshot(capturedOrigin)
+  const mapPose = resolveAppMapPoseToMapPose({
+    frame: APP_MAP_FRAME,
+    x: 1,
+    y: 0,
+    yaw: Math.PI / 2,
+  }, {
+    currentOrigin: resetOrigin,
+    waypointOrigin,
+  })
+
+  assert.equal(mapPose.frame, 'map')
+  assert.equal(mapPose.x, 10)
+  assert.equal(mapPose.y, 21)
+  assert.equal(mapPose.yaw, 3.14159)
+  assert.equal(mapPose.appMapResolution, 'waypoint-origin')
+})
+
+test('resolveAppMapPoseToMapPose uses captured map pose for legacy app_map waypoints', () => {
+  const mapPose = resolveAppMapPoseToMapPose({
+    frame: APP_MAP_FRAME,
+    x: -3.10505,
+    y: -2.38933,
+    yaw: -1.77342,
+  }, {
+    currentOrigin: {
+      x: -5.07624,
+      y: -2.9796,
+      yaw: -0.85922,
+      map: {
+        id: 'robodoge_home',
+        fingerprint: 'test-map-fingerprint',
+      },
+    },
+    capturedMapPose: {
+      frame: 'map',
+      x: -0.51338,
+      y: 0.60067,
+      yaw: 1.14547,
+    },
+  })
+
+  assert.equal(mapPose.frame, 'map')
+  assert.equal(mapPose.x, -0.51338)
+  assert.equal(mapPose.y, 0.60067)
+  assert.equal(mapPose.yaw, 1.14547)
+  assert.equal(mapPose.appMapResolution, 'captured-map-pose')
 })
 
 test('getDogzillaMapOriginIdentity reports whether saved origin belongs to a map', () => {
