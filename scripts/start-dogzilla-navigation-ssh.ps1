@@ -11,6 +11,7 @@ param(
   [int]$RosDomainId = 16,
   [int]$PosePort = 8896,
   [string]$MapYaml = "",
+  [switch]$NoSync,
   [switch]$NoHostKeyScan,
   [double]$Nav2RobotRadius = 0,
   [double]$Nav2FootprintPadding = 0,
@@ -188,18 +189,27 @@ if ($LASTEXITCODE -ne 0) {
   throw "remote navigation setup failed"
 }
 
-$navigationSource = Join-Path $repoRoot "sidecars\dogzilla_navigation"
-Write-Output "Copying sidecars\dogzilla_navigation -> ${Alias}:$RemoteRoot/sidecars/"
-& scp -r -F $configPath $navigationSource "${Alias}:$RemoteRoot/sidecars/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for dogzilla_navigation sidecar"
-}
+if (-not $NoSync) {
+  $navigationSource = Join-Path $repoRoot "sidecars\dogzilla_navigation"
+  Write-Output "Copying sidecars\dogzilla_navigation -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $navigationSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_navigation sidecar"
+  }
 
-$mapPoseSource = Join-Path $repoRoot "sidecars\dogzilla_map_pose"
-Write-Output "Copying sidecars\dogzilla_map_pose -> ${Alias}:$RemoteRoot/sidecars/"
-& scp -r -F $configPath $mapPoseSource "${Alias}:$RemoteRoot/sidecars/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for dogzilla_map_pose sidecar"
+  $mapPoseSource = Join-Path $repoRoot "sidecars\dogzilla_map_pose"
+  Write-Output "Copying sidecars\dogzilla_map_pose -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $mapPoseSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_map_pose sidecar"
+  }
+
+  $imuPublisherSource = Join-Path $repoRoot "sidecars\dogzilla_imu_publisher"
+  Write-Output "Copying sidecars\dogzilla_imu_publisher -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $imuPublisherSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_imu_publisher sidecar"
+  }
 }
 
 Write-Output "Starting DOGZILLA Nav2 waypoint navigation in $ContainerName."

@@ -16,6 +16,7 @@ param(
   [int]$RosDomainId = 16,
   [string]$DockerImage = "yahboomtechnology/ros-humble:3.6",
   [switch]$Background,
+  [switch]$NoSync,
   [switch]$NoHostKeyScan
 )
 
@@ -37,11 +38,13 @@ $configPath = Ensure-DogzillaSshConfig `
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "mkdir -p $remoteRootQuoted/sidecars $remoteRootQuoted/logs"
 
-$sidecarSource = Join-Path $repoRoot "sidecars\dogzilla_lidar_bridge"
-Write-Host "Copying sidecars\dogzilla_lidar_bridge -> ${Alias}:$RemoteRoot/sidecars/"
-& scp -r -F $configPath $sidecarSource "${Alias}:$RemoteRoot/sidecars/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for dogzilla_lidar_bridge sidecar"
+if (-not $NoSync) {
+  $sidecarSource = Join-Path $repoRoot "sidecars\dogzilla_lidar_bridge"
+  Write-Host "Copying sidecars\dogzilla_lidar_bridge -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $sidecarSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_lidar_bridge sidecar"
+  }
 }
 
 $effectiveSerialPort = $SerialPort

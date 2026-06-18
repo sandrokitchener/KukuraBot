@@ -23,8 +23,14 @@
   justify-self: center;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  background: #161618;
+  background: #d0d2cf;
   overflow: hidden;
+  aspect-ratio: 1 / 1;
+}
+
+.robot-map[data-pose-trusted='false'] {
+  border-color: rgba(197, 139, 40, 0.5);
+  box-shadow: inset 0 0 20px rgba(197, 139, 40, 0.12);
 }
 
 .robot-camera-frame-wrap {
@@ -278,6 +284,10 @@
   opacity: 0.80;
 }
 
+.has-map .robot-map::after {
+  display: none;
+}
+
 .robot-lidar-scan {
   position: absolute;
   inset: 0;
@@ -285,6 +295,7 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+  image-rendering: pixelated;
 }
 
 .robot-map-axis {
@@ -292,6 +303,10 @@
   z-index: 3;
   background: rgba(255, 255, 255, 0.06);
   pointer-events: none;
+}
+
+.has-map .robot-map-axis {
+  display: none;
 }
 
 .robot-map-axis-x {
@@ -327,10 +342,10 @@
   position: absolute;
   width: 13px;
   height: 13px;
-  border: 2px solid #fffaf4;
+  border: 2px solid #f9faf7;
   border-radius: 50%;
-  background: #007b84;
-  box-shadow: 0 0 0 3px rgba(0, 123, 132, 0.18);
+  background: #0d6f78;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.22);
   opacity: 0.92;
   transform: translate(-50%, -50%) rotate(var(--waypoint-heading));
 }
@@ -366,8 +381,8 @@
   padding: 2px 5px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
-  background: rgba(22, 22, 24, 0.82);
-  color: rgba(255, 255, 255, 0.8);
+  background: rgba(20, 22, 24, 0.88);
+  color: rgba(255, 255, 255, 0.88);
   font-size: 0.68rem;
   font-weight: 800;
   line-height: 1.1;
@@ -382,8 +397,8 @@
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgba(255, 68, 68, 0.6);
-  box-shadow: 0 0 0 1.5px rgba(255, 68, 68, 0.15);
+  background: rgba(210, 38, 38, 0.45);
+  box-shadow: none;
   transform: translate(-50%, -50%);
 }
 
@@ -398,10 +413,10 @@
   border: 2px solid #ffffff;
   border-radius: 50%;
   background: var(--map-dot);
-  box-shadow: 0 0 0 4px rgba(255, 68, 68, 0.25);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.35), 0 0 0 6px rgba(210, 38, 38, 0.18);
   opacity: 0;
   transform: translate(-50%, -50%) rotate(var(--robot-heading));
-  transition: left 280ms linear, top 280ms linear, opacity 120ms ease;
+  transition: opacity 120ms ease;
 }
 
 .robot-map-dot::after {

@@ -20,6 +20,7 @@ import {
   formatWaypointReadinessSummary,
   getMapGridView,
   getRenderableRobotMapWaypoints,
+  getSlamMapView,
   getRobotMapRangeMeters,
   headingRadiansToCssRotation,
   lidarPointToMapPose,
@@ -361,7 +362,65 @@ test('robot map view centers on occupancy-grid bounds', () => {
     centerX: 0.9774520000000004,
     centerY: -1.2174579999999997,
     rangeMeters: 6.5,
+    rangeYMeters: 6.5,
   })
+})
+
+test('getSlamMapView returns null for invalid input', () => {
+  assert.equal(getSlamMapView(null, 400, 300), null)
+  assert.equal(getSlamMapView({}, 400, 300), null)
+  assert.equal(getSlamMapView({ width: -1, height: 100, resolution: 0.05, originX: 0, originY: 0 }, 400, 300), null)
+})
+
+test('getSlamMapView preserves aspect ratio in square canvas', () => {
+  const view = getSlamMapView({
+    width: 200, height: 100, resolution: 0.1,
+    originX: -5, originY: -3,
+  }, 400, 200)
+  assert.ok(view)
+  assert.equal(view.centerX, 5)
+  assert.equal(view.centerY, 2)
+  assert.equal(view.rangeMeters, 10)
+  assert.equal(view.rangeYMeters, 5)
+})
+
+test('getSlamMapView preserves aspect ratio in non-square canvas', () => {
+  // Grid 200x100 cells @ 0.1m = 20m x 10m
+  // Canvas 400x200 pixels = 2:1 aspect ratio (matches grid)
+  const view = getSlamMapView({
+    width: 200, height: 100, resolution: 0.1,
+    originX: -5, originY: -3,
+  }, 400, 200)
+  assert.equal(view.rangeMeters, 10)
+  assert.equal(view.rangeYMeters, 5)
+})
+
+test('getSlamMapView letterboxes tall grid in wide canvas', () => {
+  // Grid 10x20m, Canvas 400x200 (wider than grid aspect)
+  const view = getSlamMapView({
+    width: 100, height: 200, resolution: 0.1,
+    originX: 0, originY: 0,
+  }, 400, 200)
+  assert.ok(view.rangeMeters > 10) // view range > grid half-width because letterboxed
+  assert.equal(view.rangeYMeters, 10)
+})
+
+test('poseToMapPosition supports non-square SLAM map view ranges', () => {
+  assert.deepEqual(
+    poseToMapPosition({ x: 10, y: 5 }, 10, 0, 0, 5),
+    { xPercent: 100, yPercent: 0 },
+  )
+})
+
+test('poseToMapPosition returns unclamped out-of-bounds values', () => {
+  const result = poseToMapPosition({ x: 10, y: 10 }, 4, 0, 0)
+  assert.ok(result.xPercent > 100)
+  assert.ok(result.yPercent < 0)
+})
+
+test('poseToMapPosition returns null for invalid pose', () => {
+  assert.equal(poseToMapPosition(null), null)
+  assert.equal(poseToMapPosition({}, 4), null)
 })
 
 test('robot map range prefers map-frame render coordinates over app_map display coordinates', () => {

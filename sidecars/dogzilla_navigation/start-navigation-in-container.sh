@@ -74,6 +74,12 @@ done
 
 if [ "${#missing_packages[@]}" -gt 0 ]; then
   export DEBIAN_FRONTEND=noninteractive
+  rm -f /etc/apt/sources.list.d/ros2.list 2>/dev/null || true
+  apt-get update
+  apt-get install -y --no-install-recommends curl ca-certificates gnupg >/dev/null
+  curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+  ubuntu_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME}}")"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${ubuntu_codename} main" > /etc/apt/sources.list.d/ros2.list
   apt-get update
   apt-get install -y --no-install-recommends "${missing_packages[@]}"
 fi

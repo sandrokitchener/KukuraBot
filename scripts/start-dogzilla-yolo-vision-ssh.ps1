@@ -13,6 +13,7 @@ param(
   [int]$Port = 8894,
   [string]$CameraUrl = "auto",
   [switch]$Background,
+  [switch]$NoSync,
   [switch]$NoInstallDeps,
   [switch]$NoHostKeyScan
 )
@@ -53,20 +54,32 @@ $remoteLabelsPath = "$remoteModelDir/custom.yaml"
 
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "mkdir -p $remoteRootQuoted/sidecars $remoteRootQuoted/models/dogzilla_yolo $remoteRootQuoted/logs"
 
-$sidecarSource = Join-Path $repoRoot "sidecars\dogzilla_yolo_vision"
-Write-Host "Copying sidecars\dogzilla_yolo_vision -> ${Alias}:$RemoteRoot/sidecars/"
-& scp -r -F $configPath $sidecarSource "${Alias}:$RemoteRoot/sidecars/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for dogzilla_yolo_vision sidecar"
+if (-not $NoSync) {
+  $sidecarSource = Join-Path $repoRoot "sidecars\dogzilla_yolo_vision"
+  Write-Host "Copying sidecars\dogzilla_yolo_vision -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $sidecarSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_yolo_vision sidecar"
+  }
+
+  if ($resolvedModelPath) {
+    Write-Host "Copying YOLO ONNX model -> ${Alias}:$remoteModelPath"
+    & scp -F $configPath $resolvedModelPath "${Alias}:$remoteModelPath"
+    if ($LASTEXITCODE -ne 0) {
+      throw "scp failed for YOLO ONNX model"
+    }
+  }
+
+  if ($resolvedDataYamlPath) {
+    Write-Host "Copying YOLO labels -> ${Alias}:$remoteLabelsPath"
+    & scp -F $configPath $resolvedDataYamlPath "${Alias}:$remoteLabelsPath"
+    if ($LASTEXITCODE -ne 0) {
+      throw "scp failed for YOLO labels"
+    }
+  }
 }
 
-if ($resolvedModelPath) {
-  Write-Host "Copying YOLO ONNX model -> ${Alias}:$remoteModelPath"
-  & scp -F $configPath $resolvedModelPath "${Alias}:$remoteModelPath"
-  if ($LASTEXITCODE -ne 0) {
-    throw "scp failed for YOLO ONNX model"
-  }
-} else {
+if (-not $resolvedModelPath) {
   Write-Host "Using existing remote YOLO ONNX model: $remoteModelPath"
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "test -s '$remoteModelPath'"
   if ($LASTEXITCODE -ne 0) {
@@ -74,13 +87,7 @@ if ($resolvedModelPath) {
   }
 }
 
-if ($resolvedDataYamlPath) {
-  Write-Host "Copying YOLO labels -> ${Alias}:$remoteLabelsPath"
-  & scp -F $configPath $resolvedDataYamlPath "${Alias}:$remoteLabelsPath"
-  if ($LASTEXITCODE -ne 0) {
-    throw "scp failed for YOLO labels"
-  }
-} else {
+if (-not $resolvedDataYamlPath) {
   Write-Host "Using existing remote YOLO labels: $remoteLabelsPath"
 }
 

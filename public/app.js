@@ -1099,6 +1099,7 @@ function startRobotMapPolling() {
   }
 
   robotMap.setMapData(null)
+  document.querySelector('.robot-map-head')?.classList.remove('has-map')
 
   if (!isRealRobotTargetActive()) {
     return
@@ -1119,6 +1120,7 @@ async function refreshDogzillaMap() {
 
     if (!response.ok || payload.ok !== true) {
       robotMap.setMapData(null)
+      document.querySelector('.robot-map-head')?.classList.remove('has-map')
       if (robotMapGridMeta) {
         robotMapGridMeta.textContent = payload?.status === 'no-map' ? 'No map' : 'Map unavailable'
       }
@@ -1129,8 +1131,10 @@ async function refreshDogzillaMap() {
     if (robotMapGridMeta) {
       robotMapGridMeta.textContent = robotMap.getMapGridMeta() || `Map ${payload.width}x${payload.height}`
     }
+    document.querySelector('.robot-map-head')?.classList.add('has-map')
   } catch {
     robotMap.setMapData(null)
+    document.querySelector('.robot-map-head')?.classList.remove('has-map')
     if (robotMapGridMeta) {
       robotMapGridMeta.textContent = 'Map unavailable'
     }
@@ -2111,6 +2115,12 @@ function renderRobotStateSnapshot(snapshot) {
   const ageMs = Number.isFinite(receivedAt) ? Date.now() - receivedAt : Infinity
   const isStale = ageMs > 3000
 
+  const poseState = snapshot?.poseState || {}
+  const waypointSafe = poseState.waypointSafe === true
+  const poseStatus = poseState.status || ''
+  const poseAgeOk = !poseState.pose?.ageSec || poseState.pose.ageSec <= 2
+  const poseTrusted = !isStale && waypointSafe && poseAgeOk && poseStatus !== 'error'
+
   robotStatePanel.dataset.state = isStale ? 'stale' : 'ready'
   robotStateChip.textContent = isStale ? 'Stale' : 'Live'
   robotStateName.textContent = robot.name
@@ -2118,6 +2128,8 @@ function renderRobotStateSnapshot(snapshot) {
   robotStateSeq.textContent = String(robot.seq)
   renderRobotTelemetry(robot)
 
+  robotMap.setPoseTrust(poseTrusted)
+  document.getElementById('robot-map')?.setAttribute('data-pose-trusted', String(poseTrusted))
   robotMap.renderWaypoints(robot)
   robotMap.renderPoseTrack(snapshot?.poseTrack || [], robot)
   robotMap.renderDot(robot)

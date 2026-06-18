@@ -11,6 +11,7 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 
 - Do not diagnose waypoint failures from coordinates alone. First check live readiness and costmap/scan evidence.
 - Waypoint readiness is stricter than "Nav2 action server exists": action server, odom/TF, active lifecycle, and filtered scan on `/scan_nav2` all matter.
+- **TF chain blocker**: If `/odom` publishes but `odom->base_link/base_footprint` TF is unavailable, Cartographer is likely stuck waiting for IMU. Fix: set `TRAJECTORY_BUILDER_2D.use_imu_data = false` in both `robodoge_dogzilla_laser_only.lua` and `robodoge_dogzilla_laser_only_localization.lua`. The DOGZILLA IMU hardware/endpoint is unreliable; Cartographer runs fine in laser-only mode. After deploying the fix, restart Cartographer (`start-map-pose-in-container.sh` detects running instances and re-copies lua configs).
 - `ros-humble-nav2-msgs` can be missing inside the `robodoge-lidar-bridge` container. Symptom: `No module named 'nav2_msgs'`. See `docs/NAVIGATION.md` for the install script path.
 - If DOGZILLA spins, stalls, or returns "No valid trajectories", inspect live costmap/Nav2 logs before changing waypoint data.
 - If robot moves opposite expected direction, verify heading/orientation and pose interpretation early in the next live run.

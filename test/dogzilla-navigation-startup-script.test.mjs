@@ -155,12 +155,23 @@ test('DOGZILLA map-pose startup waits for fresh pose after Cartographer restart'
   assert.match(script, /age_sec <= 2\.0/)
 })
 
-test('DOGZILLA Nav2 SSH startup ships map-pose sidecar for odom TF repair', async () => {
+test('DOGZILLA map-pose startup cleanly restarts stale Cartographer processes', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /stop_existing_cartographer\(\)/)
+  assert.match(script, /pkill -TERM -f "\[c\]artographer_node\.\*robodoge_dogzilla_laser_only"/)
+  assert.match(script, /pkill -KILL -f "\[c\]artographer_node\.\*robodoge_dogzilla_laser_only"/)
+  assert.match(script, /Cartographer has \$CARTOGRAPHER_COUNT matching processes/)
+})
+
+test('DOGZILLA Nav2 SSH startup ships map-pose and IMU sidecars for odom TF repair', async () => {
   const script = await readFile(SSH_SCRIPT_PATH, 'utf-8')
 
   assert.match(script, /sidecars\\dogzilla_navigation/)
   assert.match(script, /sidecars\\dogzilla_map_pose/)
+  assert.match(script, /sidecars\\dogzilla_imu_publisher/)
   assert.match(script, /scp -r -F \$configPath \$mapPoseSource/)
+  assert.match(script, /scp -r -F \$configPath \$imuPublisherSource/)
 })
 
 test('DOGZILLA Nav2 SSH startup loads obstacle config for direct npm starts', async () => {

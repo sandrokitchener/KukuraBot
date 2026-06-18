@@ -62,28 +62,36 @@ Add-ProcessAncestry $PID
 Add-ProcessAncestry $callerPid
 
 $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports -contains [int]$_.LocalPort })
+$hadListeners = $listeners.Count -gt 0
 foreach ($listener in $listeners) {
   Stop-MatchedProcess ([int]$listener.OwningProcess) "listen:$($listener.LocalPort)"
 }
 
-$repoRoot = (Get-Location).Path
-$repoPattern = [regex]::Escape($repoRoot)
-$repoProcesses = @(Get-CimInstance Win32_Process | Where-Object {
-  $name = [string]$_.Name
-  $cmd = [string]$_.CommandLine
-  if (-not $cmd) { return $false }
-  if ($name -notmatch '^(node|python|python3|ssh|adb)\\.exe$') { return $false }
-  return $cmd -match $repoPattern -or $cmd -match 'Robo-Doge'
-})
-foreach ($process in $repoProcesses) {
-  Stop-MatchedProcess ([int]$process.ProcessId) 'repo-process'
+if (-not $hadListeners) {
+  $repoRoot = (Get-Location).Path
+  $repoPattern = [regex]::Escape($repoRoot)
+  $repoProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+    $name = [string]$_.Name
+    $cmd = [string]$_.CommandLine
+    if (-not $cmd) { return $false }
+    if ($name -notmatch '^(node|python|python3|ssh|adb)\\.exe$') { return $false }
+    return $cmd -match $repoPattern -or $cmd -match 'Robo-Doge'
+  })
+  foreach ($process in $repoProcesses) {
+    Stop-MatchedProcess ([int]$process.ProcessId) 'repo-process'
+  }
 }
 
-try {
-  & adb kill-server *> $null
-} catch {}
+$hasAdb = @($stopped | Where-Object { $_.name -eq 'adb' }).Count -gt 0
+if ($hasAdb) {
+  try {
+    & adb kill-server *> $null
+  } catch {}
+}
 
-Start-Sleep -Milliseconds 500
+if ($stopped.Count -gt 0) {
+  Start-Sleep -Milliseconds 500
+}
 $stopped | ConvertTo-Json -Compress
 `
   const { stdout } = await execFileImpl(resolvePowerShellCommand(), [

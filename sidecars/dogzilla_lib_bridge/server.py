@@ -44,6 +44,9 @@ def sleep_pi() -> dict[str, Any]:
             return {"ok": True, "sleeping": True, "note": "already sleeping"}
         stopped: list[dict[str, Any]] = []
 
+        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f imu_publisher")
+        stopped.append({"service": "imu_publisher", "stopped": code == 0 or code == 1, "output": out.strip()})
+
         code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {CARTOGRAPHER_NODE}")
         stopped.append({"service": "cartographer", "stopped": code == 0 or code == 1, "output": out.strip()})
 
@@ -554,6 +557,46 @@ class DogzillaRuntime:
                 del result["readErrors"]
             return result
 
+    def read_imu(self) -> dict[str, Any]:
+        if not self.available:
+            return {**identity_payload(), "executed": False, "error": self.import_error or "DOGZILLALib unavailable"}
+
+        result = {
+            **identity_payload(),
+            "executed": True,
+            "delivery": "DOGZILLALib",
+            "dryRun": self.dry_run,
+            "roll": None,
+            "pitch": None,
+            "yaw": None,
+            "imuRaw": None,
+            "readErrors": {},
+            "readAt": utc_now(),
+        }
+
+        with self._lock:
+            robot = self._robot()
+            if robot is None:
+                return {**identity_payload(), "executed": False, "error": self.robot_error or "robot unavailable"}
+
+            imu_fields = [
+                ("roll", ["read_roll", "read_Roll"]),
+                ("pitch", ["read_pitch", "read_Pitch"]),
+                ("yaw", ["read_yaw", "read_Yaw"]),
+                ("imuRaw", ["read_imu_raw", "read_imu"]),
+            ]
+
+            for field, names in imu_fields:
+                try:
+                    result[field] = call_first(robot, names)
+                except Exception as error:
+                    result["readErrors"][field] = str(error)
+
+            if not result["readErrors"]:
+                del result["readErrors"]
+
+        return result
+
     def _execute_locomotion(self, robot, params: dict[str, Any]) -> dict[str, Any]:
         x_step = clamp(float(params.get("x_step") or 0), -25, 25)
         y_step = clamp(float(params.get("y_step") or 0), -18, 18)
@@ -859,6 +902,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/state":
             result = self.server.runtime.read_state()
             self._send_json(200 if result.get("executed") else 503, result)
+            return
+        if self.path == "/imu":
+            result = self.server.runtime.read_imu()
+            self._send_json(200, result)
             return
         if self.path == "/actions":
             self._send_json(200, {"actions": ACTION_ALIASES})

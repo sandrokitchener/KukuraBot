@@ -25,6 +25,7 @@ Stable facts captured in repo docs:
 - Mapping/localization is Cartographer-based.
 - DOGZILLA has no physical chassis odometer; Cartographer/localization supplies odom-style data.
 - Yahboom navigation docs point to `localization_imu_odom.launch.py` and `navigation2.launch.py`.
+- **IMU is unreliable**: Both Cartographer lua configs set `TRAJECTORY_BUILDER_2D.use_imu_data = false` because the DOGZILLA IMU endpoint (`/imu`) does not reliably produce data. Cartographer operates in laser-only mode with `use_online_correlative_scan_matching = true` as fallback. If IMU is ever restored, re-enable with caution and test that the full TF chain (`odom->base_link`, `map->base_link`) becomes resolvable.
 
 ## Current Robo-Doge navigation model
 

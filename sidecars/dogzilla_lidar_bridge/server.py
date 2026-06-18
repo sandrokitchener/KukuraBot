@@ -109,6 +109,7 @@ class LidarState:
     scan_odom: ScanOdomState = field(default_factory=ScanOdomState)
     latest_map: Any | None = None
     map_received_at: float = 0.0
+    last_transform_ok_at: float | None = None
 
 
 class LidarHandler(BaseHTTPRequestHandler):
@@ -256,6 +257,8 @@ def scan_loop(state: LidarState, args: argparse.Namespace) -> None:
 
                 snapshot = pose_from_transform(transform, pose_parent_frames, base_frames)
                 if snapshot is not None:
+                    with state.lock:
+                        state.last_transform_ok_at = time.time()
                     update_pose_snapshot(state, snapshot, args)
                     return
 
@@ -736,7 +739,7 @@ def pose_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
     age = time.time() - pose.received_at
     stale = age > args.pose_stale_after
     waypoint_safe = normalize_frame_id(pose.frame_id) == normalize_frame_id(args.map_frame)
-    source_available = pose_source_available(pose, pose_graph, args)
+    source_available = pose_source_available(pose, pose_graph, args, state)
     if not source_available:
         return {
             "ok": False,
@@ -808,11 +811,18 @@ def map_payload(state: LidarState, args: argparse.Namespace) -> dict[str, Any]:
         }
 
 
-def pose_source_available(pose: PoseSnapshot, pose_graph: dict[str, Any], args: argparse.Namespace) -> bool:
+def pose_source_available(pose: PoseSnapshot, pose_graph: dict[str, Any], args: argparse.Namespace, state: LidarState | None = None) -> bool:
     topics = pose_graph.get("topics", {}) if isinstance(pose_graph, dict) else {}
     source = str(pose.source or "")
     if source.startswith("tf:"):
-        return int(topics.get(args.tf_topic, {}).get("publisherCount", 0)) > 0
+        publisher_ok = int(topics.get(args.tf_topic, {}).get("publisherCount", 0)) > 0
+        if not publisher_ok:
+            return False
+        if state is not None and state.last_transform_ok_at is not None:
+            elapsed = time.time() - state.last_transform_ok_at
+            if elapsed > args.pose_stale_after:
+                return False
+        return True
     if source.startswith("odom:"):
         return int(topics.get(args.odom_topic, {}).get("publisherCount", 0)) > 0
     if source.startswith("scan-odom:"):
@@ -1151,7 +1161,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-points", type=int, default=int(os.getenv("DOGZILLA_LIDAR_MAX_POINTS", "720")))
     parser.add_argument("--stale-after", type=positive_float, default=float(os.getenv("DOGZILLA_LIDAR_STALE_AFTER", "3")))
     parser.add_argument("--pose-stale-after", type=positive_float, default=float(os.getenv("DOGZILLA_POSE_STALE_AFTER", "2")))
-    parser.add_argument("--pose-poll-interval", type=positive_float, default=float(os.getenv("DOGZILLA_POSE_POLL_INTERVAL", "1.0")))
+    parser.add_argument("--pose-poll-interval", type=positive_float, default=float(os.getenv("DOGZILLA_POSE_POLL_INTERVAL", "0.1")))
     parser.add_argument(
         "--scan-odom",
         dest="scan_odom",

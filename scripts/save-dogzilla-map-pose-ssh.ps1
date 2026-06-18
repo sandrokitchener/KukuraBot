@@ -10,6 +10,7 @@ param(
   [string]$ContainerName = "robodoge-lidar-bridge",
   [int]$RosDomainId = 16,
   [string]$MapPath = "",
+  [switch]$NoSync,
   [switch]$NoHostKeyScan
 )
 
@@ -35,11 +36,13 @@ if ($LASTEXITCODE -ne 0) {
   throw "remote map-pose setup failed"
 }
 
-$mapPoseSource = Join-Path $repoRoot "sidecars\dogzilla_map_pose"
-Write-Output "Copying sidecars\dogzilla_map_pose -> ${Alias}:$RemoteRoot/sidecars/"
-& scp -r -F $configPath $mapPoseSource "${Alias}:$RemoteRoot/sidecars/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for dogzilla_map_pose sidecar"
+if (-not $NoSync) {
+  $mapPoseSource = Join-Path $repoRoot "sidecars\dogzilla_map_pose"
+  Write-Output "Copying sidecars\dogzilla_map_pose -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $mapPoseSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_map_pose sidecar"
+  }
 }
 
 Write-Output "Saving DOGZILLA Cartographer map in $ContainerName."

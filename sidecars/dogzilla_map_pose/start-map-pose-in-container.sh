@@ -6,11 +6,14 @@ POSE_PORT="${POSE_PORT:-8896}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-$REMOTE_ROOT/maps/robodoge_home.pbstream}"
+DOGZILLA_IMU_AVAILABLE="${DOGZILLA_IMU_AVAILABLE:-auto}"
 export ROS_DOMAIN_ID
 
 mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only.lua"
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_localization.lua"
+cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_noimu.lua"
+cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu_localization.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_noimu_localization.lua"
 
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
@@ -30,6 +33,7 @@ fi
 
 if [ "${#missing_packages[@]}" -gt 0 ]; then
   export DEBIAN_FRONTEND=noninteractive
+  rm -f /etc/apt/sources.list.d/ros2.list 2>/dev/null || true
   apt-get update
   apt-get install -y --no-install-recommends curl ca-certificates gnupg >/dev/null
   curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
@@ -74,10 +78,31 @@ esac
 MODE_FILE="$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
 SHOULD_RESTART=false
 
+stop_existing_cartographer() {
+  pkill -TERM -f "[c]artographer_node.*robodoge_dogzilla_laser_only" 2>/dev/null || true
+  pkill -TERM -f "[c]artographer_occupancy_grid_node" 2>/dev/null || true
+  pkill -TERM -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true
+
+  for _ in $(seq 1 10); do
+    if ! pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1 \
+      && ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  pkill -KILL -f "[c]artographer_node.*robodoge_dogzilla_laser_only" 2>/dev/null || true
+  pkill -KILL -f "[c]artographer_occupancy_grid_node" 2>/dev/null || true
+}
+
 if pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1; then
   CURRENT_MODE="$(python3 -c "import json; print(json.load(open('$MODE_FILE')).get('mode',''))" 2>/dev/null || true)"
+  CARTOGRAPHER_COUNT="$(pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" | wc -l | tr -d ' ')"
   if [ "$CURRENT_MODE" != "$mode" ]; then
     echo "Cartographer running in '${CURRENT_MODE:-unknown}' mode, '$mode' requested. Forcing restart." >&2
+    SHOULD_RESTART=true
+  elif [ "${CARTOGRAPHER_COUNT:-0}" -gt 1 ]; then
+    echo "Cartographer has $CARTOGRAPHER_COUNT matching processes in '$mode' mode. Forcing clean restart." >&2
     SHOULD_RESTART=true
   else
     echo "Cartographer already running in '$mode' mode. Skipping restart." >&2
@@ -87,8 +112,7 @@ else
 fi
 
 if [ "$SHOULD_RESTART" = "true" ]; then
-  pkill -f "[c]artographer_node" 2>/dev/null || true
-  pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true
+  stop_existing_cartographer
 
   nohup ros2 run tf2_ros static_transform_publisher 0 0 0.18 0 0 0 base_link laser_frame > "$REMOTE_ROOT/logs/map-pose-static-tf.log" 2>&1 &
 
@@ -98,19 +122,19 @@ if [ "$SHOULD_RESTART" = "true" ]; then
   )
   if [ "$mode" = "localization" ]; then
     cartographer_args+=(
-      -configuration_basename robodoge_dogzilla_laser_only_localization.lua
+      -configuration_basename "robodoge_dogzilla_laser_only${IMU_CONFIG}_localization.lua"
       -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
       -load_frozen_state true
     )
   elif [ "$mode" = "continue_mapping" ]; then
     cartographer_args+=(
-      -configuration_basename robodoge_dogzilla_laser_only.lua
+      -configuration_basename "robodoge_dogzilla_laser_only${IMU_CONFIG}.lua"
       -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
       -load_frozen_state false
     )
   else
     cartographer_args+=(
-      -configuration_basename robodoge_dogzilla_laser_only.lua
+      -configuration_basename "robodoge_dogzilla_laser_only${IMU_CONFIG}.lua"
     )
   fi
   cartographer_args+=(
@@ -121,6 +145,53 @@ if [ "$SHOULD_RESTART" = "true" ]; then
   nohup "${cartographer_args[@]}" > "$REMOTE_ROOT/logs/map-pose-cartographer.log" 2>&1 &
 
   sleep 2
+fi
+
+IMU_CONFIG=""
+if [ "$DOGZILLA_IMU_AVAILABLE" = "auto" ]; then
+  if python3 -c "import rclpy; rclpy.init(); rclpy.shutdown()" 2>/dev/null; then
+    DOGZILLA_IMU_AVAILABLE="true"
+  else
+    DOGZILLA_IMU_AVAILABLE="false"
+    echo "rclpy not available; IMU publisher disabled. Falling back to laser-only Cartographer config." >&2
+  fi
+fi
+
+if [ "$DOGZILLA_IMU_AVAILABLE" = "true" ]; then
+  if pgrep -f "[i]mu_publisher.py" >/dev/null 2>&1; then
+    echo "DOGZILLA IMU publisher already running"
+  else
+    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_imu_publisher/imu_publisher.py" \
+      > "$REMOTE_ROOT/logs/imu-publisher.log" 2>&1 &
+    IMU_PID=$!
+    echo "DOGZILLA IMU publisher started (PID $IMU_PID)"
+    sleep 1
+    if ! kill -0 "$IMU_PID" 2>/dev/null; then
+      echo "IMU publisher exited immediately; falling back to laser-only config." >&2
+      DOGZILLA_IMU_AVAILABLE="false"
+    fi
+  fi
+
+  # Background IMU health monitor — restart if process dies
+  nohup bash -c '
+    while true; do
+      sleep 30
+      if ! pgrep -f "[i]mu_publisher.py" >/dev/null 2>&1; then
+        echo "$(date -Iseconds) IMU publisher not running — restarting" >> "$REMOTE_ROOT/logs/imu-publisher.log"
+        nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_imu_publisher/imu_publisher.py" \
+          >> "$REMOTE_ROOT/logs/imu-publisher.log" 2>&1 &
+        echo "IMU publisher restarted with PID $!" >> "$REMOTE_ROOT/logs/imu-publisher.log"
+      fi
+    done
+  ' > /dev/null 2>&1 &
+fi
+
+if [ "$DOGZILLA_IMU_AVAILABLE" = "false" ]; then
+  IMU_CONFIG="-noimu"
+  echo "Using laser-only Cartographer config (no IMU)"
+else
+  IMU_CONFIG=""
+  echo "Using standard Cartographer config (with IMU)"
 fi
 
 if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then

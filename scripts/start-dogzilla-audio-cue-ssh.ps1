@@ -11,6 +11,7 @@ param(
   [string]$Player = "aplay",
   [string]$AplayDevice = "plughw:CARD=Device,DEV=0",
   [switch]$Background,
+  [switch]$NoSync,
   [switch]$NoHostKeyScan
 )
 
@@ -32,18 +33,20 @@ $configPath = Ensure-DogzillaSshConfig `
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "mkdir -p $remoteRootQuoted/sidecars $remoteRootQuoted/public/sounds $remoteRootQuoted/logs"
 
-$sidecarSource = Join-Path $repoRoot "sidecars\dogzilla_audio_cue"
-Write-Host "Copying sidecars\dogzilla_audio_cue -> ${Alias}:$RemoteRoot/sidecars/"
-& scp -r -F $configPath $sidecarSource "${Alias}:$RemoteRoot/sidecars/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for dogzilla_audio_cue sidecar"
-}
+if (-not $NoSync) {
+  $sidecarSource = Join-Path $repoRoot "sidecars\dogzilla_audio_cue"
+  Write-Host "Copying sidecars\dogzilla_audio_cue -> ${Alias}:$RemoteRoot/sidecars/"
+  & scp -r -F $configPath $sidecarSource "${Alias}:$RemoteRoot/sidecars/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for dogzilla_audio_cue sidecar"
+  }
 
-$soundsSource = Join-Path $repoRoot "public\sounds\*.wav"
-Write-Host "Copying public\sounds\*.wav -> ${Alias}:$RemoteRoot/public/sounds/"
-& scp -F $configPath $soundsSource "${Alias}:$RemoteRoot/public/sounds/"
-if ($LASTEXITCODE -ne 0) {
-  throw "scp failed for sound cues"
+  $soundsSource = Join-Path $repoRoot "public\sounds\*.wav"
+  Write-Host "Copying public\sounds\*.wav -> ${Alias}:$RemoteRoot/public/sounds/"
+  & scp -F $configPath $soundsSource "${Alias}:$RemoteRoot/public/sounds/"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for sound cues"
+  }
 }
 
 $playerCheckCommand = "command -v $Player"
