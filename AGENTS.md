@@ -10,6 +10,20 @@ This repo uses targeted context docs to reduce token usage.
 
 Before reading broad project files, decide which subsystem the task belongs to and read only the relevant doc(s). Do not load every documentation file by default.
 
+When the user asks to "update context docs", they mean this context-doc set:
+
+- `AGENTS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/KNOWN_ISSUES.md`
+- `docs/ISAAC_SIM.md`
+- `docs/ANDROID_APP.md`
+- `docs/ELECTRON_APP.md`
+- `docs/TAURI.md`
+- `docs/NAVIGATION.md`
+- `docs/COMMANDS.md`
+
+Do not treat `docs/archive/`, generated folders, or manufacturer PDFs as context docs unless the user names them directly.
+
 For most tasks:
 1. Read `AGENTS.md`.
 2. Read only the one most relevant `docs/*.md` file.
@@ -73,3 +87,12 @@ Default app URL:
 ```text
 http://127.0.0.1:3037
 ```
+
+## OpenRTK plugin (token optimization)
+
+- RTK binary v0.42.2 installed at `C:\Users\sandr\.cargo\bin\rtk.exe`
+- `openrtk` npm package configured in `.opencode/config.json`
+- Use RTK by default for shell/git/npm/read/search commands when an RTK subcommand exists: `rtk git ...`, `rtk npm ...`, `rtk read ...`, `rtk grep ...`, `rtk diff ...`, `rtk tree ...`.
+- Fall back to raw shell only when RTK lacks the needed command, exact unfiltered output is required, or RTK itself is broken; mention the fallback briefly.
+- System prompt for `rtk gain`/meta-commands at `.opencode/opencode.md`
+- **Known issue**: npm-published `openrtk` v0.1.0 has ESM extensionless import bug — patch applied in `node_modules/openrtk/lib/index.js` (adds `.js` to `./rewrite` import). Re-patch after `npm install`/`npm ci`.

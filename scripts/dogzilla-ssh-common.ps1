@@ -98,6 +98,36 @@ function Ensure-DogzillaSshConfig {
   return (Resolve-Path -LiteralPath $configPath).Path
 }
 
+function Repair-RemoteScriptLineEndings {
+  param(
+    [Parameter(Mandatory = $true)][string]$ConfigPath,
+    [Parameter(Mandatory = $true)][string]$Alias,
+    [string]$RemoteRoot = "/home/pi/robodoge"
+  )
+
+  Require-LocalCommand ssh
+
+  $normalizeCmd = "find $RemoteRoot/sidecars -type f \( -name '*.sh' -o -name '*.lua' \) -exec sed -i 's/\r$//' {} + 2>/dev/null; echo 'normalize done'"
+  $sshArgs = @("-F", $ConfigPath, $Alias, $normalizeCmd)
+  & ssh @sshArgs
+  Write-Output "Normalized CRLF in .sh and .lua files on $Alias"
+}
+
+function Repair-RemoteScriptLineEndings {
+  param(
+    [Parameter(Mandatory = $true)][string]$ConfigPath,
+    [Parameter(Mandatory = $true)][string]$Alias,
+    [string]$RemoteRoot = "/home/pi/robodoge"
+  )
+
+  Require-LocalCommand ssh
+
+  $normalizeCmd = "find $RemoteRoot/sidecars -type f \( -name '*.sh' -o -name '*.lua' \) -exec sed -i 's/\r$//' {} + 2>/dev/null; echo 'normalize done'"
+  $sshArgs = @("-F", $ConfigPath, $Alias, $normalizeCmd)
+  & ssh @sshArgs
+  Write-Output "Normalized CRLF in .sh and .lua files on $Alias"
+}
+
 function Invoke-DogzillaSsh {
   param(
     [Parameter(Mandatory = $true)][string]$ConfigPath,

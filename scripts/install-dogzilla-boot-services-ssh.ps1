@@ -56,6 +56,8 @@ foreach ($sidecar in $sidecars) {
   }
 }
 
+Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot $RemoteRoot
+
 Write-Host "Copying public\sounds\*.wav -> ${Alias}:$RemoteRoot/public/sounds/"
 & scp -F $configPath (Join-Path $repoRoot "public\sounds\*.wav") "${Alias}:$RemoteRoot/public/sounds/"
 if ($LASTEXITCODE -ne 0) {

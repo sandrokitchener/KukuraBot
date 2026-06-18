@@ -15,6 +15,7 @@ import {
   updateManualBarkTriggerState,
 } from '../public/manual-control.js'
 import {
+  createRobotMapRenderer,
   formatLidarFailureSummary,
   formatRobotMapWaypointTitle,
   formatWaypointReadinessSummary,
@@ -521,6 +522,24 @@ test('robot map heading converts ROS yaw to CSS arrow rotation', () => {
   assert.equal(headingRadiansToCssRotation(Number.NaN), 0)
 })
 
+
+test("createRobotMapRenderer exposes callable setPoseTrust", () => {
+  const renderer = createRobotMapRenderer({
+    elements: {
+      dot: { style: {} },
+      lidarScan: { getContext: () => null, width: 0, height: 0, style: {} },
+      meta: { textContent: "" },
+      poseReadout: { textContent: "" },
+      track: { replaceChildren() {} },
+      waypoints: { replaceChildren() {} },
+    },
+    getRuntimeConfig: () => ({}),
+  })
+  assert.equal(typeof renderer.setPoseTrust, "function")
+  renderer.setPoseTrust(true)
+  renderer.setPoseTrust(false)
+  renderer.setPoseTrust(undefined)
+})
 test('formatWaypointReadinessSummary distinguishes ready and blocked map waypoint state', () => {
   assert.equal(formatWaypointReadinessSummary({
     readyForMapWaypoints: true,

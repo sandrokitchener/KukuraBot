@@ -66,8 +66,22 @@ Android-specific Tauri commands are in the Android section above.
 ## Verification
 
 ```powershell
-npm test
-git diff --check
+rtk npm test
+rtk git diff --check
 ```
 
 Python sidecar tests exist under `test/test_*.py`; run them directly only when touching Python sidecar behavior.
+
+## RTK Usage
+
+Prefer RTK wrappers for command output compression:
+
+```powershell
+rtk git status --short
+rtk git diff --check
+rtk npm test
+rtk read AGENTS.md
+rtk grep "pattern" docs
+```
+
+Use raw shell only when RTK has no matching wrapper, exact output matters, or RTK is unavailable.

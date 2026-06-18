@@ -14,6 +14,7 @@ import {
   hasDogzillaMapOriginIdentity,
   mapPoseToAppPose,
   resolveAppMapPoseToMapPose,
+  saveDogzillaMapOriginFromOccupancyGrid,
   saveDogzillaMapOriginFromPose,
 } from '../lib/dogzilla-map-frame.mjs'
 
@@ -275,6 +276,30 @@ test('saveDogzillaMapOriginFromPose persists map origin from verified pose paylo
   }
 })
 
+
+test("saveDogzillaMapOriginFromOccupancyGrid preserves map identity when mapMetadata is provided", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "robodoge-occi-"))
+  const originFile = path.join(dir, "origin.json")
+  try {
+    const origin = await saveDogzillaMapOriginFromOccupancyGrid({
+      ok: true,
+      origin: { x: 0, y: 0, yaw: 0 },
+      width: 100,
+      height: 100,
+      resolution: 0.05,
+      cells: "",
+    }, {
+      originFile,
+      mapMetadata: { id: "test_map", fingerprint: "test-fingerprint" },
+    })
+    assert.equal(origin.map.id, "test_map")
+    assert.equal(origin.map.fingerprint, "test-fingerprint")
+    const saved = JSON.parse(await readFile(originFile, "utf-8"))
+    assert.equal(saved.map.id, "test_map")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
 test('saveDogzillaMapOriginFromPose can require active map identity', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-origin-identity-'))
   const originFile = path.join(dir, 'origin.json')

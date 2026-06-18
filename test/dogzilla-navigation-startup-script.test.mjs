@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { execSync } from 'node:child_process'
 import test from 'node:test'
 
 const SCRIPT_PATH = new URL('../sidecars/dogzilla_navigation/start-navigation-in-container.sh', import.meta.url)
@@ -198,6 +199,49 @@ test('DOGZILLA cmd_vel gait adapter forwards Nav2 Twist to the non-preempting br
   assert.match(adapter, /DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ/)
   assert.match(mapping, /DOGZILLA_NAV2_GAIT_MAX_X_STEP", "14"/)
   assert.match(adapter, /DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC", "0\.8"/)
+})
+
+function parseEolLine(line) {
+  const parts = line.trim().split(/\s+/)
+  if (parts.length < 5) return null
+  const [indexEol, workingEol, , , filePath] = parts
+  const indexAttrs = indexEol.split('/')
+  const workingAttrs = workingEol.split('/')
+  if (indexAttrs.length < 2 || workingAttrs.length < 2) return null
+  return { filePath, indexEol: indexAttrs[1], workingEol: workingAttrs[1] }
+}
+
+test('all tracked .sh launch assets have no CRLF bytes', async () => {
+  const trackedSh = execSync('git ls-files --eol *.sh', { encoding: 'utf-8' }).trim().split('\n').filter(Boolean)
+
+  assert.ok(trackedSh.length > 0, 'expected at least 1 tracked .sh file')
+  for (const line of trackedSh) {
+    const info = parseEolLine(line)
+    assert.notEqual(info, null, `failed to parse: ${line}`)
+    assert.equal(
+      info.indexEol, 'lf',
+      `${info.filePath} has index EOL ${info.indexEol} instead of lf. CRLF in .sh files breaks Bash \`set -eo pipefail\` on Linux.\nFull line: ${line}`
+    )
+  }
+})
+
+test('all tracked .lua files have no CRLF bytes', async () => {
+  const trackedLua = execSync('git ls-files --eol *.lua', { encoding: 'utf-8' }).trim().split('\n').filter(Boolean)
+
+  assert.ok(trackedLua.length > 0, 'expected at least 1 tracked .lua file')
+  for (const line of trackedLua) {
+    const info = parseEolLine(line)
+    assert.notEqual(info, null, `failed to parse: ${line}`)
+    assert.equal(
+      info.indexEol, 'lf',
+      `${info.filePath} has index EOL ${info.indexEol} instead of lf.`
+    )
+  }
+})
+
+test('.gitattributes enforces LF for .sh files', async () => {
+  const attrCheck = execSync('git check-attr eol -- sidecars/dogzilla_navigation/start-navigation-in-container.sh', { encoding: 'utf-8' }).trim()
+  assert.match(attrCheck, /eol: lf$/)
 })
 
 function nodeBlock(source, packageName) {

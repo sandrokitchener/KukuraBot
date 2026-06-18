@@ -49,6 +49,8 @@ if (-not $NoSync) {
   }
 }
 
+Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot $RemoteRoot
+
 Write-Output "Starting DOGZILLA Cartographer map pose in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
 $mapEnv = if ($MapPath) { " -e DOGZILLA_MAP_PBSTREAM=$MapPath" } else { "" }

@@ -2,7 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  GREEN,
+  RESET,
   buildStartupBanner,
+  green,
+  greenBright,
   printStartupBanner,
   shouldColorizeStartupBanner,
   shouldPrintStartupBanner,
@@ -61,6 +65,18 @@ test('startup banner is interactive by default and supports env overrides', () =
     env: { QUESTING_BEAST_BANNER_PRINTED: '1', QUESTING_BEAST_BANNER: '1' },
     stream: { isTTY: true },
   }), false)
+})
+
+test('green wraps text in ANSI green when TTY', () => {
+  const savedIsTTY = process.stdout.isTTY
+  process.stdout.isTTY = true
+  delete process.env.NO_COLOR
+  assert.equal(green('hello'), `${GREEN}hello${RESET}`)
+  assert.equal(greenBright('hello'), `\x1b[1m${GREEN}hello${RESET}`)
+  process.stdout.isTTY = false
+  assert.equal(green('hello'), 'hello')
+  assert.equal(greenBright('hello'), 'hello')
+  process.stdout.isTTY = savedIsTTY
 })
 
 test('printStartupBanner writes once through the provided logger', () => {

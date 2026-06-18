@@ -35,6 +35,8 @@ $directories = @(
   @{ Source = "sidecars\dogzilla_navigation"; Destination = "$RemoteRoot/sidecars/" },
   @{ Source = "sidecars\dogzilla_yolo_vision"; Destination = "$RemoteRoot/sidecars/" },
   @{ Source = "sidecars\dogzilla_audio_cue"; Destination = "$RemoteRoot/sidecars/" },
+  @{ Source = "sidecars\dogzilla_map_pose"; Destination = "$RemoteRoot/sidecars/" },
+  @{ Source = "sidecars\dogzilla_imu_publisher"; Destination = "$RemoteRoot/sidecars/" },
   @{ Source = "ros2\dogzilla_bridge"; Destination = "$RemoteRoot/ros2/" }
 )
 

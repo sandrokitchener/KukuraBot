@@ -32,6 +32,8 @@ foreach ($item in $files) {
   Write-Host " OK" -ForegroundColor Green
 }
 
+Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $alias -RemoteRoot $remoteRoot
+
 Write-Host "Setting executable flags..." -ForegroundColor Yellow
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $alias -RemoteCommand "chmod +x $remoteRoot/sidecars/dogzilla_imu_publisher/start-imu-publisher.sh $remoteRoot/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
 

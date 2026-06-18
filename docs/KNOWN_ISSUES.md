@@ -23,9 +23,11 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 - Notes are human comments only. Navigation and validation should use structured fields.
 - Current verified `app_map` entries include `living_room`, `kitchen`, `garage`, and `charger` in `robodoge_home`; other map entries remain unverified in the current file.
 - `app_map` waypoints require `output/app-cache/dogzilla-map-origin.json` or equivalent saved origin state to resolve back into current `map` coordinates.
+- `output/app-cache/dogzilla-map-origin.json` saved via `autoSaveDogzillaMapOrigin` now includes the active map identity from bridge health. If Nav2 is up, the saved origin carries `map.id` and `map.fingerprint`, eliminating the `stale-missing-map-identity` status on restart. Identity-bearing origins are preserved by default if the bridge health does not report active map metadata.
 
 ## Startup/runtime
 
+- **CRLF shell failure**: If Windows Git checkouts introduce CRLF into `.sh` files (`w/crlf` from `git ls-files --eol`), Bash aborts on `pipefail\r` before Cartographer or Nav2 can start. The app's waypoint blocker (map pose exists but no `/navigate_to_pose` action server) is the downstream symptom. Fix: `.gitattributes` forces LF for `*.sh` and `*.lua`; `Repair-RemoteScriptLineEndings` in `dogzilla-ssh-common.ps1` normalizes remote files after each `scp` so even pre-deployed bad files are repaired on the next SSH startup.
 - `npm start` runs `scripts/start-clean.mjs`, which stops local processes/listeners on Robo-Doge ports before importing `run.mjs`.
 - The user previously preferred the slower blocking startup over UI-first startup because it was more trustworthy. Be careful before making startup non-blocking.
 - Port conflicts around `3037`, `8891`-`8896`, and `5037` can be caused by stale Node/Python/ADB processes.

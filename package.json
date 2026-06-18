@@ -34,7 +34,8 @@
   "dependencies": {
     "@huggingface/transformers": "^4.1.0",
     "@moonshine-ai/moonshine-js": "^0.1.29",
-    "@ricky0123/vad-web": "^0.0.24"
+    "@ricky0123/vad-web": "^0.0.24",
+    "openrtk": "^0.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",

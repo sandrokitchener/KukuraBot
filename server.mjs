@@ -43,7 +43,7 @@ import {
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
 import { buildSystemHealthz } from './lib/system-healthz.mjs'
-import { printStartupBanner } from './lib/startup-banner.mjs'
+import { green, printStartupBanner } from './lib/startup-banner.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
@@ -184,6 +184,14 @@ server.listen(PORT, HOST, async () => {
   console.log(
     `${appConfig.serverReadyLabel} running at http://${HOST}:${PORT} using ${profileConfig.activeProfile.label} (${profileConfig.activeProfile.model})`,
   )
+  console.log()
+  console.log(green(`     |\\_/|`))
+  console.log(green(`     | @ @   Woof!`))
+  console.log(green(`     |   <>              _`))
+  console.log(green(`     |  _/\\------____ ((| |))`))
+  console.log(green(`     |               \`--' |`))
+  console.log(green(` ____|_       ___|   |___.'`))
+  console.log(green(`/_/_____/____/_______|`))
   void warmActiveModel(profileConfig.activeProfile)
 })
 

@@ -212,6 +212,8 @@ if (-not $NoSync) {
   }
 }
 
+Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot $RemoteRoot
+
 Write-Output "Starting DOGZILLA Nav2 waypoint navigation in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_navigation/start-navigation-in-container.sh"
 $mapEnv = if ($MapYaml) { " -e DOGZILLA_NAV2_MAP=$MapYaml" } else { "" }

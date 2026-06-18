@@ -733,6 +733,7 @@ export function createRobotMapRenderer({
     getViewModeLabel,
     hideDot,
     renderDot,
+    setPoseTrust,
     setViewMode,
     renderLidarScan,
     renderPoseTrack,

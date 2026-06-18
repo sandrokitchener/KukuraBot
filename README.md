@@ -83,8 +83,14 @@ Test-NetConnection -ComputerName 100.89.71.113 -Port 3037
 
 ## More Docs
 
+Context docs are the compact agent-facing docs. When asked to update context docs, update the relevant file from this set:
+
+- [AGENTS.md](AGENTS.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/NAVIGATION.md](docs/NAVIGATION.md)
+- [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)
+- [docs/ISAAC_SIM.md](docs/ISAAC_SIM.md)
 - [docs/ANDROID_APP.md](docs/ANDROID_APP.md)
 - [docs/ELECTRON_APP.md](docs/ELECTRON_APP.md)
-- [docs/ISAAC_SIM.md](docs/ISAAC_SIM.md)
+- [docs/TAURI.md](docs/TAURI.md)
+- [docs/NAVIGATION.md](docs/NAVIGATION.md)
+- [docs/COMMANDS.md](docs/COMMANDS.md)

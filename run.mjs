@@ -20,7 +20,7 @@ import { startManagedRobotEnvironment } from './lib/robot-sidecar-launcher.mjs'
 import { resolveActiveSpeechProfile } from './lib/speech-profile-config.mjs'
 import { loadSpeechSidecarConfig } from './lib/speech-sidecar-config.mjs'
 import { startManagedSpeechSidecar } from './lib/speech-sidecar-launcher.mjs'
-import { printStartupBanner } from './lib/startup-banner.mjs'
+import { green, printStartupBanner } from './lib/startup-banner.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const cliOptions = parseCliArgs(process.argv.slice(2))
@@ -170,7 +170,15 @@ if (existingAppConfig && reuseExistingApp) {
     })
 
     server.once('spawn', () => {
-      console.log(`Launcher ready. App URL: ${APP_URL}`)
+      console.log(green(`Launcher ready. App URL: ${APP_URL}`))
+      console.log()
+      console.log(green(`     |\\_/|`))
+      console.log(green(`     | @ @   Woof!`))
+      console.log(green(`     |   <>              _`))
+      console.log(green(`     |  _/\\------____ ((| |))`))
+      console.log(green(`     |               \`--' |`))
+      console.log(green(` ____|_       ___|   |___.'`))
+      console.log(green(`/_/_____/____/_______|`))
 
       if (isLocalDesktopHost(HOST)) {
         openBrowser(APP_URL)
@@ -300,7 +308,7 @@ async function ensureExistingAppDogzillaDirectBridge(appUrl, appConfig) {
     const health = await safeReadJson(healthResponse)
 
     if (healthResponse.ok && health?.status === 'ok') {
-      console.log(`DOGZILLA direct bridge already ready at ${health.destination}.`)
+      console.log(green(`DOGZILLA direct bridge already ready at ${health.destination}.`))
       return
     }
   } catch {
@@ -325,7 +333,7 @@ async function ensureExistingAppDogzillaWaypointNavigation(appUrl, appConfig) {
     const health = await safeReadJson(healthResponse)
 
     if (healthResponse.ok && isDogzillaWaypointNavigationReady(health)) {
-      console.log(`DOGZILLA waypoint navigator already ready at ${health.destination}.`)
+      console.log(green(`DOGZILLA waypoint navigator already ready at ${health.destination}.`))
       return
     }
   } catch {
@@ -341,7 +349,7 @@ async function ensureExistingAppDogzillaWaypointNavigation(appUrl, appConfig) {
   const health = await waitForExistingAppDogzillaWaypointNavigation(appUrl)
 
   if (isDogzillaWaypointNavigationReady(health)) {
-    console.log(`DOGZILLA waypoint navigator ready at ${health.destination}.`)
+    console.log(green(`DOGZILLA waypoint navigator ready at ${health.destination}.`))
   } else {
     console.warn(`DOGZILLA waypoint navigator did not become ready: ${health?.error || health?.status || 'unknown status'}`)
   }
