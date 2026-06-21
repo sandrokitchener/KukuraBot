@@ -27,6 +27,50 @@ npm run dogzilla:start-map-pose
 npm run dogzilla:set-origin
 ```
 
+Map identity / stale waypoint check:
+
+```powershell
+Invoke-RestMethod -TimeoutSec 45 http://10.0.4.32:8893/healthz | Select-Object -ExpandProperty runtime | Select-Object -ExpandProperty map | ConvertTo-Json -Depth 8
+Get-Content output/app-cache/dogzilla-map-origin.json
+npm run dogzilla:validate-waypoints
+```
+
+Expected rule: active map fingerprint, saved origin fingerprint, and waypoint fingerprint must all exist and match before app-map waypoint dispatch is trusted.
+
+Recurring lifecycle-dispatch failure check:
+
+```powershell
+npm run dogzilla:probe-nav
+Invoke-RestMethod -TimeoutSec 45 http://10.0.4.32:8893/healthz | Select-Object -ExpandProperty runtime | Select-Object -ExpandProperty nav2 | ConvertTo-Json -Depth 8
+ssh -F output/pi-ssh/config dogzilla "tail -n 20 /home/pi/robodoge/sidecars/dogzilla_lib_bridge/command_log.ndjson"
+ssh -F output/pi-ssh/config dogzilla 'docker exec robodoge-lidar-bridge bash -lc "source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=16; for n in controller_server planner_server bt_navigator behavior_server; do echo NODE:\$n; ros2 lifecycle get /\$n || true; done"'
+```
+
+Expected current direct-bridge Nav2 timing defaults:
+
+```text
+lifecycleWaitTimeoutSec: 12
+dockerStatusTimeoutSec: 30
+```
+
+DOGZILLA support services:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-bridge-ssh.ps1 -Bridge direct -Live -Background
+powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-yolo-vision-ssh.ps1 -Background
+powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-audio-cue-ssh.ps1 -Background
+npm run dogzilla:start-map-pose
+npm run dogzilla:start-navigation
+```
+
+Health endpoints:
+
+```powershell
+Invoke-RestMethod -TimeoutSec 8 http://10.0.4.32:8893/healthz
+Invoke-RestMethod -TimeoutSec 8 http://10.0.4.32:8894/healthz
+Invoke-RestMethod -TimeoutSec 8 http://10.0.4.32:8896/healthz
+```
+
 SSH:
 
 ```powershell

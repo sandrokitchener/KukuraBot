@@ -18,7 +18,7 @@ public/ UI or packaged shell
 -> sidecar or robot bridge
 ```
 
-`run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge processes and ports, then imports `run.mjs`.
+`run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge processes and ports, then imports `run.mjs`. `server.mjs` also starts a non-blocking DOGZILLA startup watchdog so direct `server.mjs`, LAN, packaged, or reused-app paths still self-heal required support services, the direct bridge, and Nav2 after the UI is up.
 
 ## Key entrypoints
 
@@ -31,6 +31,7 @@ public/ UI or packaged shell
 | `lib/robot-command-compiler.mjs` | Real robot command preview and waypoint pose resolution |
 | `lib/isaacsim-command-compiler.mjs` | Isaac Sim preview construction |
 | `lib/dogzilla-connection-center.mjs` | In-app DOGZILLA service actions and SSH script wiring |
+| `lib/dogzilla-startup-watchdog.mjs` | App-up DOGZILLA self-heal loop for YOLO/audio/lidar/map-pose, direct bridge, and Nav2 |
 | `sidecars/` | Python/ROS/DOGZILLA support services |
 
 ## Runtime targets
@@ -44,6 +45,24 @@ Configured by `config/robot-runtime.json`.
 | `isaacsim` | `isaacsim` | Isaac sidecar and simulator target |
 
 Current config default is `dogzilla_direct`, with `dryRun: false` and `requiresOperatorConfirmation: false`. Treat live safety as task-specific; verify current config before changing movement behavior.
+
+Isaac Sim is a simulator target and sidecar only. It is not a real DOGZILLA
+sensor and must not participate in DOGZILLA navigation readiness or degrade
+real-world health when the active target is `dogzilla_direct`.
+
+For DOGZILLA waypoint dispatch, the direct bridge `/healthz` Nav2 payload is a
+status snapshot, not a guarantee that the next `/commands` request will skip
+checks. `/commands` re-probes Nav2 action, `/odom`/TF, lifecycle nodes, and
+`/scan_nav2` before sending a goal. Slow Pi lifecycle service responses can make
+the command path report inactive lifecycle nodes even when a later snapshot is
+ready; keep the direct-bridge lifecycle/status timeouts documented in
+`docs/NAVIGATION.md`.
+
+Map identity is part of that safety boundary. `robodoge_home_map.json` is the
+active map contract, and saved origins/waypoints are usable only when their
+fingerprints exist and match the active map. `/api/robot/state` caps live health
+probes so the UI can show blocked/localizing/stuck status without waiting on a
+slow bridge health request.
 
 ## Config ownership
 

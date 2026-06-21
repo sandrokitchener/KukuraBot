@@ -4,7 +4,8 @@ set -eo pipefail
 REMOTE_ROOT="${REMOTE_ROOT:-/home/pi/robodoge}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 POSE_PORT="${POSE_PORT:-8896}"
-DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-$REMOTE_ROOT/maps/robodoge_home.yaml}"
+DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
+DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-}"
 DOGZILLA_NAV2_BASE_PARAMS="${DOGZILLA_NAV2_BASE_PARAMS:-/opt/ros/humble/share/nav2_bringup/params/nav2_params.yaml}"
 DOGZILLA_NAV2_PARAMS="${DOGZILLA_NAV2_PARAMS:-$REMOTE_ROOT/logs/robodoge_nav2_params.yaml}"
 DOGZILLA_NAV2_LAUNCH="$REMOTE_ROOT/sidecars/dogzilla_navigation/robodoge_nav2_navigation_launch.py"
@@ -56,13 +57,81 @@ export DOGZILLA_NAV2_SCAN_FILTER_ENABLED DOGZILLA_NAV2_SCAN_FILTER_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
 export DOGZILLA_NAV2_SPEED_RAMP_INTERVAL DOGZILLA_NAV2_SPEED_RAMP_BUFFER
+export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/logs"
+
+if command -v flock >/dev/null 2>&1; then
+  exec 8>"$REMOTE_ROOT/logs/nav2-startup.lock"
+  if ! flock -w "${DOGZILLA_NAV2_START_LOCK_TIMEOUT_SEC:-300}" 8; then
+    echo "Timed out waiting for another DOGZILLA Nav2 startup to finish." >&2
+    exit 2
+  fi
+fi
+
+if [ -z "$DOGZILLA_NAV2_MAP" ] && [ -s "$DOGZILLA_MAP_METADATA" ]; then
+  DOGZILLA_NAV2_MAP="$(python3 - "$DOGZILLA_MAP_METADATA" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+metadata_path = Path(sys.argv[1])
+try:
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+yaml_path = str(metadata.get("yaml") or "").strip()
+if not yaml_path:
+    raise SystemExit(0)
+path = Path(yaml_path)
+if not path.is_absolute():
+    path = metadata_path.parent / path
+print(path)
+PY
+)"
+fi
+DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-$REMOTE_ROOT/maps/robodoge_home.yaml}"
 
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1091
 source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true
+
+run_apt_get_once() {
+  local lock_timeout="${DOGZILLA_APT_LOCK_TIMEOUT_SEC:-300}"
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "$lock_timeout" /tmp/robodoge-apt.lock bash -c '
+      dpkg --configure -a >/dev/null 2>&1 || true
+      apt-get "$@"
+    ' bash "$@"
+    return $?
+  fi
+
+  dpkg --configure -a >/dev/null 2>&1 || true
+  apt-get "$@"
+}
+
+run_apt_get() {
+  local attempt=1
+  local max_attempts="${DOGZILLA_APT_MAX_ATTEMPTS:-40}"
+  local delay_sec="${DOGZILLA_APT_RETRY_DELAY_SEC:-3}"
+
+  while true; do
+    if run_apt_get_once "$@"; then
+      return 0
+    fi
+
+    local status=$?
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return "$status"
+    fi
+
+    echo "apt-get $* failed (attempt $attempt/$max_attempts); waiting for apt/dpkg lock." >&2
+    sleep "$delay_sec"
+    attempt=$((attempt + 1))
+  done
+}
 
 missing_packages=()
 for pkg in nav2_bringup nav2_bt_navigator nav2_controller nav2_planner nav2_map_server nav2_lifecycle_manager; do
@@ -75,13 +144,13 @@ done
 if [ "${#missing_packages[@]}" -gt 0 ]; then
   export DEBIAN_FRONTEND=noninteractive
   rm -f /etc/apt/sources.list.d/ros2.list 2>/dev/null || true
-  apt-get update
-  apt-get install -y --no-install-recommends curl ca-certificates gnupg >/dev/null
+  run_apt_get update
+  run_apt_get install -y --no-install-recommends curl ca-certificates gnupg >/dev/null
   curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
   ubuntu_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME}}")"
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${ubuntu_codename} main" > /etc/apt/sources.list.d/ros2.list
-  apt-get update
-  apt-get install -y --no-install-recommends "${missing_packages[@]}"
+  run_apt_get update
+  run_apt_get install -y --no-install-recommends "${missing_packages[@]}"
 fi
 
 if [ ! -s "$DOGZILLA_NAV2_BASE_PARAMS" ]; then
@@ -306,19 +375,25 @@ if "result" not in payload:
     raise SystemExit(2)
 PY
 
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/cmd_vel_gait_adapter.py" \
-    --input-topic "$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC" \
-    --bridge-url "$DOGZILLA_NAV2_GAIT_ADAPTER_URL" \
-    --max-rate-hz "$DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ" \
-    --stale-stop-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC" \
-    --http-timeout-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC" \
-    --speed-ramp-interval "$DOGZILLA_NAV2_SPEED_RAMP_INTERVAL" \
-    --speed-ramp-buffer "$DOGZILLA_NAV2_SPEED_RAMP_BUFFER" \
-    > "$REMOTE_ROOT/logs/cmd-vel-gait-adapter.log" 2>&1 &
+  (
+    exec 8>&- 2>/dev/null || true
+    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/cmd_vel_gait_adapter.py" \
+      --input-topic "$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC" \
+      --bridge-url "$DOGZILLA_NAV2_GAIT_ADAPTER_URL" \
+      --max-rate-hz "$DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ" \
+      --stale-stop-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC" \
+      --http-timeout-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC" \
+      --speed-ramp-interval "$DOGZILLA_NAV2_SPEED_RAMP_INTERVAL" \
+      --speed-ramp-buffer "$DOGZILLA_NAV2_SPEED_RAMP_BUFFER" \
+      > "$REMOTE_ROOT/logs/cmd-vel-gait-adapter.log" 2>&1 &
+  )
 else
   if ! ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
     pkill -f "[y]ahboom_base.*base" 2>/dev/null || true
-    nohup ros2 run yahboom_base base > "$REMOTE_ROOT/logs/yahboom-base.log" 2>&1 &
+    (
+      exec 8>&- 2>/dev/null || true
+      nohup ros2 run yahboom_base base > "$REMOTE_ROOT/logs/yahboom-base.log" 2>&1 &
+    )
   fi
 fi
 
@@ -340,13 +415,16 @@ fi
 
 if [ "$DOGZILLA_NAV2_SCAN_FILTER_ENABLED" = "1" ]; then
   pkill -f "[s]can_self_filter.py" 2>/dev/null || true
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_self_filter.py" \
-    --input-topic /scan \
-    --output-topic "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" \
-    --mask-start-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG" \
-    --mask-end-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG" \
-    --mask-range-m "$DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M" \
-    > "$REMOTE_ROOT/logs/scan-self-filter.log" 2>&1 &
+  (
+    exec 8>&- 2>/dev/null || true
+    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_self_filter.py" \
+      --input-topic /scan \
+      --output-topic "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" \
+      --mask-start-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG" \
+      --mask-end-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG" \
+      --mask-range-m "$DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M" \
+      > "$REMOTE_ROOT/logs/scan-self-filter.log" 2>&1 &
+  )
 
   for _ in $(seq 1 30); do
     if ros2 topic info "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" 2>/dev/null | grep -q "Publisher count: [1-9]"; then
@@ -445,11 +523,14 @@ start_tf_odom_helper() {
   local base_frame="${1:-base_link}"
   pkill -f "[t]f_odom_publisher.py" 2>/dev/null || true
   sleep 1
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
-    --odom-frame odom \
-    --base-frame "$base_frame" \
-    --topic /odom \
-    > "$REMOTE_ROOT/logs/tf-odom-publisher.log" 2>&1 &
+  (
+    exec 8>&- 2>/dev/null || true
+    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
+      --odom-frame odom \
+      --base-frame "$base_frame" \
+      --topic /odom \
+      > "$REMOTE_ROOT/logs/tf-odom-publisher.log" 2>&1 &
+  )
 }
 
 start_map_pose_localization() {
@@ -564,13 +645,16 @@ pkill -f "[w]aypoint_follower" 2>/dev/null || true
 pkill -f "[v]elocity_smoother" 2>/dev/null || true
 pkill -f "[m]ap_server" 2>/dev/null || true
 
-nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
-  map:="$DOGZILLA_NAV2_MAP" \
-  params_file:="$DOGZILLA_NAV2_PARAMS" \
-  use_sim_time:=false \
-  autostart:=true \
-  use_respawn:=true \
-  > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
+(
+  exec 8>&- 2>/dev/null || true
+  nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
+    map:="$DOGZILLA_NAV2_MAP" \
+    params_file:="$DOGZILLA_NAV2_PARAMS" \
+    use_sim_time:=false \
+    autostart:=true \
+    use_respawn:=true \
+    > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
+)
 
 nav_ready=0
 for _ in $(seq 1 120); do

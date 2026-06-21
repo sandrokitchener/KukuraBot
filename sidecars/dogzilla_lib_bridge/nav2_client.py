@@ -25,7 +25,7 @@ DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_GOAL_RE
 DEFAULT_NAV2_CANCEL_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_CANCEL_TIMEOUT", "1.0"))
 DEFAULT_NAV2_STATUS_CACHE_SEC = float(os.environ.get("DOGZILLA_NAV2_STATUS_CACHE_SEC", "5.0"))
 DEFAULT_NAV2_STATUS_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_STATUS_WAIT_TIMEOUT", "2.0"))
-DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_DOCKER_STATUS_TIMEOUT", "10.0"))
+DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_DOCKER_STATUS_TIMEOUT", "30.0"))
 DEFAULT_NAV2_ODOM_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_ODOM_WAIT_TIMEOUT", "6.0"))
 DEFAULT_ODOM_TOPIC = os.environ.get("DOGZILLA_ODOM_TOPIC", "/odom")
 DEFAULT_NAV2_LIFECYCLE_NODES = tuple(
@@ -36,7 +36,7 @@ DEFAULT_NAV2_LIFECYCLE_NODES = tuple(
     ).split(",")
     if node.strip()
 )
-DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_LIFECYCLE_WAIT_TIMEOUT", "2.0"))
+DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_LIFECYCLE_WAIT_TIMEOUT", "12.0"))
 DEFAULT_NAV2_SCAN_TOPIC = os.environ.get(
     "DOGZILLA_NAV2_SCAN_TOPIC",
     os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2"),
@@ -1318,7 +1318,14 @@ finally:
     node.destroy_node()
     rclpy.shutdown()
 """
-        docker_timeout = self.wait_timeout + self.goal_response_timeout + DEFAULT_NAV2_ODOM_WAIT_TIMEOUT + 12
+        docker_timeout = (
+            self.wait_timeout
+            + self.goal_response_timeout
+            + DEFAULT_NAV2_ODOM_WAIT_TIMEOUT
+            + DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT
+            + DEFAULT_NAV2_SCAN_WAIT_TIMEOUT
+            + 5
+        )
         try:
             completed = self._run_docker_python(script, timeout=docker_timeout)
         except subprocess.TimeoutExpired:

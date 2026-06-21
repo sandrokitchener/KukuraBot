@@ -75,6 +75,9 @@ Open these only when a compact doc explicitly routes you there or the task direc
 - For LiDAR/navigation, stay on the DOGZILLA HAT UART path `/dev/ttyAMA1` unless the user explicitly changes hardware.
 - Treat `config/robot-waypoints.json` as authoritative for waypoint coordinates and trust fields. Do not rewrite, downgrade, disable, or "correct" trusted entries without explicit user instruction.
 - Diagnostics may warn about map identity, fingerprints, bounds, notes, or drift, but those diagnostics must stay separate from waypoint config authority.
+- Active DOGZILLA map identity is authoritative for dispatch readiness. If saved origin or waypoint fingerprints are missing or differ from the active map fingerprint, treat origin/waypoints as stale for navigation while preserving `config/robot-waypoints.json`.
+- If a DOGZILLA waypoint command reports `Nav2 lifecycle nodes are not active: controller_server, planner_server, bt_navigator, behavior_server`, do not assume Nav2 is stopped. First read `docs/NAVIGATION.md` and `docs/KNOWN_ISSUES.md`, then compare live `/healthz`, command log, and lifecycle services. The direct bridge uses longer lifecycle/status timeouts intentionally because Pi lifecycle services can answer slowly under load.
+- DOGZILLA SSH startup scripts are launched from Windows PowerShell. Do not send PowerShell here-string heredocs through SSH for Python/Bash snippets; CRLF can break remote delimiters. Prefer `python3 -c`, checked-in scripts, or one-line shell loops, and make background stop loops skip `$$`/`$PPID` so they do not kill their own SSH launcher.
 - For app/operator UI work, prefer existing panels and services before adding new surfaces.
 - Use repo-local evidence before generic ROS, GitHub, or web explanations.
 

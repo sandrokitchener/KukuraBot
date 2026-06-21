@@ -63,7 +63,7 @@ def read_active_map_metadata(
         max_y = min_y + height_cells * resolution
         return {
             "available": True,
-            "id": yaml_path.stem,
+            "id": str(info.get("id") or yaml_path.stem),
             "metadataFile": str(metadata_path),
             "yaml": str(yaml_path),
             "pgm": str(pgm_path),

@@ -74,7 +74,76 @@
   min-width: 0;
 }
 
-.map-origin-button {
+.map-workflow-panel {
+  border: 1px solid rgba(63, 53, 43, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 250, 244, 0.72);
+}
+
+.map-workflow-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 7px 10px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+.map-workflow-status {
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-workflow-status[data-state='success'] {
+  color: #007b84;
+}
+
+.map-workflow-status[data-state='error'] {
+  color: var(--danger);
+}
+
+.map-workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(180px, 0.65fr);
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
+.map-workflow-group {
+  display: grid;
+  gap: 7px;
+  align-content: start;
+  min-width: 0;
+}
+
+.map-workflow-label {
+  color: #6f675f;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.map-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.map-origin-button,
+.map-workflow-button {
   min-height: 30px;
   padding: 5px 10px;
   border-color: rgba(63, 53, 43, 0.28);
@@ -85,7 +154,9 @@
 }
 
 .map-origin-button:hover:not(:disabled),
-.map-origin-button:focus-visible {
+.map-origin-button:focus-visible,
+.map-workflow-button:hover:not(:disabled),
+.map-workflow-button:focus-visible {
   border-color: rgba(255, 123, 86, 0.72);
   background: #fff0e5;
 }
@@ -364,13 +435,7 @@
 }
 
 .robot-map-waypoint[data-enabled='false'] {
-  background: #7f7568;
-  box-shadow: 0 0 0 3px rgba(127, 117, 104, 0.16);
-  opacity: 0.45;
-}
-
-.robot-map-waypoint[data-enabled='false']::after {
-  border-bottom-color: #7f7568;
+  display: none;
 }
 
 .robot-map-waypoint-label {
@@ -455,6 +520,27 @@
   min-height: 22px;
   color: rgba(255, 255, 255, 0.45);
   font-size: 0.86rem;
+}
+
+.robot-nav-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  z-index: 6;
+  display: none;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(22, 22, 24, 0.82);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.robot-nav-badge:not(:empty) {
+  display: inline-block;
 }
 
 .robot-state-panel[data-state='stale'] .robot-state-chip {
@@ -579,6 +665,7 @@
 
 /* Map view toggle */
 /* Hide SLAM-only controls until mapping mode is entered */
+.robot-map-panel:not(.is-slam-mode) .show-on-slam,
 .robot-map-head:not(.is-slam-mode) .show-on-slam {
   display: none;
 }

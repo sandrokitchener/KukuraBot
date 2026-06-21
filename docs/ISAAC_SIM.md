@@ -5,6 +5,9 @@ Read this for Isaac Sim, Isaac Lab, simulation, USD/CAD, and robot model work.
 ## Current shape
 
 Isaac support is separated into command compilation, sidecar transport, and Isaac-side runtime hooks.
+It is a simulator-side integration, not a DOGZILLA real-world sensor; app health
+may report the Isaac sidecar, but DOGZILLA navigation readiness must ignore it
+unless the active runtime target is `isaacsim`.
 
 ```text
 app command JSON

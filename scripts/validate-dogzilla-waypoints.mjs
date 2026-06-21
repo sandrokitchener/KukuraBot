@@ -272,6 +272,36 @@ function validateOneWaypoint({
     ...(!identityCheck.ok ? [identityCheck.message] : []),
     ...(!mapCheck.ok ? [mapCheck.message] : []),
   ]
+  const identityBlocksWaypoint = !identityCheck.ok
+  if (identityBlocksWaypoint) {
+    return {
+      ...base,
+      enabled: false,
+      ok: false,
+      status: identityCheck.reason || 'stale-map-mismatch',
+      compiledPose: {
+        frame: params.frame,
+        x: params.x,
+        y: params.y,
+        yaw: params.yaw,
+      },
+      problems: [
+        ...problems,
+        identityCheck.message,
+      ],
+      advisoryProblems: [
+        ...(!mapCheck.ok ? [mapCheck.message] : []),
+      ],
+      mapCheck: {
+        reason: mapCheck.ok ? 'inside-active-map' : mapCheck.reason,
+        message: mapCheck.ok ? 'waypoint target is inside active map bounds' : mapCheck.message,
+      },
+      mapIdentityCheck: {
+        reason: identityCheck.reason,
+        message: identityCheck.message,
+      },
+    }
+  }
 
   return {
     ...base,

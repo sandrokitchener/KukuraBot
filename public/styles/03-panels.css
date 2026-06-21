@@ -377,6 +377,34 @@ select {
   text-transform: uppercase;
 }
 
+#robot-nav-status-row {
+  grid-column: 1 / -1;
+}
+
+#robot-nav-status-row[data-severity='green'] #robot-nav-status {
+  color: #2e7d32;
+}
+
+#robot-nav-status-row[data-severity='yellow'] #robot-nav-status {
+  color: var(--warning);
+}
+
+#robot-nav-status-row[data-severity='orange'] #robot-nav-status {
+  color: var(--accent);
+}
+
+#robot-nav-status-row[data-severity='red'] #robot-nav-status {
+  color: var(--danger);
+}
+
+#robot-nav-status-row[data-severity='blue'] #robot-nav-status {
+  color: #1565c0;
+}
+
+#robot-nav-status-row[data-severity='gray'] #robot-nav-status {
+  color: var(--ink-faint);
+}
+
 .robot-state-panel strong,
 .meta-card strong {
   display: block;

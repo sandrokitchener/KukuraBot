@@ -57,6 +57,17 @@ const speechLockNote = document.querySelector('#speech-lock-note')
 const speechSettingsStatus = document.querySelector('#speech-settings-status')
 const speechStatus = document.querySelector('#speech-status')
 const speechPreview = document.querySelector('#speech-preview')
+const NAV_STATUS_ICONS = {
+  navigating: '\u2192',
+  finding_waypoint: '\u2753',
+  arrived: '\u2713',
+  stuck: '\u2717',
+  blocked: '\u26A0',
+  ready: '\u25CF',
+  idle: '\u25CB',
+  unknown: '',
+}
+
 const speechFiles = document.querySelector('#speech-files')
 const runtimePanel = document.querySelector('.runtime-panel')
 const runtimeTargetChip = document.querySelector('#runtime-target-chip')
@@ -71,6 +82,9 @@ const robotStateSeq = document.querySelector('#robot-state-seq')
 const robotBatteryMeter = document.querySelector('#robot-battery-meter')
 const robotBatteryValue = document.querySelector('#robot-battery-value')
 const robotTelemetryMeta = document.querySelector('#robot-telemetry-meta')
+const robotNavStatus = document.querySelector('#robot-nav-status')
+const robotNavTarget = document.querySelector('#robot-nav-target')
+const robotNavStatusRow = document.querySelector('#robot-nav-status-row')
 const robotMapTrack = document.querySelector('#robot-map-track')
 const robotMapWaypoints = document.querySelector('#robot-map-waypoints')
 const robotMapDot = document.querySelector('#robot-map-dot')
@@ -345,7 +359,11 @@ for (const button of connectionActionButtons) {
 const waypointCaptureButton = document.getElementById('waypoint-capture-button')
 const waypointCaptureInput = document.getElementById('waypoint-capture-name')
 const waypointCaptureStatus = document.getElementById('waypoint-capture-status')
+const waypointReadinessButton = document.getElementById('waypoint-readiness-button')
+const mapWorkflowPanel = document.getElementById('map-workflow-panel')
+const mapWorkflowStatus = document.getElementById('map-workflow-status')
 waypointCaptureButton?.addEventListener('click', handleWaypointCapture)
+waypointReadinessButton?.addEventListener('click', handleWaypointReadinessCheck)
 
 const mapViewToggle = document.getElementById('map-view-toggle')
 const mapViewModeLabel = document.querySelector('.map-view-mode-label')
@@ -1167,7 +1185,7 @@ async function refreshDogzillaWaypointReadiness() {
   if (!isRealRobotTargetActive()) {
     runtimeConfig.robotRuntime.waypointReadiness = null
     robotMap.setWaypointReadiness('')
-    return
+    return null
   }
 
   const readinessPath = runtimeConfig.robotRuntime.waypointReadinessPath || DEFAULT_ROBOT_RUNTIME.waypointReadinessPath
@@ -1180,9 +1198,11 @@ async function refreshDogzillaWaypointReadiness() {
 
     runtimeConfig.robotRuntime.waypointReadiness = payload
     robotMap.setWaypointReadiness(formatWaypointReadinessSummary(payload))
+    return payload
   } catch (error) {
     runtimeConfig.robotRuntime.waypointReadiness = null
     robotMap.setWaypointReadiness(`Waypoints not ready: ${formatError(error)}.`)
+    return null
   }
 }
 
@@ -1479,6 +1499,7 @@ async function handleDogzillaConnectionAction(event) {
         status: 'saved',
         origin,
       }, null, 2)
+      setMapWorkflowStatus(originText, 'success')
       setStatus(originText)
       return
     }
@@ -1505,17 +1526,27 @@ async function handleDogzillaConnectionAction(event) {
     }
 
     // Show capture/save buttons when mapping starts, hide when map is saved
-    const mapPanel = document.querySelector('.robot-map-head')
-    if (mapPanel) {
-      if (action === 'start-map-pose-mapping') {
-        mapPanel.classList.add('is-slam-mode')
-      } else if (action === 'save-map-pose') {
-        mapPanel.classList.remove('is-slam-mode')
+    const mapHead = document.querySelector('.robot-map-head')
+    const mapPanel = document.querySelector('.robot-map-panel')
+    for (const panel of [mapHead, mapPanel]) {
+      if (!panel) {
+        continue
       }
+      if (action === 'start-map-pose-mapping') {
+        panel.classList.add('is-slam-mode')
+      } else if (action === 'save-map-pose') {
+        panel.classList.remove('is-slam-mode')
+      }
+    }
+    if (action === 'start-map-pose' || action === 'start-map-pose-mapping' || action === 'save-map-pose') {
+      setMapWorkflowStatus(`${formatConnectionAction(action)}: ${payload.status}.`, payload.status === 'ok' ? 'success' : '')
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
     connectionOutput.textContent = formatError(error)
+    if (event.currentTarget.closest?.('.map-workflow-panel')) {
+      setMapWorkflowStatus(formatError(error), 'error')
+    }
     setStatus(formatError(error), 'error')
   } finally {
     setConnectionActionsDisabled(false)
@@ -1550,12 +1581,37 @@ async function handleWaypointCapture() {
     waypointCaptureStatus.className = 'waypoint-capture-status success'
     waypointCaptureInput.value = ''
     // Refresh waypoints on the map immediately
-    void refreshDogzillaWaypointReadiness()
+    const readiness = await refreshDogzillaWaypointReadiness()
+    setMapWorkflowStatus(formatWaypointReadinessSummary(readiness) || `Saved waypoint "${name}".`, readiness?.readyForMapWaypoints === true ? 'success' : 'error')
   } catch (error) {
     waypointCaptureStatus.textContent = formatError(error)
     waypointCaptureStatus.className = 'waypoint-capture-status error'
+    setMapWorkflowStatus(formatError(error), 'error')
   } finally {
     waypointCaptureButton.disabled = false
+  }
+}
+
+async function handleWaypointReadinessCheck() {
+  if (!waypointReadinessButton) {
+    return
+  }
+
+  waypointReadinessButton.disabled = true
+  setMapWorkflowStatus('Checking waypoint readiness...', '')
+
+  try {
+    const readiness = await refreshDogzillaWaypointReadiness()
+    const summary = formatWaypointReadinessSummary(readiness) || 'Waypoint readiness unavailable.'
+    const state = readiness?.readyForMapWaypoints === true ? 'success' : 'error'
+    setMapWorkflowStatus(summary, state)
+    setStatus(summary, state === 'success' ? undefined : 'error')
+  } catch (error) {
+    const message = formatError(error)
+    setMapWorkflowStatus(message, 'error')
+    setStatus(message, 'error')
+  } finally {
+    waypointReadinessButton.disabled = false
   }
 }
 
@@ -1740,8 +1796,23 @@ function setConnectionActionsDisabled(disabled) {
   saveDogzillaBackendButton.disabled = disabled
   dogzillaBackendUrlInput.disabled = disabled
   runDogzillaPreflightButton.disabled = disabled
+  if (waypointReadinessButton) {
+    waypointReadinessButton.disabled = disabled
+  }
   for (const button of connectionActionButtons) {
     button.disabled = disabled
+  }
+}
+
+function setMapWorkflowStatus(message, state = '') {
+  if (!mapWorkflowStatus) {
+    return
+  }
+
+  mapWorkflowStatus.textContent = message || 'Ready check not run.'
+  mapWorkflowStatus.dataset.state = state
+  if (state === 'error') {
+    mapWorkflowPanel?.setAttribute('open', '')
   }
 }
 
@@ -2104,6 +2175,9 @@ function renderRobotStateSnapshot(snapshot) {
     robotStateSeq.textContent = '-'
     renderBatteryMeter(Number.NaN)
     robotTelemetryMeta.textContent = ''
+    robotNavStatus.textContent = '-'
+    delete robotNavStatusRow?.dataset?.severity
+    robotNavTarget.textContent = ''
     robotMap.hideDot()
     robotMap.clearPoseTrack()
     robotMap.setPoseReadout(null)
@@ -2128,6 +2202,28 @@ function renderRobotStateSnapshot(snapshot) {
   robotStateSeq.textContent = String(robot.seq)
   renderRobotTelemetry(robot)
 
+  const navStatus = snapshot?.navigationStatus
+  if (navStatus) {
+    const icon = NAV_STATUS_ICONS[navStatus.status] || ''
+    robotNavStatus.textContent = navStatus.text ? `${icon} ${navStatus.text}` : '-'
+    if (navStatus.severity) {
+      robotNavStatusRow.dataset.severity = navStatus.severity
+    } else {
+      delete robotNavStatusRow?.dataset?.severity
+    }
+    robotNavTarget.textContent = navStatus.targetWaypoint ? `Target: ${navStatus.targetWaypoint}` : ''
+    if (robotMap.setNavStatusBadge) {
+      robotMap.setNavStatusBadge(`${icon} ${navStatus.text || ''}`)
+    }
+  } else {
+    robotNavStatus.textContent = '-'
+    delete robotNavStatusRow?.dataset?.severity
+    robotNavTarget.textContent = ''
+    if (robotMap.setNavStatusBadge) {
+      robotMap.setNavStatusBadge('')
+    }
+  }
+
   robotMap.setPoseTrust(poseTrusted)
   document.getElementById('robot-map')?.setAttribute('data-pose-trusted', String(poseTrusted))
   robotMap.renderWaypoints(robot)
@@ -2144,6 +2240,9 @@ function renderRobotStateInactive() {
   robotStateSeq.textContent = '-'
   renderBatteryMeter(Number.NaN)
   robotTelemetryMeta.textContent = ''
+  robotNavStatus.textContent = '-'
+  delete robotNavStatusRow?.dataset?.severity
+  robotNavTarget.textContent = ''
   robotMap.hideDot()
   robotMap.renderWaypoints()
   robotMap.clearPoseTrack()

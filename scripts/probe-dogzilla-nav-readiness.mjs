@@ -3,7 +3,7 @@ import { loadDogzillaConnectionConfig } from '../lib/dogzilla-connection-center.
 import { validatePoseInsideDogzillaMap } from '../lib/dogzilla-map-metadata.mjs'
 import { getDogzillaWaypointNavigationReadiness } from '../lib/dogzilla-navigation-readiness.mjs'
 
-const DEFAULT_TIMEOUT_MS = 12000
+const DEFAULT_TIMEOUT_MS = 40000
 
 async function main() {
   const args = new Set(process.argv.slice(2))

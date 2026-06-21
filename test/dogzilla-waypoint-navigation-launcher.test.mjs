@@ -71,7 +71,7 @@ test('forceDogzillaWaypointNavigationOnStartup starts Nav2 and waits for bridge 
 
   assert.equal(result.status, 'ok')
   assert.equal(result.reusedNavigation, false)
-  assert.deepEqual(actionCalls, ['start-navigation'])
+  assert.deepEqual(actionCalls, ['start-map-pose', 'start-navigation'])
 })
 
 test('forceDogzillaWaypointNavigationOnStartup does not start Nav2 when direct bridge is down', async () => {
@@ -96,7 +96,7 @@ test('forceDogzillaWaypointNavigationOnStartup does not start Nav2 when direct b
   assert.deepEqual(actionCalls, [])
 })
 
-test('forceDogzillaWaypointNavigationOnStartup reports start-navigation failure', async () => {
+test('forceDogzillaWaypointNavigationOnStartup reports map-pose startup failure', async () => {
   const result = await forceDogzillaWaypointNavigationOnStartup({
     runtimeConfig: directRuntimeConfig(),
     ros2Config: directRos2Config(),
@@ -111,7 +111,32 @@ test('forceDogzillaWaypointNavigationOnStartup reports start-navigation failure'
   })
 
   assert.equal(result.status, 'error')
-  assert.equal(result.startResult.error, 'map pose unavailable')
+  assert.equal(result.error, 'DOGZILLA map pose is not ready')
+  assert.equal(result.mapPoseStartResult.error, 'map pose unavailable')
+})
+
+test('forceDogzillaWaypointNavigationOnStartup reports start-navigation failure after map-pose succeeds', async () => {
+  const result = await forceDogzillaWaypointNavigationOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    probeRobotSidecarHealthImpl: async () => nav2Health({ nav2Available: false }),
+    runDogzillaConnectionActionImpl: async (action) => action === 'start-map-pose'
+      ? {
+        status: 'ok',
+        action,
+      }
+      : {
+        status: 'error',
+        action,
+        error: 'nav2 launch failed',
+      },
+  })
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.mapPoseStartResult.status, 'ok')
+  assert.equal(result.startResult.error, 'nav2 launch failed')
 })
 
 function directRuntimeConfig() {

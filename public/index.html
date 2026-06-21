@@ -201,6 +201,11 @@
                 <strong id="runtime-target-name">Loading...</strong>
                 <div id="runtime-target-source" class="meta-note"></div>
               </div>
+              <div id="robot-nav-status-row">
+                <span class="robot-state-label">Navigation</span>
+                <strong id="robot-nav-status">-</strong>
+                <div id="robot-nav-target" class="meta-note"></div>
+              </div>
             </div>
           </section>
 
@@ -208,24 +213,44 @@
             <div class="robot-map-head">
               <h2>Mini Map</h2>
               <div class="robot-map-actions">
-                <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Calibrate charger origin for new captures</button>
-                <div class="waypoint-capture-row show-on-slam">
-                  <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name (e.g. garage)" maxlength="40" />
-                  <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Capture current robot pose as a waypoint">Capture</button>
-                  <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
-                </div>
                 <div class="map-view-toggle-row">
                   <button type="button" id="map-view-toggle" class="map-view-toggle" data-view-mode="follow">Top-down map</button>
                   <span class="map-view-mode-label">Follow</span>
                 </div>
-                <button type="button" class="map-slam-button" data-connection-action="start-map-pose-mapping">Start SLAM mapping</button>
-                <button type="button" class="map-slam-button show-on-slam" data-connection-action="save-map-pose">Save SLAM map</button>
                 <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
               </div>
               <div class="robot-map-meta-row">
                 <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
               </div>
             </div>
+            <details id="map-workflow-panel" class="map-workflow-panel">
+              <summary>
+                <span>Mapping</span>
+                <span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
+              </summary>
+              <div class="map-workflow-grid">
+                <div class="map-workflow-group">
+                  <span class="map-workflow-label">Current saved map</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Localize on saved map</button>
+                    <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Set charger origin here</button>
+                    <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check waypoint readiness</button>
+                  </div>
+                  <div class="waypoint-capture-row">
+                    <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
+                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as a waypoint">Save waypoint here</button>
+                    <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
+                  </div>
+                </div>
+                <div class="map-workflow-group">
+                  <span class="map-workflow-label">New SLAM map</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" class="map-slam-button" data-connection-action="start-map-pose-mapping">Start new SLAM map</button>
+                    <button type="button" class="map-slam-button show-on-slam" data-connection-action="save-map-pose">Save new map identity</button>
+                  </div>
+                </div>
+              </div>
+            </details>
             <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
@@ -233,6 +258,7 @@
               <span id="robot-map-waypoints" class="robot-map-waypoints" aria-hidden="true"></span>
               <span id="robot-map-track" class="robot-map-track" aria-hidden="true"></span>
               <span id="robot-map-dot" class="robot-map-dot" aria-hidden="true"></span>
+              <span id="robot-nav-badge" class="robot-nav-badge" aria-hidden="true"></span>
               <span id="robot-pose-readout" class="robot-pose-readout">pose -</span>
             </div>
             <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>

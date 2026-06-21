@@ -191,6 +191,15 @@ test('getDogzillaMapOriginStatus detects missing, ready, and mismatched origin m
       id: 'active',
       fingerprint: 'fp',
     },
+  }, null).status, 'active-map-identity-unavailable')
+  assert.equal(getDogzillaMapOriginStatus({
+    x: 1,
+    y: 2,
+    yaw: 0,
+    map: {
+      id: 'active',
+      fingerprint: 'fp',
+    },
   }, { id: 'active', fingerprint: 'fp' }).status, 'ready')
 })
 

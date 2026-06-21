@@ -21,268 +21,308 @@
         "living_room": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": 1.32329,
-          "y": -0.82861,
-          "yaw": 2.01156,
+          "x": 8.49323,
+          "y": 7.28597,
+          "yaw": -0.30688,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "living_room",
           "verified": true,
-          "capturedAt": "2026-06-17T03:35:56.164Z",
+          "capturedAt": "2026-06-18T19:58:23.120Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
-          "mapFingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+          "mapFingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
           "map": {
             "available": true,
             "id": "robodoge_home",
             "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
             "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
             "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-            "savedAt": "2026-06-16T22:38:11+08:00",
+            "savedAt": "2026-06-17T11:38:14+08:00",
             "resolution": 0.05,
-            "widthCells": 224,
-            "heightCells": 196,
-            "widthMeters": 11.200000000000001,
-            "heightMeters": 9.8,
+            "widthCells": 354,
+            "heightCells": 354,
+            "widthMeters": 17.7,
+            "heightMeters": 17.7,
             "origin": [
-              -1.1,
-              -2.5,
+              -7.563617,
+              -9.330555,
               0
             ],
             "bounds": {
-              "minX": -1.1,
-              "maxX": 10.100000000000001,
-              "minY": -2.5,
-              "maxY": 7.300000000000001
+              "minX": -7.563617,
+              "maxX": 10.136382999999999,
+              "minY": -9.330555,
+              "maxY": 8.369444999999999
             },
-            "fingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+            "fingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
             "error": ""
           },
           "mapOrigin": {
             "frame": "app_map",
             "sourceFrame": "map",
-            "label": "charger_origin",
-            "x": 0.72171,
-            "y": 0.45865,
-            "yaw": -0.27702,
-            "source": "tf:map->base_link",
-            "savedAt": "2026-06-17T03:32:58.902Z",
+            "label": "home_origin",
+            "x": -7.563617,
+            "y": -9.330555,
+            "yaw": 0,
+            "source": "occupancy-grid",
+            "savedAt": "2026-06-18T19:50:05.089Z",
             "mapId": "robodoge_home",
-            "mapFingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+            "mapFingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
             "map": {
               "available": true,
               "id": "robodoge_home",
+              "metadataFile": "/home/pi/robodoge/maps/robodoge_home_map.json",
               "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
               "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
               "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-              "savedAt": "2026-06-16T22:38:11+08:00",
+              "savedAt": "2026-06-17T11:38:14+08:00",
               "resolution": 0.05,
-              "widthCells": 224,
-              "heightCells": 196,
-              "widthMeters": 11.200000000000001,
-              "heightMeters": 9.8,
               "origin": [
-                -1.1,
-                -2.5,
+                -7.563617,
+                -9.330555,
                 0
               ],
+              "widthCells": 354,
+              "heightCells": 354,
+              "widthMeters": 17.7,
+              "heightMeters": 17.7,
               "bounds": {
-                "minX": -1.1,
-                "maxX": 10.100000000000001,
-                "minY": -2.5,
-                "maxY": 7.300000000000001
+                "minX": -7.563617,
+                "maxX": 10.136382999999999,
+                "minY": -9.330555,
+                "maxY": 8.369444999999999
               },
-              "fingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
-              "error": ""
+              "fingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
+              "files": {
+                "yaml": {
+                  "path": "/home/pi/robodoge/maps/robodoge_home.yaml",
+                  "size": 156,
+                  "mtime": 1781667494.1336932,
+                  "sha256": "4dbf9b534303312320c7f9bd25c93372ad4afcc30ca548d718919d0d56fe3b6a"
+                },
+                "pgm": {
+                  "path": "/home/pi/robodoge/maps/robodoge_home.pgm",
+                  "size": 125368,
+                  "mtime": 1781667494.1336932,
+                  "sha256": "768a8dd3bed74bca780525dda38ac0736c7e645b96266d3c18d115b60bb75e05"
+                },
+                "pbstream": {
+                  "path": "/home/pi/robodoge/maps/robodoge_home.pbstream",
+                  "size": 5533445,
+                  "mtime": 1781667487.305627,
+                  "sha256": "abe87aff82690b653815a9980fed8a19bea7f18f22642407726d0db6952d9d7c"
+                }
+              }
             }
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": 1.76793,
-            "y": -0.70028,
-            "yaw": 1.73454,
-            "theta": 1.73454,
+            "x": 0.92961,
+            "y": -2.04459,
+            "yaw": -0.30688,
+            "theta": -0.30688,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-17T03:35:56.164Z (app_map frame)."
+            "Captured from app at 2026-06-18T19:58:23.120Z (app_map frame)."
           ]
         },
         "kitchen": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": 0.57206,
-          "y": -0.68685,
-          "yaw": -0.00845,
+          "x": 7.49237,
+          "y": 9.04669,
+          "yaw": -0.25585,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "kitchen",
           "verified": true,
-          "capturedAt": "2026-06-17T03:34:18.488Z",
+          "capturedAt": "2026-06-18T19:57:18.393Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
-          "mapFingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+          "mapFingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
           "map": {
             "available": true,
             "id": "robodoge_home",
             "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
             "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
             "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-            "savedAt": "2026-06-16T22:38:11+08:00",
+            "savedAt": "2026-06-17T11:38:14+08:00",
             "resolution": 0.05,
-            "widthCells": 224,
-            "heightCells": 196,
-            "widthMeters": 11.200000000000001,
-            "heightMeters": 9.8,
+            "widthCells": 354,
+            "heightCells": 354,
+            "widthMeters": 17.7,
+            "heightMeters": 17.7,
             "origin": [
-              -1.1,
-              -2.5,
+              -7.563617,
+              -9.330555,
               0
             ],
             "bounds": {
-              "minX": -1.1,
-              "maxX": 10.100000000000001,
-              "minY": -2.5,
-              "maxY": 7.300000000000001
+              "minX": -7.563617,
+              "maxX": 10.136382999999999,
+              "minY": -9.330555,
+              "maxY": 8.369444999999999
             },
-            "fingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+            "fingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
             "error": ""
           },
           "mapOrigin": {
             "frame": "app_map",
             "sourceFrame": "map",
-            "label": "charger_origin",
-            "x": 0.72171,
-            "y": 0.45865,
-            "yaw": -0.27702,
-            "source": "tf:map->base_link",
-            "savedAt": "2026-06-17T03:32:58.902Z",
+            "label": "home_origin",
+            "x": -7.563617,
+            "y": -9.330555,
+            "yaw": 0,
+            "source": "occupancy-grid",
+            "savedAt": "2026-06-18T19:50:05.089Z",
             "mapId": "robodoge_home",
-            "mapFingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+            "mapFingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
             "map": {
               "available": true,
               "id": "robodoge_home",
+              "metadataFile": "/home/pi/robodoge/maps/robodoge_home_map.json",
               "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
               "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
               "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-              "savedAt": "2026-06-16T22:38:11+08:00",
+              "savedAt": "2026-06-17T11:38:14+08:00",
               "resolution": 0.05,
-              "widthCells": 224,
-              "heightCells": 196,
-              "widthMeters": 11.200000000000001,
-              "heightMeters": 9.8,
               "origin": [
-                -1.1,
-                -2.5,
+                -7.563617,
+                -9.330555,
                 0
               ],
+              "widthCells": 354,
+              "heightCells": 354,
+              "widthMeters": 17.7,
+              "heightMeters": 17.7,
               "bounds": {
-                "minX": -1.1,
-                "maxX": 10.100000000000001,
-                "minY": -2.5,
-                "maxY": 7.300000000000001
+                "minX": -7.563617,
+                "maxX": 10.136382999999999,
+                "minY": -9.330555,
+                "maxY": 8.369444999999999
               },
-              "fingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
-              "error": ""
+              "fingerprint": "b2478b9073e795ce0caf435b145278df44986dddb46757ae6fac8cd6ad8931b3",
+              "files": {
+                "yaml": {
+                  "path": "/home/pi/robodoge/maps/robodoge_home.yaml",
+                  "size": 156,
+                  "mtime": 1781667494.1336932,
+                  "sha256": "4dbf9b534303312320c7f9bd25c93372ad4afcc30ca548d718919d0d56fe3b6a"
+                },
+                "pgm": {
+                  "path": "/home/pi/robodoge/maps/robodoge_home.pgm",
+                  "size": 125368,
+                  "mtime": 1781667494.1336932,
+                  "sha256": "768a8dd3bed74bca780525dda38ac0736c7e645b96266d3c18d115b60bb75e05"
+                },
+                "pbstream": {
+                  "path": "/home/pi/robodoge/maps/robodoge_home.pbstream",
+                  "size": 5533445,
+                  "mtime": 1781667487.305627,
+                  "sha256": "abe87aff82690b653815a9980fed8a19bea7f18f22642407726d0db6952d9d7c"
+                }
+              }
             }
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": 1.08411,
-            "y": -0.35847,
-            "yaw": -0.28547,
-            "theta": -0.28547,
+            "x": -0.07125,
+            "y": -0.28387,
+            "yaw": -0.25585,
+            "theta": -0.25585,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-17T03:34:18.488Z (app_map frame)."
+            "Captured from app at 2026-06-18T19:57:18.393Z (app_map frame)."
           ]
         },
         "garage": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": 0.48888,
-          "y": -0.62495,
-          "yaw": 2.72054,
+          "x": -0.00677,
+          "y": -0.01965,
+          "yaw": -2.75689,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "garage",
           "verified": true,
-          "capturedAt": "2026-06-17T03:33:47.108Z",
+          "capturedAt": "2026-06-18T20:06:10.546Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
-          "mapFingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+          "mapFingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
           "map": {
             "available": true,
             "id": "robodoge_home",
             "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
             "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
             "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-            "savedAt": "2026-06-16T22:38:11+08:00",
+            "savedAt": "2026-06-19T03:58:58+08:00",
             "resolution": 0.05,
-            "widthCells": 224,
-            "heightCells": 196,
-            "widthMeters": 11.200000000000001,
-            "heightMeters": 9.8,
+            "widthCells": 287,
+            "heightCells": 258,
+            "widthMeters": 14.350000000000001,
+            "heightMeters": 12.9,
             "origin": [
-              -1.1,
-              -2.5,
+              -6.177503,
+              -7.599371,
               0
             ],
             "bounds": {
-              "minX": -1.1,
-              "maxX": 10.100000000000001,
-              "minY": -2.5,
-              "maxY": 7.300000000000001
+              "minX": -6.177503,
+              "maxX": 8.172497000000002,
+              "minY": -7.599371,
+              "maxY": 5.300629000000001
             },
-            "fingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+            "fingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
             "error": ""
           },
           "mapOrigin": {
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": 0.72171,
-            "y": 0.45865,
-            "yaw": -0.27702,
+            "x": 0.03217,
+            "y": 0.02343,
+            "yaw": 2.69177,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-17T03:32:58.902Z",
+            "savedAt": "2026-06-18T20:05:42.360Z",
             "mapId": "robodoge_home",
-            "mapFingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+            "mapFingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
             "map": {
               "available": true,
               "id": "robodoge_home",
               "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
               "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
               "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-              "savedAt": "2026-06-16T22:38:11+08:00",
+              "savedAt": "2026-06-19T03:58:58+08:00",
               "resolution": 0.05,
-              "widthCells": 224,
-              "heightCells": 196,
-              "widthMeters": 11.200000000000001,
-              "heightMeters": 9.8,
+              "widthCells": 287,
+              "heightCells": 258,
+              "widthMeters": 14.350000000000001,
+              "heightMeters": 12.9,
               "origin": [
-                -1.1,
-                -2.5,
+                -6.177503,
+                -7.599371,
                 0
               ],
               "bounds": {
-                "minX": -1.1,
-                "maxX": 10.100000000000001,
-                "minY": -2.5,
-                "maxY": 7.300000000000001
+                "minX": -6.177503,
+                "maxX": 8.172497000000002,
+                "minY": -7.599371,
+                "maxY": 5.300629000000001
               },
-              "fingerprint": "60a3d8960a58c19502a1694e34a165d56994d32c90e423ea0b224cc5628e4aaa",
+              "fingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
               "error": ""
             }
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": 1.02103,
-            "y": -0.27618,
-            "yaw": 2.44352,
-            "theta": 2.44352,
+            "x": 0.04681,
+            "y": 0.03818,
+            "yaw": -0.06512,
+            "theta": -0.06512,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-17T03:33:47.108Z (app_map frame)."
+            "Captured from app at 2026-06-18T20:06:10.546Z (app_map frame)."
           ]
         },
         "bedroom": {
@@ -518,90 +558,90 @@
         "charger": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": -0.00751,
-          "y": 0.00069,
-          "yaw": 0.15959,
+          "x": -0.00282,
+          "y": -0.00565,
+          "yaw": -0.01006,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "charger",
           "verified": true,
-          "capturedAt": "2026-06-16T14:37:22.501Z",
+          "capturedAt": "2026-06-18T20:05:54.975Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
-          "mapFingerprint": "e5020e25d8faeeeb03d8b380139a14e1560838694ce0030a835c239b23c74760",
+          "mapFingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
           "map": {
             "available": true,
             "id": "robodoge_home",
             "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
             "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
             "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-            "savedAt": "2026-06-16T09:25:46+08:00",
+            "savedAt": "2026-06-19T03:58:58+08:00",
             "resolution": 0.05,
-            "widthCells": 360,
-            "heightCells": 353,
-            "widthMeters": 18,
-            "heightMeters": 17.650000000000002,
+            "widthCells": 287,
+            "heightCells": 258,
+            "widthMeters": 14.350000000000001,
+            "heightMeters": 12.9,
             "origin": [
-              -8.103468,
-              -8.020546,
+              -6.177503,
+              -7.599371,
               0
             ],
             "bounds": {
-              "minX": -8.103468,
-              "maxX": 9.896532,
-              "minY": -8.020546,
-              "maxY": 9.629454000000003
+              "minX": -6.177503,
+              "maxX": 8.172497000000002,
+              "minY": -7.599371,
+              "maxY": 5.300629000000001
             },
-            "fingerprint": "e5020e25d8faeeeb03d8b380139a14e1560838694ce0030a835c239b23c74760",
+            "fingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
             "error": ""
           },
           "mapOrigin": {
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": -0.00508,
-            "y": 0.00129,
-            "yaw": -0.16116,
+            "x": 0.03217,
+            "y": 0.02343,
+            "yaw": 2.69177,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-16T14:35:55.226Z",
+            "savedAt": "2026-06-18T20:05:42.360Z",
             "mapId": "robodoge_home",
-            "mapFingerprint": "e5020e25d8faeeeb03d8b380139a14e1560838694ce0030a835c239b23c74760",
+            "mapFingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
             "map": {
               "available": true,
               "id": "robodoge_home",
               "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
               "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
               "pbstream": "/home/pi/robodoge/maps/robodoge_home.pbstream",
-              "savedAt": "2026-06-16T09:25:46+08:00",
+              "savedAt": "2026-06-19T03:58:58+08:00",
               "resolution": 0.05,
-              "widthCells": 360,
-              "heightCells": 353,
-              "widthMeters": 18,
-              "heightMeters": 17.650000000000002,
+              "widthCells": 287,
+              "heightCells": 258,
+              "widthMeters": 14.350000000000001,
+              "heightMeters": 12.9,
               "origin": [
-                -8.103468,
-                -8.020546,
+                -6.177503,
+                -7.599371,
                 0
               ],
               "bounds": {
-                "minX": -8.103468,
-                "maxX": 9.896532,
-                "minY": -8.020546,
-                "maxY": 9.629454000000003
+                "minX": -6.177503,
+                "maxX": 8.172497000000002,
+                "minY": -7.599371,
+                "maxY": 5.300629000000001
               },
-              "fingerprint": "e5020e25d8faeeeb03d8b380139a14e1560838694ce0030a835c239b23c74760",
+              "fingerprint": "c6c39d5ebc7c5b02e86332e86a668cb89e15242eef98149dc612a98eb60c6487",
               "error": ""
             }
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": -0.01238,
-            "y": 0.00318,
-            "yaw": -0.00157,
-            "theta": -0.00157,
+            "x": 0.03716,
+            "y": 0.02729,
+            "yaw": 2.68171,
+            "theta": 2.68171,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-16T14:37:22.501Z (app_map frame)."
+            "Captured from app at 2026-06-18T20:05:54.975Z (app_map frame)."
           ]
         }
       }

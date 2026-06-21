@@ -284,6 +284,10 @@ export function createRobotMapRenderer({
       return
     }
 
+    // Reset stale tracking
+    staleWaypointCount = 0
+    staleWaypointIds = []
+
     // Initialize appMapOriginCache via getCanvasRobotPose so app_map waypoints can convert
     const canvasPose = robot ? getCanvasRobotPose(robot) : null
     const centerPose = canvasPose || normalizeRobotMapPose(robot?.pose)
@@ -291,6 +295,13 @@ export function createRobotMapRenderer({
     const markers = []
 
     getRenderableRobotMapWaypoints(getWaypoints()).forEach((waypoint) => {
+      // Skip disabled/stale waypoints — they should not render
+      if (waypoint.enabled === false) {
+        staleWaypointCount++
+        staleWaypointIds.push(waypoint.id)
+        return
+      }
+
       // Convert app_map waypoints to map frame so they align with grid.
       // Prefer capturedMapPose (always map frame) over live conversion via appMapToMapPose,
       // because appMapToMapPose depends on the saved origin which may not match the capture
@@ -456,8 +467,13 @@ export function createRobotMapRenderer({
     updateMeta()
   }
 
+  let navStatusBadge = ''
+
   function updateMeta() {
-    elements.meta.textContent = [baseMeta, waypointReadinessSummary, lidarSummary].filter(Boolean).join(' ')
+    const staleInfo = staleWaypointCount > 0
+      ? `${staleWaypointCount} stale waypoint(s) hidden`
+      : ''
+    elements.meta.textContent = [baseMeta, staleInfo, waypointReadinessSummary, lidarSummary].filter(Boolean).join(' ')
   }
 
   function renderLidarScan(scan, robot = lastRenderedRobot) {
@@ -698,6 +714,9 @@ export function createRobotMapRenderer({
     context?.clearRect(0, 0, elements.lidarScan.width, elements.lidarScan.height)
   }
 
+  let staleWaypointCount = 0
+  let staleWaypointIds = []
+
   function setPoseTrust(trusted) {
     poseTrusted = trusted === true
   }
@@ -731,6 +750,7 @@ export function createRobotMapRenderer({
     getMapGridMeta: () => mapGridMeta,
     getViewMode: () => mapViewMode,
     getViewModeLabel,
+    getStaleWaypointCount: () => staleWaypointCount,
     hideDot,
     renderDot,
     setPoseTrust,
@@ -741,6 +761,7 @@ export function createRobotMapRenderer({
     setLidarSummary,
     setMapData,
     setMeta,
+    setNavStatusBadge: (text) => { navStatusBadge = text || '' },
     setPoseReadout,
     setWaypointReadiness,
     streamPath: () => getRuntimeConfig?.().robotRuntime?.stateStreamPath || defaultRobotRuntime?.stateStreamPath,

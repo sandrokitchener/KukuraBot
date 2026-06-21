@@ -91,15 +91,9 @@ if (-not $resolvedDataYamlPath) {
   Write-Host "Using existing remote YOLO labels: $remoteLabelsPath"
 }
 
-$installCommand = "python3 - <<'PY'
-import importlib.util
-import sys
-missing=[m for m in ['cv2','numpy','onnxruntime'] if importlib.util.find_spec(m) is None]
-if missing:
-    print('missing:' + ','.join(missing))
-    sys.exit(42)
-print('deps-ok')
-PY"
+$installProbe = "import importlib.util, sys; missing=[m for m in ('cv2','numpy','onnxruntime') if importlib.util.find_spec(m) is None]; print('missing:' + ','.join(missing) if missing else 'deps-ok'); sys.exit(42 if missing else 0)"
+$installProbeQuoted = ConvertTo-RemoteSingleQuote $installProbe
+$installCommand = "python3 -c $installProbeQuoted"
 
 $installResult = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $installCommand
 if ($LASTEXITCODE -ne 0) {
@@ -116,15 +110,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $effectiveCameraUrl = if ($CameraUrl) { $CameraUrl } else { "auto" }
 if ($effectiveCameraUrl -eq "auto") {
-  $detectCameraCommand = @'
-for candidate in /dev/v4l/by-id/*video-index0 /dev/video0 /dev/video1 /dev/video2 /dev/video3; do
-  if [ -e "$candidate" ]; then
-    printf '%s' "$candidate"
-    exit 0
-  fi
-done
-printf '/dev/video0'
-'@
+  $detectCameraCommand = 'for candidate in /dev/v4l/by-id/*video-index0 /dev/video0 /dev/video1 /dev/video2 /dev/video3; do if [ -e "$candidate" ]; then printf "%s" "$candidate"; exit 0; fi; done; printf "/dev/video0"'
   $effectiveCameraUrl = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $detectCameraCommand
   $effectiveCameraUrl = ($effectiveCameraUrl | Out-String).Trim()
   if (-not $effectiveCameraUrl) {
@@ -143,99 +129,15 @@ $serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/
 
 $releaseVendorCameraCommand = "true"
 if (-not $usesHttpCamera) {
-  $releaseVendorCameraCommand = @'
-python3 - <<'PY'
-import os, signal, subprocess, time
-camera_source = os.environ.get('ROBO_DOGE_CAMERA_SOURCE', '')
-camera_realpath = os.path.realpath(camera_source) if camera_source else ''
-try:
-    rows = subprocess.check_output(['pgrep', '-af', '/home/pi/DOGZILLA/app_dogzilla/app_dogzilla.py'], text=True).splitlines()
-except subprocess.CalledProcessError:
-    rows = []
-for row in rows:
-    pid = int(row.split()[0])
-    if pid in (os.getpid(), os.getppid()):
-        continue
-    try:
-        comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
-    except OSError:
-        continue
-    if comm.startswith('python'):
-        os.kill(pid, signal.SIGTERM)
-        print(f'stopped vendor camera app {pid}')
-camera_consumers = set()
-if camera_realpath:
-    for name in os.listdir('/proc'):
-        if not name.isdigit():
-            continue
-        pid = int(name)
-        if pid in (os.getpid(), os.getppid()):
-            continue
-        fd_dir = f'/proc/{pid}/fd'
-        try:
-            comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
-        except OSError:
-            continue
-        if comm not in ('pipewire', 'wireplumber'):
-            continue
-        try:
-            fd_names = os.listdir(fd_dir)
-        except OSError:
-            continue
-        for fd_name in fd_names:
-            try:
-                target = os.path.realpath(os.readlink(f'{fd_dir}/{fd_name}'))
-            except OSError:
-                continue
-            if target == camera_realpath:
-                camera_consumers.add((pid, comm))
-                break
-for pid, comm in sorted(camera_consumers):
-    try:
-        os.kill(pid, signal.SIGTERM)
-        print(f'stopped camera desktop consumer {comm} {pid}')
-    except ProcessLookupError:
-        pass
-if rows or camera_consumers:
-    time.sleep(1)
-PY
-'@
-  $releaseCameraScript = ConvertTo-RemoteSingleQuote $releaseVendorCameraCommand.Trim()
   $releaseCameraSource = ConvertTo-RemoteSingleQuote $effectiveCameraUrl
-  $releaseVendorCameraCommand = "ROBO_DOGE_CAMERA_SOURCE=$releaseCameraSource bash -lc $releaseCameraScript"
+  $releaseVendorCameraCommand = "pkill -TERM -f '[a]pp_dogzilla.py' 2>/dev/null || true; if command -v fuser >/dev/null 2>&1; then fuser -k $releaseCameraSource 2>/dev/null || true; fi; sleep 1"
 }
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
-  $stopCommand = @'
-python3 - <<'PY'
-import os, signal, subprocess, time
-try:
-    rows = subprocess.check_output(['pgrep', '-af', 'sidecars/dogzilla_yolo_vision/server.py'], text=True).splitlines()
-except subprocess.CalledProcessError:
-    rows = []
-stopped = []
-for row in rows:
-    pid = int(row.split()[0])
-    try:
-        comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
-    except OSError:
-        continue
-    if comm.startswith('python'):
-        os.kill(pid, signal.SIGTERM)
-        stopped.append(pid)
-        print(f'stopped yolo vision {pid}')
-time.sleep(0.8)
-for pid in stopped:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        continue
-    os.kill(pid, signal.SIGKILL)
-    print(f'force-stopped yolo vision {pid}')
-PY
-'@
-  $stopCommand = $stopCommand.Trim()
+  $stopPattern = "[s]idecars/dogzilla_yolo_vision/server.py"
+  $stopPatternQuoted = ConvertTo-RemoteSingleQuote $stopPattern
+  $stopCommand = 'for pid in $(pgrep -f ' + $stopPatternQuoted + ' 2>/dev/null || true); do if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi; kill -TERM "$pid" 2>/dev/null || true; done; sleep 0.8; for pid in $(pgrep -f ' + $stopPatternQuoted + ' 2>/dev/null || true); do if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi; kill -KILL "$pid" 2>/dev/null || true; done'
   $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand
   $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && $releaseVendorCameraCommand && if [ -f logs/yolo-vision.pid ]; then kill `$(cat logs/yolo-vision.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/yolo-vision.log 2>&1 < /dev/null & echo `$! > logs/yolo-vision.pid) && sleep 2 && cat logs/yolo-vision.pid && tail -n 20 logs/yolo-vision.log"
   Write-Host "Starting DOGZILLA YOLO vision sidecar on $Alias port $Port in remote background."

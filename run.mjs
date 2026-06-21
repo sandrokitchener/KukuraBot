@@ -8,6 +8,7 @@ import {
   forceDogzillaWaypointNavigationOnStartup,
   isDogzillaWaypointNavigationReady,
 } from './lib/dogzilla-waypoint-navigation-launcher.mjs'
+import { shouldBlockDogzillaAppLaunchForNavigation } from './lib/dogzilla-startup-watchdog.mjs'
 import { loadIsaacSidecarConfig } from './lib/isaacsim-config.mjs'
 import { startManagedIsaacEnvironment } from './lib/isaacsim-launcher.mjs'
 import { loadRobotRos2Config, loadRobotRuntimeConfig } from './lib/robot-runtime-config.mjs'
@@ -142,6 +143,28 @@ if (existingAppConfig && reuseExistingApp) {
       return null
     })
 
+    const startupGate = {
+      status: waypointNavigationStartup?.status === 'ok' || waypointNavigationStartup?.status === 'skipped'
+        ? 'ok'
+        : 'degraded',
+      waypointNavigation: waypointNavigationStartup || {
+        enabled: true,
+        status: 'error',
+        error: 'DOGZILLA waypoint navigation startup did not return a result.',
+      },
+    }
+
+    if (shouldBlockDogzillaAppLaunchForNavigation(startupGate)) {
+      const reason = waypointNavigationStartup?.error
+        || waypointNavigationStartup?.health?.error
+        || waypointNavigationStartup?.health?.body?.runtime?.nav2?.serverError
+        || 'DOGZILLA Nav2 waypoint readiness is not proven.'
+      startupStatus.stop()
+      console.error(`App launch blocked: DOGZILLA navigation is not ready. ${reason}`)
+      console.error('Set APP_DOGZILLA_STARTUP_REQUIRE_NAV=0 only for non-navigation debugging.')
+      process.exit(1)
+    }
+
     startupStatus.update('Running robot startup sequence')
     await runRobotStartupSequence({
       runtimeConfig: robotRuntimeConfig,
@@ -162,6 +185,7 @@ if (existingAppConfig && reuseExistingApp) {
         APP_HOST: HOST,
         APP_PORT: String(PORT),
         APP_MODEL_PROFILE: MODEL_PROFILE,
+        APP_DOGZILLA_STARTUP_WATCHDOG: '0',
         ROBOT_RUNTIME_TARGET: robotRuntimeConfig.activeTargetId,
         KUKURA_HOST: HOST,
         KUKURA_PORT: String(PORT),

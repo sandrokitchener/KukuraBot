@@ -8,7 +8,12 @@ const LAUNCH_PATH = new URL('../sidecars/dogzilla_navigation/robodoge_nav2_navig
 const GAIT_ADAPTER_PATH = new URL('../sidecars/dogzilla_navigation/cmd_vel_gait_adapter.py', import.meta.url)
 const NAV2_GAIT_MAPPING_PATH = new URL('../sidecars/dogzilla_lib_bridge/nav2_gait_adapter.py', import.meta.url)
 const MAP_POSE_SCRIPT_PATH = new URL('../sidecars/dogzilla_map_pose/start-map-pose-in-container.sh', import.meta.url)
+const SAVE_MAP_POSE_SCRIPT_PATH = new URL('../sidecars/dogzilla_map_pose/save-map-pose-in-container.sh', import.meta.url)
 const SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-navigation-ssh.ps1', import.meta.url)
+const BRIDGE_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-bridge-ssh.ps1', import.meta.url)
+const YOLO_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-yolo-vision-ssh.ps1', import.meta.url)
+const AUDIO_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-audio-cue-ssh.ps1', import.meta.url)
+const YOLO_SERVER_PATH = new URL('../sidecars/dogzilla_yolo_vision/server.py', import.meta.url)
 
 test('DOGZILLA Nav2 startup generates doorway-tuned params from upstream defaults', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
@@ -163,6 +168,118 @@ test('DOGZILLA map-pose startup cleanly restarts stale Cartographer processes', 
   assert.match(script, /pkill -TERM -f "\[c\]artographer_node\.\*robodoge_dogzilla_laser_only"/)
   assert.match(script, /pkill -KILL -f "\[c\]artographer_node\.\*robodoge_dogzilla_laser_only"/)
   assert.match(script, /Cartographer has \$CARTOGRAPHER_COUNT matching processes/)
+})
+
+test('DOGZILLA map-pose startup selects no-IMU config before Cartographer launch', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+  const imuConfigIndex = script.indexOf('IMU_CONFIG="_noimu"')
+  const cartographerArgsIndex = script.indexOf('cartographer_args=(')
+
+  assert.ok(imuConfigIndex > 0, 'expected no-IMU config assignment')
+  assert.ok(cartographerArgsIndex > 0, 'expected Cartographer arg construction')
+  assert.ok(imuConfigIndex < cartographerArgsIndex, 'IMU_CONFIG must be resolved before Cartographer args are built')
+  assert.match(script, /DOGZILLA_IMU_AVAILABLE="\$\{DOGZILLA_IMU_AVAILABLE:-false\}"/)
+  assert.doesNotMatch(script, /robodoge_dogzilla_laser_only-noimu/)
+})
+
+test('DOGZILLA map-pose startup resolves active pbstream from map metadata', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /DOGZILLA_MAP_METADATA/)
+  assert.match(script, /metadata\.get\("pbstream"\)/)
+  assert.match(script, /DOGZILLA_MAP_PBSTREAM="\$\{DOGZILLA_MAP_PBSTREAM:-\$REMOTE_ROOT\/maps\/robodoge_home\.pbstream\}"/)
+})
+
+test('DOGZILLA map-pose startup retries apt while another startup owns the lock', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /map-pose-startup\.lock/)
+  assert.match(script, /Timed out waiting for another DOGZILLA map-pose startup/)
+  assert.match(script, /run_apt_get_once\(\)/)
+  assert.match(script, /\/tmp\/robodoge-apt\.lock/)
+  assert.match(script, /dpkg --configure -a/)
+  assert.match(script, /run_apt_get\(\)/)
+  assert.match(script, /waiting for apt\/dpkg lock/)
+  assert.match(script, /run_apt_get update/)
+  assert.match(script, /run_apt_get install -y --no-install-recommends "\$\{missing_packages\[@\]\}"/)
+  assert.match(script, /exec 8>&- 2>\/dev\/null \|\| true[\s\S]+nohup "\$\{cartographer_args\[@\]\}"/)
+  assert.match(script, /exec 8>&- 2>\/dev\/null \|\| true[\s\S]+cartographer_occupancy_grid_node/)
+})
+
+test('DOGZILLA map save refuses localization and writes unique map identity', async () => {
+  const script = await readFile(SAVE_MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /Refusing to save map while Cartographer is in localization mode/)
+  assert.match(script, /DOGZILLA_MAP_SAVE_ALLOW_LOCALIZATION/)
+  assert.match(script, /map_id="\$\{DOGZILLA_MAP_ID:-robodoge_home_\$\(date -u \+%Y%m%dT%H%M%SZ\)\}"/)
+  assert.match(script, /"id": "\$map_id"/)
+  assert.match(script, /"activeAlias": "robodoge_home"/)
+})
+
+test('DOGZILLA Nav2 startup resolves map yaml from active map metadata', async () => {
+  const script = await readFile(SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /DOGZILLA_MAP_METADATA/)
+  assert.match(script, /metadata\.get\("yaml"\)/)
+  assert.match(script, /DOGZILLA_NAV2_MAP="\$\{DOGZILLA_NAV2_MAP:-\$REMOTE_ROOT\/maps\/robodoge_home\.yaml\}"/)
+})
+
+test('DOGZILLA Nav2 startup retries apt while map-pose startup owns the lock', async () => {
+  const script = await readFile(SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /nav2-startup\.lock/)
+  assert.match(script, /Timed out waiting for another DOGZILLA Nav2 startup/)
+  assert.match(script, /run_apt_get_once\(\)/)
+  assert.match(script, /\/tmp\/robodoge-apt\.lock/)
+  assert.match(script, /dpkg --configure -a/)
+  assert.match(script, /run_apt_get\(\)/)
+  assert.match(script, /waiting for apt\/dpkg lock/)
+  assert.match(script, /run_apt_get update/)
+  assert.match(script, /run_apt_get install -y --no-install-recommends "\$\{missing_packages\[@\]\}"/)
+  assert.match(script, /exec 8>&- 2>\/dev\/null \|\| true[\s\S]+cmd_vel_gait_adapter\.py/)
+  assert.match(script, /exec 8>&- 2>\/dev\/null \|\| true[\s\S]+ros2 launch "\$DOGZILLA_NAV2_LAUNCH"/)
+})
+
+test('DOGZILLA direct bridge background startup avoids nested SSH heredocs', async () => {
+  const script = await readFile(BRIDGE_SSH_SCRIPT_PATH, 'utf-8')
+
+  assert.doesNotMatch(script, /python3 - <<'PY'/)
+  assert.match(script, /\$stopPattern = if \(\$processPath\.Length -gt 0\)/)
+  assert.match(script, /pgrep -f ' \+ \$stopPatternQuoted/)
+  assert.match(script, /\[ "\$pid" = "\$\$" \] \|\| \[ "\$pid" = "\$PPID" \]/)
+  assert.match(script, /kill -TERM "\$pid"/)
+  assert.match(script, /kill -KILL "\$pid"/)
+})
+
+test('DOGZILLA support service background startups avoid nested SSH heredocs', async () => {
+  const yoloScript = await readFile(YOLO_SSH_SCRIPT_PATH, 'utf-8')
+  const audioScript = await readFile(AUDIO_SSH_SCRIPT_PATH, 'utf-8')
+
+  assert.doesNotMatch(yoloScript, /python3 - <<'PY'/)
+  assert.doesNotMatch(yoloScript, /\$detectCameraCommand = @'/)
+  assert.match(yoloScript, /\$detectCameraCommand = 'for candidate in \/dev\/v4l\/by-id\/\*video-index0/)
+  assert.match(yoloScript, /python3 -c \$installProbeQuoted/)
+  assert.match(yoloScript, /fuser -k \$releaseCameraSource/)
+  assert.match(yoloScript, /\$stopPattern = "\[s\]idecars\/dogzilla_yolo_vision\/server\.py"/)
+  assert.match(yoloScript, /pgrep -f ' \+ \$stopPatternQuoted/)
+  assert.match(yoloScript, /\[ "\$pid" = "\$\$" \] \|\| \[ "\$pid" = "\$PPID" \]/)
+  assert.match(yoloScript, /kill -TERM "\$pid"/)
+  assert.match(yoloScript, /kill -KILL "\$pid"/)
+
+  assert.doesNotMatch(audioScript, /python3 - <<'PY'/)
+  assert.match(audioScript, /\$stopPattern = "\[s\]idecars\/dogzilla_audio_cue\/server\.py"/)
+  assert.match(audioScript, /pgrep -f ' \+ \$stopPatternQuoted/)
+  assert.match(audioScript, /\[ "\$pid" = "\$\$" \] \|\| \[ "\$pid" = "\$PPID" \]/)
+  assert.match(audioScript, /kill -TERM "\$pid"/)
+  assert.match(audioScript, /kill -KILL "\$pid"/)
+})
+
+test('DOGZILLA YOLO server allows immediate restart on the same port', async () => {
+  const server = await readFile(YOLO_SERVER_PATH, 'utf-8')
+
+  assert.match(server, /class ReusableThreadingHTTPServer\(ThreadingHTTPServer\):/)
+  assert.match(server, /allow_reuse_address = True/)
+  assert.match(server, /server = ReusableThreadingHTTPServer\(\(args\.host, args\.port\), VisionHandler\)/)
 })
 
 test('DOGZILLA Nav2 SSH startup ships map-pose and IMU sidecars for odom TF repair', async () => {

@@ -158,6 +158,41 @@ test('forceDogzillaRequiredServicesOnStartup reuses healthy services', async () 
   assert.equal(result.results.mapPose.reusedService, true)
 })
 
+test('forceDogzillaRequiredServicesOnStartup reuses top-level map pose response', async () => {
+  const startedActions = []
+  const result = await forceDogzillaRequiredServicesOnStartup({
+    config: {
+      lidar: {
+        enabled: true,
+        healthUrl: 'http://dogzilla:8896/healthz',
+        poseUrl: 'http://dogzilla:8896/pose',
+      },
+    },
+    logger: silentLogger(),
+    fetchImpl: async (url) => jsonResponse(true, String(url).endsWith('/pose')
+      ? {
+        ok: true,
+        waypointSafe: true,
+        frame: 'map',
+        x: 0.00211,
+        y: -0.00497,
+      }
+      : { ok: true }),
+    runDogzillaConnectionActionImpl: async (action) => {
+      startedActions.push(action)
+      return {
+        status: 'ok',
+        action,
+      }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.deepEqual(startedActions, [])
+  assert.equal(result.results.lidar.reusedService, true)
+  assert.equal(result.results.mapPose.reusedService, true)
+})
+
 test('forceDogzillaRequiredServicesOnStartup replaces healthy services when requested', async () => {
   const startedActions = []
   const result = await forceDogzillaRequiredServicesOnStartup({

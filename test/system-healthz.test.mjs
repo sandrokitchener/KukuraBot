@@ -158,7 +158,82 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
   assert.equal(payload.sensors.mapOrigin.mapId, 'robodoge_home')
   assert.equal(payload.sensors.yoloVision.authority, 'DOGZILLA YOLO vision sidecar')
   assert.equal(payload.sensors.yoloVision.ageSec, 0.5)
+  assert.equal(payload.sensors.isaac, undefined)
   assert.equal(payload.sidecars.lidarBridge.destination, 'http://10.0.4.32:8896/healthz')
+  assert.equal(payload.sidecars.isaac.status, 'ok')
+})
+
+test('buildHealthzPayload keeps Isaac sidecar failure out of real DOGZILLA sensor status', () => {
+  const payload = buildHealthzPayload({
+    generationId: 'gen-isaac-sidecar-failed',
+    checkedAt: '2026-06-04T12:00:10.000Z',
+    probeResults: {
+      dogzillaConfig: {},
+      robotState: {
+        status: 'ok',
+        activeTarget: {
+          id: 'dogzilla-direct',
+          kind: 'dogzilla-direct',
+        },
+        mapOrigin: {
+          configured: true,
+          status: 'ready',
+          identity: {
+            id: 'robodoge_home',
+            fingerprint: 'abc123',
+          },
+          activeMap: {
+            id: 'robodoge_home',
+            fingerprint: 'abc123',
+          },
+        },
+        activeRobot: {
+          timestamp: '2026-06-04T12:00:08.000Z',
+          receivedAt: '2026-06-04T12:00:08.500Z',
+          telemetry: {
+            battery: 81,
+            batteryStatus: 'ok',
+            roll: 0,
+          },
+        },
+      },
+      robotBridge: {
+        status: 'ok',
+        destination: 'http://10.0.4.32:8893/healthz',
+      },
+      lidarHealth: {
+        status: 'disabled',
+      },
+      pose: {
+        status: 'disabled',
+      },
+      camera: {
+        status: 'unconfigured',
+      },
+      vision: {
+        status: 'disabled',
+      },
+      audio: {
+        status: 'disabled',
+      },
+      speech: {
+        status: 'disabled',
+      },
+      isaac: {
+        status: 'error',
+        destination: 'http://127.0.0.1:8891/healthz',
+        error: 'connect ECONNREFUSED 127.0.0.1:8891',
+      },
+    },
+  })
+
+  assert.equal(payload.ok, true)
+  assert.equal(payload.status, 'ok')
+  assert.equal(payload.sensors.isaac, undefined)
+  assert.deepEqual(payload.failedRequiredSensors, [])
+  assert.deepEqual(payload.failedEnabledSensors, [])
+  assert.equal(payload.sidecars.isaac.status, 'error')
+  assert.equal(payload.sidecars.isaac.error, 'connect ECONNREFUSED 127.0.0.1:8891')
 })
 
 test('buildHealthzPayload marks missing required map pose as failed', () => {

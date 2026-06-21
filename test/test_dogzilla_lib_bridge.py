@@ -675,7 +675,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["delivery"], "Nav2 NavigateToPose")
         self.assertEqual(result["backend"], "docker-rclpy")
         self.assertEqual(result["container"], "robodoge-lidar-bridge")
-        self.assertEqual(calls[0]["timeout"], 20.0)
+        self.assertEqual(calls[0]["timeout"], 30.0)
         self.assertIn("dogzilla_direct_nav2_docker_client", calls[0]["script"])
         self.assertIn('\\"x\\": 1.25', calls[0]["script"])
         self.assertIn("probe_live_odom", calls[0]["script"])
@@ -697,7 +697,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
         self.assertFalse(result["executed"])
         self.assertEqual(result["delivery"], "nav2-docker-timeout")
-        self.assertIn("20.0s", result["error"])
+        self.assertIn("30.0s", result["error"])
         self.assertEqual(result["backend"], "docker-rclpy")
 
     def test_action_loop_calls_dogzilla_perform_mode(self):

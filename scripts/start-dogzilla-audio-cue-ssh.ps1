@@ -60,35 +60,9 @@ $audioSetupCommand = "amixer -c 2 set Speaker 100% unmute 2>/dev/null || true; p
 
 if ($Background) {
   $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
-  $stopCommand = @'
-python3 - <<'PY'
-import os, signal, subprocess, time
-try:
-    rows = subprocess.check_output(['pgrep', '-af', 'sidecars/dogzilla_audio_cue/server.py'], text=True).splitlines()
-except subprocess.CalledProcessError:
-    rows = []
-stopped = []
-for row in rows:
-    pid = int(row.split()[0])
-    try:
-        comm = open(f'/proc/{pid}/comm', encoding='utf-8').read().strip()
-    except OSError:
-        continue
-    if comm.startswith('python'):
-        os.kill(pid, signal.SIGTERM)
-        stopped.append(pid)
-        print(f'stopped audio cue {pid}')
-time.sleep(0.8)
-for pid in stopped:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        continue
-    os.kill(pid, signal.SIGKILL)
-    print(f'force-stopped audio cue {pid}')
-PY
-'@
-  $stopCommand = $stopCommand.Trim()
+  $stopPattern = "[s]idecars/dogzilla_audio_cue/server.py"
+  $stopPatternQuoted = ConvertTo-RemoteSingleQuote $stopPattern
+  $stopCommand = 'for pid in $(pgrep -f ' + $stopPatternQuoted + ' 2>/dev/null || true); do if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi; kill -TERM "$pid" 2>/dev/null || true; done; sleep 0.8; for pid in $(pgrep -f ' + $stopPatternQuoted + ' 2>/dev/null || true); do if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi; kill -KILL "$pid" 2>/dev/null || true; done'
   $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand
   $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && $audioSetupCommand && if [ -f logs/audio-cue.pid ]; then kill `$(cat logs/audio-cue.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/audio-cue.log 2>&1 < /dev/null & echo `$! > logs/audio-cue.pid) && sleep 1 && cat logs/audio-cue.pid && tail -n 20 logs/audio-cue.log"
   Write-Host "Starting DOGZILLA audio cue bridge on $Alias port $Port in remote background."

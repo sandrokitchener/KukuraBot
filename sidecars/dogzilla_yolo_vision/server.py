@@ -71,6 +71,10 @@ class VisionState:
     last_person_bark_at: float = 0.0
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 class YoloOnnxDetector:
     def __init__(self, model_path: str, labels_path: str, input_size: int, confidence: float, iou: float):
         self.model_path = model_path
@@ -706,7 +710,7 @@ def main() -> int:
         raise SystemExit(f"YOLO ONNX model missing: {model}")
 
     state = VisionState()
-    server = ThreadingHTTPServer((args.host, args.port), VisionHandler)
+    server = ReusableThreadingHTTPServer((args.host, args.port), VisionHandler)
     server.state = state  # type: ignore[attr-defined]
     server.args = args  # type: ignore[attr-defined]
     print(f"DOGZILLA YOLO vision stream listening on http://{args.host}:{args.port}", flush=True)

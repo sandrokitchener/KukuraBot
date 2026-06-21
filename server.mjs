@@ -29,7 +29,7 @@ import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile } from './lib/model-profile-config.mjs'
-import { fetchRobotBridgeState } from './lib/robot-sidecar-client.mjs'
+import { fetchRobotBridgeState, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,
@@ -42,8 +42,15 @@ import {
   handleRobotStateStreamUpgrade,
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
+import { deriveNavigationStatus } from './lib/dogzilla-navigation-status.mjs'
+import {
+  runDogzillaStartupWatchdog,
+  shouldBlockDogzillaAppLaunchForNavigation,
+} from './lib/dogzilla-startup-watchdog.mjs'
 import { buildSystemHealthz } from './lib/system-healthz.mjs'
 import { green, printStartupBanner } from './lib/startup-banner.mjs'
+import { loadRobotWaypointsConfig } from './lib/isaacsim-config.mjs'
+import { validateDogzillaWaypoints } from './scripts/validate-dogzilla-waypoints.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
@@ -63,6 +70,24 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '0.0.0.0'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
 const appConfig = await loadAppConfig()
+const dogzillaStartupResult = await runDogzillaStartupWatchdog({ logger: console }).catch((error) => ({
+  status: 'degraded',
+  waypointNavigation: {
+    status: 'error',
+    error: error instanceof Error ? error.message : String(error),
+  },
+}))
+
+if (shouldBlockDogzillaAppLaunchForNavigation(dogzillaStartupResult)) {
+  const reason = dogzillaStartupResult.waypointNavigation?.error
+    || dogzillaStartupResult.waypointNavigation?.health?.error
+    || dogzillaStartupResult.waypointNavigation?.health?.body?.runtime?.nav2?.serverError
+    || 'DOGZILLA Nav2 waypoint readiness is not proven.'
+  console.error(`App launch blocked: DOGZILLA navigation is not ready. ${reason}`)
+  console.error('Set APP_DOGZILLA_STARTUP_REQUIRE_NAV=0 only for non-navigation debugging.')
+  process.exit(1)
+}
+
 printStartupBanner({
   appName: appConfig.appName,
   mode: 'server',
@@ -73,7 +98,29 @@ const APP_STARTED_AT = new Date().toISOString()
 let robotBridgeStateSeq = 0
 const dogzillaBatteryStateTracker = createDogzillaBatteryStateTracker()
 const DOGZILLA_POSE_TRACK_LIMIT = 80
+const DOGZILLA_HEALTH_CACHE_MAX_AGE_MS = 30_000
 const dogzillaPoseTrack = []
+let lastDogzillaBridgeHealth = null
+const navigationDispatch = {
+  waypointName: null,
+  dispatchedAt: null,
+  arrivedAt: null,
+  status: 'idle',
+}
+
+function recordNavigationDispatch({ waypointName, waypoint, arrivalTolerance } = {}) {
+  navigationDispatch.waypointName = String(waypointName || waypoint || '').trim() || null
+  navigationDispatch.dispatchedAt = Date.now()
+  navigationDispatch.arrivedAt = null
+  navigationDispatch.status = 'navigating'
+}
+
+function resetNavigationDispatch() {
+  navigationDispatch.waypointName = null
+  navigationDispatch.dispatchedAt = null
+  navigationDispatch.arrivedAt = null
+  navigationDispatch.status = 'idle'
+}
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -125,6 +172,8 @@ const server = createServer(async (request, response) => {
       response,
       readJsonBody,
       sendJson,
+      recordNavigationDispatch,
+      resetNavigationDispatch,
     }
 
     if ((await tryHandleDogzillaRoute({
@@ -268,19 +317,49 @@ async function readJsonBody(request) {
 async function buildCurrentRobotStateSnapshot() {
   const robotRuntimeConfig = await loadRobotRuntimeConfig()
   const robotRos2Config = await loadRobotRos2Config()
+  const robotStateProbeConfig = withRobotStateProbeTimeout(robotRos2Config, 4000)
   const streamSnapshot = getRobotStateSnapshot()
-  const [bridgeState, poseState, mapOrigin] = await Promise.all([
-    fetchRobotBridgeState(robotRuntimeConfig, robotRos2Config),
+  const [bridgeState, bridgeHealth, poseState, mapOrigin, waypointConfig] = await Promise.all([
+    fetchRobotBridgeState(robotRuntimeConfig, robotStateProbeConfig),
+    probeRobotSidecarHealth(robotRuntimeConfig, robotStateProbeConfig),
     getDogzillaRobotPose({ timeoutMs: 1200 }),
     loadDogzillaMapOrigin(),
+    loadRobotWaypointsConfig(),
   ])
-  const activeMap = bridgeState?.body?.runtime?.map && typeof bridgeState.body.runtime.map === 'object'
-    ? bridgeState.body.runtime.map
+  if (bridgeHealth?.status === 'ok') {
+    lastDogzillaBridgeHealth = {
+      body: bridgeHealth.body,
+      receivedAt: Date.now(),
+    }
+  }
+  const cachedBridgeHealth = lastDogzillaBridgeHealth
+    && Date.now() - lastDogzillaBridgeHealth.receivedAt <= DOGZILLA_HEALTH_CACHE_MAX_AGE_MS
+    ? lastDogzillaBridgeHealth
+    : null
+  const effectiveBridgeHealthBody = bridgeHealth?.status === 'ok'
+    ? bridgeHealth.body
+    : cachedBridgeHealth?.body || null
+  const bridgeRuntime = effectiveBridgeHealthBody?.runtime && typeof effectiveBridgeHealthBody.runtime === 'object'
+    ? effectiveBridgeHealthBody.runtime
+    : null
+  const activeMap = bridgeRuntime?.map && typeof bridgeRuntime.map === 'object'
+    ? bridgeRuntime.map
     : null
   const mapOriginStatus = getDogzillaMapOriginStatus(mapOrigin, activeMap)
-  const bridgeRobot = applyMapOriginToRobotState(
-    buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState),
-    mapOriginStatus.configured ? mapOrigin : null,
+  const dogzillaWaypointReadiness = effectiveBridgeHealthBody
+    ? validateDogzillaWaypoints({
+        waypointConfig,
+        mapOrigin,
+        mapMetadata: activeMap || mapOrigin?.map || null,
+        bridgeHealth: effectiveBridgeHealthBody,
+      })
+    : null
+  const bridgeRobot = applyMapOriginStatusToRobotState(
+    applyMapOriginToRobotState(
+      buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState),
+      mapOriginStatus.configured ? mapOrigin : null,
+    ),
+    mapOriginStatus,
   )
   const bridgeOwnsActiveRobot = robotRuntimeConfig.activeTarget?.kind === 'dogzilla-direct'
   const streamRobots = bridgeOwnsActiveRobot && !bridgeRobot
@@ -293,6 +372,7 @@ async function buildCurrentRobotStateSnapshot() {
       ? 'error'
       : streamSnapshot.status
   recordDogzillaMapPose(bridgeRobot)
+  const poseTrack = bridgeRobot?.pose ? getDogzillaPoseTrack() : []
   const robots = bridgeRobot
     ? [bridgeRobot, ...streamRobots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
     : streamRobots
@@ -305,9 +385,34 @@ async function buildCurrentRobotStateSnapshot() {
     streamPath: ROBOT_STATE_STREAM_PATH,
     activeTarget: robotRuntimeConfig.activeTarget,
     bridgeState,
+    bridgeHealth,
     poseState,
     mapOrigin: mapOriginStatus,
-    poseTrack: bridgeRobot?.pose ? getDogzillaPoseTrack() : [],
+    poseTrack,
+    navigationStatus: deriveNavigationStatus({
+      poseTrack,
+      dispatchState: navigationDispatch,
+      mapOriginStatus,
+      bridgeRuntime,
+      poseState,
+      dogzillaWaypointReadiness,
+    }),
+  }
+}
+
+function withRobotStateProbeTimeout(ros2Config = {}, timeoutMs = 4000) {
+  const transport = ros2Config.transport ?? {}
+  const configuredTimeoutMs = Number(transport.timeoutMs)
+  const cappedTimeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+    ? Math.min(configuredTimeoutMs, timeoutMs)
+    : timeoutMs
+
+  return {
+    ...ros2Config,
+    transport: {
+      ...transport,
+      timeoutMs: cappedTimeoutMs,
+    },
   }
 }
 
@@ -433,6 +538,27 @@ function applyMapOriginToRobotState(robot, mapOrigin) {
       mapOriginLabel: pose.originLabel,
       mapOriginSavedAt: pose.originSavedAt,
       mapSource: 'saved-dogzilla-map-origin',
+    },
+  }
+}
+
+function applyMapOriginStatusToRobotState(robot, mapOriginStatus) {
+  if (!robot) {
+    return robot
+  }
+
+  return {
+    ...robot,
+    telemetry: {
+      ...robot.telemetry,
+      mapOriginConfigured: mapOriginStatus?.configured === true,
+      mapOriginStatus: mapOriginStatus?.status || 'missing',
+      mapOriginLabel: mapOriginStatus?.origin?.label || robot.telemetry?.mapOriginLabel || '',
+      mapOriginSavedAt: mapOriginStatus?.origin?.savedAt || robot.telemetry?.mapOriginSavedAt || '',
+      activeMapId: mapOriginStatus?.activeMap?.id || '',
+      activeMapFingerprint: mapOriginStatus?.activeMap?.fingerprint || '',
+      originMapId: mapOriginStatus?.identity?.id || '',
+      originMapFingerprint: mapOriginStatus?.identity?.fingerprint || '',
     },
   }
 }

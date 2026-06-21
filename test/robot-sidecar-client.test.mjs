@@ -465,7 +465,7 @@ test('sendRobotCommand blocks trusted waypoint when live robot pose is outside a
   )
 })
 
-test('sendRobotCommand sends trusted config waypoint captured against a different DOGZILLA map', async () => {
+test('sendRobotCommand blocks trusted config waypoint captured against a different DOGZILLA map', async () => {
   const requests = []
 
   await withMockedFetch(
@@ -489,12 +489,44 @@ test('sendRobotCommand sends trusted config waypoint captured against a differen
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'sent')
-      assert.equal(result.attempted, true)
-      assert.equal(requests.length, 4)
+      assert.equal(result.status, 'map-id-mismatch')
+      assert.equal(result.attempted, false)
+      assert.equal(result.kind, 'map-waypoint')
+      assert.match(result.error, /belongs to map "old_map"/)
+      assert.match(result.operatorMessage, /stale or unknown map identity/)
+      assert.equal(requests.length, 1)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
-      assert.equal(requests[1].url, 'http://10.0.4.32:8896/pose')
-      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand blocks trusted config waypoint without active map identity', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody())
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview({
+          params: {
+            waypoint: 'kitchen',
+            mapId: '',
+            mapFingerprint: '',
+          },
+        }),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'missing-map-identity')
+      assert.equal(result.attempted, false)
+      assert.equal(result.kind, 'map-waypoint')
+      assert.match(result.error, /no map identity/)
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
     },
   )
 })
@@ -566,7 +598,7 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
       )
 
       assert.equal(result.status, 'sent')
-      assert.deepEqual(actions, ['start-navigation'])
+      assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
       assert.equal(requests.filter((request) => request.url.endsWith('/healthz')).length, 2)
       assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
