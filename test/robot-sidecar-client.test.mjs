@@ -330,6 +330,7 @@ test('sendRobotCommand still blocks old bridge health when pose only proves odom
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
         {
+          autoStartWaypointNavigation: false,
           loadDogzillaConnectionConfigImpl: async () => ({
             lidar: {
               poseUrl: 'http://10.0.4.32:8896/pose',
@@ -601,6 +602,105 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
       assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
       assert.equal(requests.filter((request) => request.url.endsWith('/healthz')).length, 2)
       assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', async () => {
+  const requests = []
+  const actions = []
+  let healthCount = 0
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+
+      if (String(url).endsWith('/healthz')) {
+        healthCount += 1
+        return jsonResponse(nav2HealthBody({
+          nav2: {
+            lifecycle: {
+              active: healthCount > 1,
+              error: healthCount > 1 ? null : 'Nav2 lifecycle nodes are not active: controller_server',
+            },
+          },
+        }))
+      }
+
+      return jsonResponse({ accepted: true }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        {
+          sleepImpl: async () => {},
+          runDogzillaConnectionActionImpl: async (action) => {
+            actions.push(action)
+            return { status: 'ok', action }
+          },
+        },
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
+      assert.equal(requests.filter((request) => request.url.endsWith('/healthz')).length, 2)
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand repairs and retries when command-time Nav2 action server lookup fails', async () => {
+  const requests = []
+  const actions = []
+  let commandAttempts = 0
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+
+      if (String(url).endsWith('/healthz')) {
+        return jsonResponse(nav2HealthBody())
+      }
+
+      if (String(url).endsWith('/commands')) {
+        const body = parseRequestBody(options)
+        if (body?.action !== 'stop') {
+          commandAttempts += 1
+          if (commandAttempts === 1) {
+            return jsonResponse({
+              result: {
+                executed: false,
+                delivery: 'nav2-unavailable',
+                error: 'Nav2 NavigateToPose action server unavailable after 2.0s',
+              },
+            }, { ok: false, status: 503 })
+          }
+        }
+      }
+
+      return jsonResponse({ accepted: true }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        {
+          sleepImpl: async () => {},
+          runDogzillaConnectionActionImpl: async (action) => {
+            actions.push(action)
+            return { status: 'ok', action }
+          },
+        },
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.equal(result.retriedAfterNavigationRepair, true)
+      assert.equal(result.firstAttempt.error, 'Nav2 NavigateToPose action server unavailable after 2.0s')
+      assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
+      assert.equal(commandAttempts, 2)
     },
   )
 })

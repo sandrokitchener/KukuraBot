@@ -96,14 +96,7 @@
             </div>
           </div>
 
-          <button
-            id="persistent-emergency-stop"
-            class="persistent-emergency-stop"
-            type="button"
-            aria-label="Emergency stop robot"
-          >Emergency Stop</button>
-
-          <div class="intro-head">
+ <div class="intro-head">
             <div class="intro-copy">
               <p id="app-eyebrow" class="eyebrow">Quadruped inspection console</p>
               <h1 id="app-title" class="brand-title" aria-label="Questing Beast">
@@ -125,8 +118,16 @@
               rows="6"
               placeholder="Try: go to the living room"
             ></textarea>
-            <button id="send-button" type="submit">Ask Assistant</button>
-          </form>
+ <div class="chat-form-actions">
+ <button id="send-button" type="submit">Ask Assistant</button>
+ <button
+ id="persistent-emergency-stop"
+ class="persistent-emergency-stop"
+ type="button"
+ aria-label="Emergency stop robot"
+ >Stop</button>
+ </div>
+ </form>
 
           <div id="status" class="status" data-state="idle">
             <span class="status-dot" aria-hidden="true"></span>
@@ -261,11 +262,11 @@
                 <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
               </div>
             </div>
-            <div id="map-workflow-panel" class="map-workflow-panel">
-              <div class="map-workflow-head">
-                <span class="map-workflow-title">Navigation Setup</span>
-                <span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
-              </div>
+ <details id="map-workflow-panel" class="map-workflow-panel">
+ <summary class="map-workflow-head">
+ <span class="map-workflow-title">Navigation Setup</span>
+ <span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
+ </summary>
               <div class="map-workflow-steps">
                 <div class="map-workflow-step">
                   <span class="map-step-number">1</span>
@@ -305,8 +306,8 @@
                   </div>
                 </div>
               </div>
-            </div>
-            <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
+ </details>
+ <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
               <span class="robot-map-axis robot-map-axis-y" aria-hidden="true"></span>

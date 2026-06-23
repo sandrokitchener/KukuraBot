@@ -277,6 +277,35 @@ test('forceDogzillaRequiredServicesOnStartup starts map pose when lidar is healt
   assert.equal(result.results.mapPose.reusedService, false)
 })
 
+test('forceDogzillaRequiredServicesOnStartup accepts health recovery after start command failure', async () => {
+  const readyUrls = new Set()
+
+  const result = await forceDogzillaRequiredServicesOnStartup({
+    config: {
+      vision: {
+        enabled: true,
+        statusUrl: 'http://dogzilla:8894/healthz',
+      },
+    },
+    logger: silentLogger(),
+    fetchImpl: async (url) => jsonResponse(true, { ok: readyUrls.has(String(url)) }),
+    runDogzillaConnectionActionImpl: async () => {
+      readyUrls.add('http://dogzilla:8894/healthz')
+      return {
+        status: 'error',
+        action: 'start-yolo',
+        error: 'launcher returned before health was ready',
+      }
+    },
+    sleepImpl: async () => {},
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.results.vision.status, 'ok')
+  assert.equal(result.results.vision.recoveredAfterStartError, true)
+  assert.equal(result.results.vision.health.status, 'ok')
+})
+
 test('forceDogzillaRequiredServicesOnStartup skips map pose when lidar startup fails', async () => {
   const startedActions = []
 
@@ -289,6 +318,8 @@ test('forceDogzillaRequiredServicesOnStartup skips map pose when lidar startup f
       },
     },
     logger: silentLogger(),
+    readyTimeoutMs: 1,
+    pollIntervalMs: 1,
     fetchImpl: async () => jsonResponse(false, { ok: false }),
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)

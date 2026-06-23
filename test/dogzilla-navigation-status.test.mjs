@@ -47,6 +47,28 @@ describe('deriveNavigationStatus', () => {
     assert.match(result.text, /active-map-identity-unavailable/)
   })
 
+  it('returns repairing when repairState is active', () => {
+    const result = deriveNavigationStatus({
+      mapOriginStatus: { status: 'stale-map-mismatch', configured: false },
+      repairState: { repairing: true, lastRepairAt: '2026-06-22T00:00:00Z' },
+    })
+    assert.equal(result.status, 'repairing')
+    assert.equal(result.severity, 'yellow')
+    assert.match(result.text, /Repairing/)
+  })
+
+  it('keeps active dispatch visible while repair monitor is active', () => {
+    const t = now()
+    const result = deriveNavigationStatus({
+      dispatchState: { status: 'navigating', waypointName: 'kitchen', dispatchedAt: t - 6000 },
+      repairState: { repairing: true, lastRepairAt: '2026-06-22T00:00:00Z' },
+    })
+
+    assert.equal(result.status, 'navigating')
+    assert.equal(result.severity, 'blue')
+    assert.equal(result.text, 'Walking to kitchen')
+  })
+
   it('uses waypoint readiness blocker before fallback map-origin noise', () => {
     const result = deriveNavigationStatus({
       mapOriginStatus: { status: 'active-map-identity-unavailable', configured: false },

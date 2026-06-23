@@ -31,7 +31,7 @@ PC runtime for phone:
 npm run dev:lan
 ```
 
-The older doc mentions `bun run dev:lan`; current `package.json` script is `node --watch scripts/start-lan-server.mjs`.
+Archived Android notes may mention `bun run dev:lan`; current `package.json` uses `npm run dev:lan` (`node --watch scripts/start-lan-server.mjs`).
 
 ## Build and install
 

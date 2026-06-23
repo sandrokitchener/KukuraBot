@@ -2,20 +2,28 @@ const ROBOT_MAP_RANGE_METERS = 3
 
 const MAP_CELL_FREE = 0
 const MAP_CELL_UNKNOWN = -1
+const EGO_VIEW_MAX_RANGE_METERS = 6
+const EGO_HISTORY_MS = 1_800
+const MAX_EGO_HISTORY_POINTS = 1_200
+const EGO_CLUSTER_DISTANCE_METERS = 0.42
+const EGO_CLUSTER_MIN_POINTS = 3
 
 function rangeToRGBA(rangeNorm, alpha = 1) {
   const t = clamp(rangeNorm, 0, 1)
+  const near = [197, 142, 72]
+  const mid = [132, 165, 154]
+  const far = [218, 226, 220]
   let r, g, b
   if (t <= 0.5) {
     const u = t / 0.5
-    r = 255
-    g = Math.round(50 + u * 170)
-    b = Math.round(u * 50)
+    r = Math.round(near[0] + (mid[0] - near[0]) * u)
+    g = Math.round(near[1] + (mid[1] - near[1]) * u)
+    b = Math.round(near[2] + (mid[2] - near[2]) * u)
   } else {
     const u = (t - 0.5) / 0.5
-    r = Math.round(255 - u * 255)
-    g = 220
-    b = Math.round(50 + u * 205)
+    r = Math.round(mid[0] + (far[0] - mid[0]) * u)
+    g = Math.round(mid[1] + (far[1] - mid[1]) * u)
+    b = Math.round(mid[2] + (far[2] - mid[2]) * u)
   }
   return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`
 }
@@ -34,6 +42,7 @@ export function createRobotMapRenderer({
   let lastPoseTrack = []
   let poseTrusted = true
   const accumulatedPoints = []
+  const egoScanHistory = []
   const ACCUMULATION_MS = 1_500
   const MAX_ACCUMULATED_POINTS = 2_000
   let mapGrid = null
@@ -44,21 +53,93 @@ export function createRobotMapRenderer({
   let mapViewMode = 'follow'
   let lastMapCanvasWidth = 0
   let lastMapCanvasHeight = 0
-  // Cached app_map→map origin derived from rawPose.mapFramePose
   let appMapOriginCache = null
+
+  const ZOOM_MIN = 0.5
+  const ZOOM_MAX = 4
+  const ZOOM_STEP = 0.25
+  let zoomLevel = 1
+
+  function applyZoomToRange(rangeMeters) {
+    return rangeMeters * zoomLevel
+  }
+
+  function setZoom(level) {
+    const clamped = clamp(Number(level) || 1, ZOOM_MIN, ZOOM_MAX)
+    if (clamped === zoomLevel) return
+    zoomLevel = clamped
+    updateZoomIndicator()
+    reRenderCurrentView()
+  }
+
+  function getZoom() {
+    return zoomLevel
+  }
+
+  function resetZoom() {
+    setZoom(1)
+  }
+
+  function updateZoomIndicator() {
+    const indicator = elements?.map?.querySelector?.('.robot-map-zoom-indicator')
+    if (!indicator) return
+    const pct = Math.round(zoomLevel * 100)
+    indicator.textContent = `${pct}%`
+    indicator.title = `Zoom: ${pct}% — scroll to zoom, click to reset`
+  }
+
+  function reRenderCurrentView() {
+    if (lastRenderedRobot) {
+      renderDot(lastRenderedRobot)
+      if (mapViewMode === 'map') {
+        renderWaypoints(lastRenderedRobot)
+        renderPoseTrack(lastPoseTrack, lastRenderedRobot)
+      }
+    }
+    if (lastRenderedScan) {
+      renderLidarScan(lastRenderedScan)
+    }
+  }
+
+  function handleMapWheel(event) {
+    event.preventDefault()
+    const delta = event.deltaY
+    if (delta < 0) {
+      setZoom(zoomLevel - ZOOM_STEP)
+    } else if (delta > 0) {
+      setZoom(zoomLevel + ZOOM_STEP)
+    }
+  }
+
+  elements?.map?.setAttribute?.('data-view-mode', mapViewMode)
+  if (elements?.map) {
+    elements.map.addEventListener('wheel', handleMapWheel, { passive: false })
+    const zoomIndicator = elements.map.querySelector('.robot-map-zoom-indicator')
+    if (zoomIndicator) {
+      zoomIndicator.addEventListener('click', resetZoom)
+    }
+  }
 
   function getCurrentMapView(mapRangeFallback, robotPose = null) {
     if (mapViewMode === 'map' && mapGrid) {
-      return getSlamMapView(mapGrid, lastMapCanvasWidth || 1, lastMapCanvasHeight || 1) || getMapGridView(mapGrid)
+      const slamView = getSlamMapView(mapGrid, lastMapCanvasWidth || 1, lastMapCanvasHeight || 1) || getMapGridView(mapGrid)
+      if (slamView) {
+        return {
+          ...slamView,
+          rangeMeters: applyZoomToRange(slamView.rangeMeters),
+          rangeYMeters: applyZoomToRange(slamView.rangeYMeters || slamView.rangeMeters),
+        }
+      }
     }
 
     const centerX = toFiniteNumber(robotPose?.x)
     const centerY = toFiniteNumber(robotPose?.y)
+    const range = applyZoomToRange(mapRangeFallback)
     return {
       centerX: Number.isFinite(centerX) ? centerX : 0,
       centerY: Number.isFinite(centerY) ? centerY : 0,
-      rangeMeters: mapRangeFallback,
-      rangeYMeters: mapRangeFallback,
+      rangeMeters: range,
+      rangeYMeters: range,
     }
   }
 
@@ -288,6 +369,12 @@ export function createRobotMapRenderer({
     staleWaypointCount = 0
     staleWaypointIds = []
 
+    if (mapViewMode === 'follow') {
+      elements.waypoints.replaceChildren()
+      updateMeta()
+      return
+    }
+
     // Initialize appMapOriginCache via getCanvasRobotPose so app_map waypoints can convert
     const canvasPose = robot ? getCanvasRobotPose(robot) : null
     const centerPose = canvasPose || normalizeRobotMapPose(robot?.pose)
@@ -371,6 +458,19 @@ export function createRobotMapRenderer({
     }
 
     lastRenderedRobot = robot
+    if (mapViewMode === 'follow') {
+      elements.dot.style.left = '50%'
+      elements.dot.style.top = '82%'
+      elements.dot.style.opacity = poseTrusted ? '1' : '0.35'
+      elements.dot.style.setProperty('--robot-heading', '0rad')
+      setPoseReadout(robotPose, robotPose.frame || 'map')
+      const trustSuffix = poseTrusted ? '' : ' — POSE UNTRUSTED (localizing)'
+      setMeta(
+        `x ${robotPose.x.toFixed(2)}m, y ${robotPose.y.toFixed(2)}m, θ ${robotPose.theta.toFixed(2)}rad. Updated ${formatEventTimestamp(robot.receivedAt)}.${trustSuffix}`,
+      )
+      return
+    }
+
     elements.dot.style.left = `${position.xPercent}%`
     elements.dot.style.top = `${position.yPercent}%`
     elements.dot.style.opacity = poseTrusted ? '1' : '0.35'
@@ -394,7 +494,7 @@ export function createRobotMapRenderer({
       return
     }
 
-    if (!robot?.pose) {
+    if (!robot?.pose || mapViewMode === 'follow') {
       clearPoseTrack()
       return
     }
@@ -469,6 +569,18 @@ export function createRobotMapRenderer({
 
   let navStatusBadge = ''
 
+  function setNavStatusBadge(text, severity) {
+    navStatusBadge = String(text || '').trim()
+    if (elements?.navStatusBadge) {
+      elements.navStatusBadge.textContent = navStatusBadge
+      if (navStatusBadge) {
+        elements.navStatusBadge.dataset.severity = severity || elements.navStatusBadge.dataset.severity || 'yellow'
+      } else {
+        delete elements.navStatusBadge.dataset.severity
+      }
+    }
+  }
+
   function updateMeta() {
     const staleInfo = staleWaypointCount > 0
       ? `${staleWaypointCount} stale waypoint(s) hidden`
@@ -509,13 +621,35 @@ export function createRobotMapRenderer({
       lastMapCanvasWidth = width
       lastMapCanvasHeight = height
       const slamView = getSlamMapView(mapGrid, width, height)
-      if (slamView) view = slamView
+      if (slamView) {
+        view = {
+          ...slamView,
+          rangeMeters: applyZoomToRange(slamView.rangeMeters),
+          rangeYMeters: applyZoomToRange(slamView.rangeYMeters || slamView.rangeMeters),
+        }
+      }
     }
     const mapRange = view.rangeMeters
     const mapRangeY = view.rangeYMeters || mapRange
 
     const points = Array.isArray(scan.points) ? scan.points : []
     const maxSeen = Math.max(...points.map((point) => toFiniteNumber(point.range)).filter(Number.isFinite), 1)
+
+    if (mapViewMode === 'follow') {
+      const egoMaxRange = EGO_VIEW_MAX_RANGE_METERS * zoomLevel
+      renderEgoLidarView(context, {
+        width,
+        height,
+        points,
+        now,
+        maxSeen,
+        poseTrusted,
+        history: egoScanHistory,
+        egoMaxRange,
+      })
+      return
+    }
+
     const viewCenterMetersX = view.centerX
     const viewCenterMetersY = view.centerY
 
@@ -594,32 +728,41 @@ export function createRobotMapRenderer({
 
     context.save()
 
-    // Layer 4: Route polyline (red, drawn before points so points sit on top)
+    // Layer 4: Recent pose trail, drawn before points so points sit on top.
     if (Array.isArray(lastPoseTrack) && lastPoseTrack.length >= 2) {
       const routePoses = lastPoseTrack.filter((p) => isRenderableRobotMapFrame(p?.frame))
-      context.beginPath()
-      let started = false
-      for (const tp of routePoses) {
-        // Convert app_map track poses to map frame so route aligns with grid
-        const mapPose = appMapOriginCache && (tp.frame === 'app_map' || tp.frame === undefined)
-          ? appMapToMapPose(tp)
-          : tp
-        const pos = poseToMapPosition(mapPose, mapRange, viewCenterMetersX, viewCenterMetersY, mapRangeY)
-        if (!pos) { continue }
-        const px = (pos.xPercent / 100) * width
-        const py = (pos.yPercent / 100) * height
-        if (!started) {
-          context.moveTo(px, py)
-          started = true
-        } else {
-          context.lineTo(px, py)
+      const maxRouteSegmentMeters = Math.max(1.25, Math.min(2.5, mapRange * 0.25))
+      const routeSegments = getRobotMapRouteSegments(routePoses, {
+        maxSegmentMeters: maxRouteSegmentMeters,
+        convertPose(tp) {
+          // Convert app_map track poses to map frame so route aligns with grid.
+          return appMapOriginCache && (tp.frame === 'app_map' || tp.frame === undefined)
+            ? appMapToMapPose(tp)
+            : tp
+        },
+      })
+
+      for (const segment of routeSegments) {
+        context.beginPath()
+        let started = false
+        for (const mapPose of segment) {
+          const pos = poseToMapPosition(mapPose, mapRange, viewCenterMetersX, viewCenterMetersY, mapRangeY)
+          if (!pos) { continue }
+          const px = (pos.xPercent / 100) * width
+          const py = (pos.yPercent / 100) * height
+          if (!started) {
+            context.moveTo(px, py)
+            started = true
+          } else {
+            context.lineTo(px, py)
+          }
         }
+        context.strokeStyle = 'rgba(160, 86, 42, 0.68)'
+        context.lineWidth = 1.5
+        context.lineCap = 'round'
+        context.lineJoin = 'round'
+        context.stroke()
       }
-      context.strokeStyle = 'rgba(210, 38, 38, 0.92)'
-      context.lineWidth = 2
-      context.lineCap = 'round'
-      context.lineJoin = 'round'
-      context.stroke()
     }
 
     // Layer 5: Range rings (very transparent)
@@ -724,6 +867,19 @@ export function createRobotMapRenderer({
   function setViewMode(mode) {
     if (mode !== 'follow' && mode !== 'map') return
     mapViewMode = mode
+    elements?.map?.setAttribute?.('data-view-mode', mode)
+    updateZoomIndicator()
+    if (mode === 'follow') {
+      elements.waypoints?.replaceChildren()
+      elements.track?.replaceChildren()
+      if (lastRenderedRobot) {
+        renderDot(lastRenderedRobot)
+      }
+    } else if (lastRenderedRobot) {
+      renderWaypoints(lastRenderedRobot)
+      renderPoseTrack(lastPoseTrack, lastRenderedRobot)
+      renderDot(lastRenderedRobot)
+    }
     // Re-render with last scan data immediately
     if (lastRenderedScan) {
       renderLidarScan(lastRenderedScan)
@@ -751,8 +907,10 @@ export function createRobotMapRenderer({
     getViewMode: () => mapViewMode,
     getViewModeLabel,
     getStaleWaypointCount: () => staleWaypointCount,
+    getZoom,
     hideDot,
     renderDot,
+    resetZoom,
     setPoseTrust,
     setViewMode,
     renderLidarScan,
@@ -763,7 +921,9 @@ export function createRobotMapRenderer({
     setMeta,
     setNavStatusBadge: (text) => { navStatusBadge = text || '' },
     setPoseReadout,
+    setNavStatusBadge,
     setWaypointReadiness,
+    setZoom,
     streamPath: () => getRuntimeConfig?.().robotRuntime?.stateStreamPath || defaultRobotRuntime?.stateStreamPath,
   }
 }
@@ -865,6 +1025,54 @@ export function poseToMapPosition(pose, rangeMeters = ROBOT_MAP_RANGE_METERS, ce
   return {
     xPercent: 50 + (xRatio * 50),
     yPercent: 50 - (yRatio * 50),
+  }
+}
+
+export function getRobotMapRouteSegments(track, {
+  convertPose = (pose) => pose,
+  maxSegmentMeters = 1.5,
+} = {}) {
+  const segments = []
+  let current = []
+  let previousRaw = null
+  let previousPose = null
+
+  for (const rawPose of Array.isArray(track) ? track : []) {
+    if (!isRenderableRobotMapFrame(rawPose?.frame)) {
+      flushRouteSegment()
+      previousRaw = null
+      previousPose = null
+      continue
+    }
+
+    const convertedPose = normalizeRobotMapPose(convertPose(rawPose))
+    if (!convertedPose) {
+      flushRouteSegment()
+      previousRaw = null
+      previousPose = null
+      continue
+    }
+
+    if (previousRaw && previousPose && (
+      hasRoutePoseContextChanged(previousRaw, rawPose)
+      || routePoseDistance(previousPose, convertedPose) > maxSegmentMeters
+    )) {
+      flushRouteSegment()
+    }
+
+    current.push(convertedPose)
+    previousRaw = rawPose
+    previousPose = convertedPose
+  }
+
+  flushRouteSegment()
+  return segments
+
+  function flushRouteSegment() {
+    if (current.length >= 2) {
+      segments.push(current)
+    }
+    current = []
   }
 }
 
@@ -1065,6 +1273,241 @@ export function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : Number.NaN
 }
 
+export function projectLidarPointToEgoView(point, {
+  width = 360,
+  height = 360,
+  maxRange = EGO_VIEW_MAX_RANGE_METERS,
+} = {}) {
+  const forward = toFiniteNumber(point?.x)
+  const lateral = toFiniteNumber(point?.y)
+  if (!Number.isFinite(forward) || !Number.isFinite(lateral) || forward < -0.15) {
+    return null
+  }
+
+  const fallbackRange = Math.hypot(forward, lateral)
+  const range = toFiniteNumber(point?.range)
+  const resolvedRange = Number.isFinite(range) ? range : fallbackRange
+  if (!Number.isFinite(resolvedRange) || resolvedRange > maxRange || forward > maxRange + 0.2) {
+    return null
+  }
+
+  const depthNorm = clamp(forward / maxRange, 0, 1)
+  const depthCurve = 1 - Math.pow(1 - depthNorm, 1.72)
+  const centerX = width / 2
+  const horizonY = height * 0.17
+  const egoY = height * 0.82
+  const lateralScale = width * (0.13 - depthNorm * 0.07)
+
+  return {
+    x: centerX - lateral * lateralScale,
+    y: egoY - depthCurve * (egoY - horizonY),
+    forward,
+    lateral,
+    range: resolvedRange,
+    depth: depthNorm,
+  }
+}
+
+export function clusterLidarPoints(points, {
+  maxRange = EGO_VIEW_MAX_RANGE_METERS,
+  maxClusterDistance = EGO_CLUSTER_DISTANCE_METERS,
+  minPoints = EGO_CLUSTER_MIN_POINTS,
+} = {}) {
+  const candidates = normalizeEgoScanPoints(points, { maxRange })
+    .sort((a, b) => Math.atan2(a.y, Math.max(a.x, 0.001)) - Math.atan2(b.y, Math.max(b.x, 0.001)))
+  const clusters = []
+  let group = []
+
+  for (const point of candidates) {
+    const previous = group[group.length - 1]
+    if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) > maxClusterDistance) {
+      pushCluster(group)
+      group = []
+    }
+    group.push(point)
+  }
+  pushCluster(group)
+
+  return clusters
+
+  function pushCluster(items) {
+    if (items.length < minPoints) {
+      return
+    }
+
+    const xs = items.map((item) => item.x)
+    const ys = items.map((item) => item.y)
+    const ranges = items.map((item) => item.range)
+    const centerX = xs.reduce((sum, value) => sum + value, 0) / items.length
+    const centerY = ys.reduce((sum, value) => sum + value, 0) / items.length
+    clusters.push({
+      x: centerX,
+      y: centerY,
+      range: Math.min(...ranges),
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+      count: items.length,
+      points: items,
+    })
+  }
+}
+
+function renderEgoLidarView(context, {
+  width,
+  height,
+  points,
+  now,
+  maxSeen,
+  poseTrusted,
+  history,
+  egoMaxRange = EGO_VIEW_MAX_RANGE_METERS,
+}) {
+  const scanPoints = normalizeEgoScanPoints(points, { maxRange: egoMaxRange })
+  for (const point of scanPoints) {
+    history.push({ ...point, addedAt: now })
+  }
+
+  const cutoff = now - EGO_HISTORY_MS
+  while (history.length > 0 && history[0].addedAt < cutoff) {
+    history.shift()
+  }
+  if (history.length > MAX_EGO_HISTORY_POINTS) {
+    history.splice(0, history.length - MAX_EGO_HISTORY_POINTS)
+  }
+
+  context.save()
+  context.clearRect(0, 0, width, height)
+  drawEgoSceneBackground(context, width, height, poseTrusted, egoMaxRange)
+  drawEgoScanHistory(context, history, { width, height, now, poseTrusted, egoMaxRange })
+  drawEgoLivePoints(context, scanPoints, {
+    width,
+    height,
+    maxSeen: Math.max(maxSeen, egoMaxRange),
+    poseTrusted,
+    egoMaxRange,
+  })
+  drawEgoRobotPad(context, width, height, poseTrusted)
+
+  if (!poseTrusted) {
+    context.font = 'bold 11px sans-serif'
+    context.textAlign = 'center'
+    context.textBaseline = 'bottom'
+    context.fillStyle = 'rgba(126, 91, 40, 0.78)'
+    context.fillText('Localizing...', width / 2, height * 0.74)
+  }
+  context.restore()
+}
+
+function drawEgoSceneBackground(context, width, height, poseTrusted, egoMaxRange = EGO_VIEW_MAX_RANGE_METERS) {
+  const alpha = poseTrusted ? 1 : 0.42
+  const sky = context.createLinearGradient(0, 0, 0, height)
+  sky.addColorStop(0, '#f4f5f1')
+  sky.addColorStop(0.42, '#e6e8e2')
+  sky.addColorStop(1, '#d4d8d0')
+  context.fillStyle = sky
+  context.fillRect(0, 0, width, height)
+
+  context.globalAlpha = alpha
+  context.fillStyle = 'rgba(255, 255, 255, 0.36)'
+  context.beginPath()
+  context.moveTo(width * 0.5, height * 0.88)
+  context.lineTo(width * 0.15, height * 0.18)
+  context.quadraticCurveTo(width * 0.5, height * 0.08, width * 0.85, height * 0.18)
+  context.closePath()
+  context.fill()
+
+  context.lineWidth = 1
+  context.strokeStyle = 'rgba(74, 94, 90, 0.18)'
+  for (const lateral of [-2.4, -1.2, 0, 1.2, 2.4]) {
+    const near = projectLidarPointToEgoView({ x: 0.15, y: lateral }, { width, height })
+    const far = projectLidarPointToEgoView({ x: egoMaxRange, y: lateral }, { width, height, maxRange: egoMaxRange })
+    if (!near || !far) { continue }
+    context.beginPath()
+    context.moveTo(near.x, near.y)
+    context.quadraticCurveTo(width / 2, height * 0.44, far.x, far.y)
+    context.stroke()
+  }
+
+  context.strokeStyle = 'rgba(74, 94, 90, 0.12)'
+  for (const meters of [1, 2, 3, 4.5, 6]) {
+    const left = projectLidarPointToEgoView({ x: meters, y: 2.7 }, { width, height })
+    const right = projectLidarPointToEgoView({ x: meters, y: -2.7 }, { width, height })
+    if (!left || !right) { continue }
+    context.beginPath()
+    context.moveTo(left.x, left.y)
+    context.quadraticCurveTo(width / 2, left.y + 5, right.x, right.y)
+    context.stroke()
+  }
+
+  context.globalAlpha = 1
+}
+
+function drawEgoScanHistory(context, history, { width, height, now, poseTrusted, egoMaxRange = EGO_VIEW_MAX_RANGE_METERS }) {
+  const dim = poseTrusted ? 1 : 0.28
+  for (const point of history) {
+    const projected = projectLidarPointToEgoView(point, { width, height, maxRange: egoMaxRange })
+    if (!projected) { continue }
+    const ageRatio = clamp((now - point.addedAt) / EGO_HISTORY_MS, 0, 1)
+    context.fillStyle = `rgba(86, 111, 106, ${((0.13 * (1 - ageRatio)) * dim).toFixed(3)})`
+    context.beginPath()
+    context.arc(projected.x, projected.y, 1.2 + (1 - projected.depth) * 1.3, 0, Math.PI * 2)
+    context.fill()
+  }
+}
+
+function drawEgoLivePoints(context, points, { width, height, maxSeen, poseTrusted, egoMaxRange = EGO_VIEW_MAX_RANGE_METERS }) {
+  const dim = poseTrusted ? 1 : 0.28
+  for (const point of points) {
+    const projected = projectLidarPointToEgoView(point, { width, height, maxRange: egoMaxRange })
+    if (!projected) { continue }
+    const rangeNorm = clamp(point.range / maxSeen, 0, 1)
+    const size = 1.5 + (1 - projected.depth) * 2.2
+    const alpha = (0.30 + (1 - rangeNorm) * 0.22) * dim
+    context.fillStyle = rangeToRGBA(rangeNorm, alpha)
+    context.beginPath()
+    context.arc(projected.x, projected.y, size, 0, Math.PI * 2)
+    context.fill()
+  }
+}
+
+function drawEgoRobotPad(context, width, height, poseTrusted) {
+  const alpha = poseTrusted ? 1 : 0.35
+  const centerX = width / 2
+  const baseY = height * 0.84
+  const padGradient = context.createRadialGradient(centerX, baseY, 2, centerX, baseY, width * 0.24)
+  padGradient.addColorStop(0, `rgba(24, 28, 29, ${(0.24 * alpha).toFixed(3)})`)
+  padGradient.addColorStop(1, 'rgba(24, 28, 29, 0)')
+  context.fillStyle = padGradient
+  context.beginPath()
+  context.ellipse(centerX, baseY + 12, width * 0.22, height * 0.06, 0, 0, Math.PI * 2)
+  context.fill()
+}
+
+function normalizeEgoScanPoints(points, { maxRange = EGO_VIEW_MAX_RANGE_METERS } = {}) {
+  return (Array.isArray(points) ? points : [])
+    .map((point) => {
+      const x = toFiniteNumber(point?.x)
+      const y = toFiniteNumber(point?.y)
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < -0.15) {
+        return null
+      }
+      const fallbackRange = Math.hypot(x, y)
+      const range = toFiniteNumber(point?.range)
+      const resolvedRange = Number.isFinite(range) ? range : fallbackRange
+      if (!Number.isFinite(resolvedRange) || resolvedRange > maxRange || x > maxRange + 0.2) {
+        return null
+      }
+      return {
+        x,
+        y,
+        range: resolvedRange,
+      }
+    })
+    .filter(Boolean)
+}
+
 function drawCenteredLidarScan(context, points, { width, height, displayRange, now = Date.now() }) {
   const radius = Math.min(width, height) * 0.42
   const centerX = width / 2
@@ -1156,6 +1599,28 @@ function normalizeRobotMapPose(value) {
     y,
     theta,
   }
+}
+
+function routePoseDistance(a, b) {
+  return Math.hypot(b.x - a.x, b.y - a.y)
+}
+
+function hasRoutePoseContextChanged(a, b) {
+  const aFrame = String(a?.frame || '').trim().replace(/^\/+/, '')
+  const bFrame = String(b?.frame || '').trim().replace(/^\/+/, '')
+  if (aFrame !== bFrame) {
+    return true
+  }
+
+  return routeContextValue(a, 'originSavedAt') !== routeContextValue(b, 'originSavedAt')
+    || routeContextValue(a, 'originLabel') !== routeContextValue(b, 'originLabel')
+    || routeContextValue(a, 'originMapFingerprint') !== routeContextValue(b, 'originMapFingerprint')
+    || routeContextValue(a, 'mapFingerprint') !== routeContextValue(b, 'mapFingerprint')
+    || routeContextValue(a, 'sourceFrame') !== routeContextValue(b, 'sourceFrame')
+}
+
+function routeContextValue(pose, key) {
+  return String(pose?.[key] || pose?.mapOrigin?.[key] || '').trim()
 }
 
 function clamp(value, min, max) {

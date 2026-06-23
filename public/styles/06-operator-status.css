@@ -67,19 +67,22 @@
 }
 
 .persistent-emergency-stop {
-  display: block;
-  width: 100%;
-  padding: 10px 16px;
-  margin-bottom: 12px;
-  background: var(--danger);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  font-weight: 700;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+ display: inline-flex;
+ align-items: center;
+ justify-content: center;
+ width: 56px;
+ min-width: 56px;
+ min-height: 48px;
+ padding: 0;
+ background: var(--danger);
+ color: #fff;
+ border: none;
+ border-radius: 6px;
+ font-size: 0.72rem;
+ font-weight: 900;
+ cursor: pointer;
+ text-transform: uppercase;
+ letter-spacing: 0.04em;
 }
 
 .persistent-emergency-stop:hover {

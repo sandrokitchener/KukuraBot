@@ -12,6 +12,7 @@ import {
   getDogzillaMapOriginIdentity,
   getDogzillaMapOriginStatus,
   hasDogzillaMapOriginIdentity,
+  isDogzillaAppMapTransformOrigin,
   mapPoseToAppPose,
   resolveAppMapPoseToMapPose,
   saveDogzillaMapOriginFromOccupancyGrid,
@@ -39,6 +40,22 @@ test('mapPoseToAppPose makes saved origin the new zero pose', () => {
   assert.equal(appPose.y, 0)
   assert.equal(appPose.yaw, 1.5708)
   assert.equal(appPose.theta, 1.5708)
+})
+
+test('occupancy grid origin is not an app-map transform origin', () => {
+  const origin = {
+    source: 'occupancy-grid',
+    x: -8.15,
+    y: -6.5,
+    yaw: 0,
+    map: { id: 'robodoge_home', fingerprint: 'map-fp' },
+  }
+  const pose = { frame: 'map', x: 0, y: 0, yaw: 0 }
+
+  assert.equal(isDogzillaAppMapTransformOrigin(origin), false)
+  assert.equal(mapPoseToAppPose(pose, origin), null)
+  assert.equal(appPoseToMapPose({ frame: APP_MAP_FRAME, x: 8.15, y: 6.5, yaw: 0 }, origin), null)
+  assert.deepEqual(applyMapOriginToPose(pose, origin), pose)
 })
 
 test('appPoseToMapPose converts app frame targets back to ROS map frame', () => {

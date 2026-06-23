@@ -53,6 +53,19 @@ lifecycleWaitTimeoutSec: 12
 dockerStatusTimeoutSec: 30
 ```
 
+Navigation repair/status from app state:
+
+```powershell
+Invoke-RestMethod -TimeoutSec 8 http://127.0.0.1:3037/api/robot/state | Select-Object -ExpandProperty navigationStatus | ConvertTo-Json -Depth 8
+```
+
+Expected active repair signal:
+
+```text
+status: repairing
+text: Repairing navigation...
+```
+
 DOGZILLA support services:
 
 ```powershell
@@ -76,6 +89,23 @@ SSH:
 ```powershell
 ssh -F output/pi-ssh/config dogzilla <command>
 scp -F output/pi-ssh/config <local> dogzilla:<remote>
+```
+
+Manual Nav2 message fix:
+
+```powershell
+scp -F output/pi-ssh/config scripts/install-nav2-msgs-in-container.sh dogzilla:/home/pi/robodoge/
+ssh -F output/pi-ssh/config dogzilla "docker exec robodoge-lidar-bridge sudo bash /home/pi/robodoge/install-nav2-msgs-in-container.sh"
+ssh -F output/pi-ssh/config dogzilla "sudo systemctl restart robodoge-direct-bridge.service; sleep 5"
+```
+
+Deploy changed direct-bridge Nav2 client:
+
+```powershell
+scp -F output/pi-ssh/config sidecars/dogzilla_lib_bridge/nav2_client.py dogzilla:/home/pi/robodoge/sidecars/dogzilla_lib_bridge/nav2_client.py
+ssh -F output/pi-ssh/config dogzilla "rm -f /home/pi/robodoge/sidecars/dogzilla_lib_bridge/__pycache__/nav2_client.cpython-311.pyc"
+ssh -F output/pi-ssh/config dogzilla "sudo systemctl restart robodoge-direct-bridge.service; sleep 5"
+node scripts/probe-dogzilla-nav-readiness.mjs
 ```
 
 ## Android

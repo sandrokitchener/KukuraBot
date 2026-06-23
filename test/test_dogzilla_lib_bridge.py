@@ -403,6 +403,9 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["delivery"], "nav2-unavailable")
         self.assertEqual(result["error"], "Nav2 NavigateToPose action server unavailable")
 
+    def test_nav2_command_action_wait_timeout_matches_pi_load(self):
+        self.assertGreaterEqual(dogzilla_lib_bridge.DEFAULT_NAV2_WAIT_TIMEOUT, 12.0)
+
 
 
     def test_replacing_navigation_cancel_event_cancels_previous_goto(self):

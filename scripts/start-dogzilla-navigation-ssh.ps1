@@ -243,7 +243,10 @@ if ($Nav2ScanFilterMaskRangeM -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_FILTE
 if ($YawGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_YAW_GOAL_TOLERANCE=$YawGoalTolerance" }
 if ($Nav2XyGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_XY_GOAL_TOLERANCE=$Nav2XyGoalTolerance" }
 $remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$nav2Env $ContainerName bash $containerScript"
-Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+$sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
-  throw "DOGZILLA Nav2 waypoint navigation failed to start"
+  $detail = ($sshOutput | Out-String).Trim()
+  $detailLines = $detail -split "`n" | Select-Object -First 30 | ForEach-Object { "    $_" }
+  $suffix = if ($detailLines.Count -gt 0) { "`n`nSSH output:`n$($detailLines -join "`n")" } else { "" }
+  throw "DOGZILLA Nav2 waypoint navigation failed to start (exit=$LASTEXITCODE).$suffix"
 }

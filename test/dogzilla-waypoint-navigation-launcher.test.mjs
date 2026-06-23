@@ -48,6 +48,40 @@ test('forceDogzillaWaypointNavigationOnStartup reuses existing Nav2 server', asy
   assert.deepEqual(actionCalls, [])
 })
 
+test('forceDogzillaWaypointNavigationOnStartup waits through transient Nav2 probe miss', async () => {
+  const healthSequence = [
+    nav2Health({ nav2Available: false }),
+    nav2Health(),
+  ]
+  const actionCalls = []
+  const sleepCalls = []
+  let probeCalls = 0
+
+  const result = await forceDogzillaWaypointNavigationOnStartup({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    sleepImpl: async (ms) => {
+      sleepCalls.push(ms)
+    },
+    probeRobotSidecarHealthImpl: async () => {
+      probeCalls += 1
+      return healthSequence.shift() || nav2Health()
+    },
+    runDogzillaConnectionActionImpl: async (action) => {
+      actionCalls.push(action)
+      return { status: 'ok', action }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.reusedNavigation, true)
+  assert.deepEqual(actionCalls, [])
+  assert.equal(probeCalls, 2)
+  assert.deepEqual(sleepCalls, [])
+})
+
 test('forceDogzillaWaypointNavigationOnStartup starts Nav2 and waits for bridge health', async () => {
   const healthSequence = [
     nav2Health({ nav2Available: false }),
@@ -62,6 +96,7 @@ test('forceDogzillaWaypointNavigationOnStartup starts Nav2 and waits for bridge 
     dogzillaConfig: { lidar: { enabled: true } },
     logger: quietLogger(),
     sleepImpl: async () => {},
+    existingReadyGraceMs: 0,
     probeRobotSidecarHealthImpl: async () => healthSequence.shift() || nav2Health(),
     runDogzillaConnectionActionImpl: async (action) => {
       actionCalls.push(action)

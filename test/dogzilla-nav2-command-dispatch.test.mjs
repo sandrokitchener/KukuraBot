@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { sendRobotCommand } from '../lib/robot-sidecar-client.mjs'
+import { getNav2Stability, resetNav2Stability } from '../lib/dogzilla-nav2-stability.mjs'
+import {
+  dogzillaDirectRuntime,
+  dogzillaTransportConfig,
+  jsonResponse,
+  nav2HealthBody,
+  parseRequestBody,
+  waypointGotoPreview,
+  withMockedFetch,
+} from '../test-support/robot-http-fixtures.mjs'
+
+test('first waypoint command failure is recorded in nav2 event log even after repair succeeds', async () => {
+  resetNav2Stability()
+  const originalBlocker = 'Nav2 NavigateToPose action server unavailable after 2.0s'
+  let commandAttempts = 0
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      if (String(url).endsWith('/healthz')) {
+        return jsonResponse(nav2HealthBody())
+      }
+
+      if (String(url).endsWith('/commands')) {
+        const body = parseRequestBody(options)
+        if (body?.action !== 'stop') {
+          commandAttempts += 1
+          if (commandAttempts === 1) {
+            return jsonResponse({
+              result: {
+                executed: false,
+                delivery: 'nav2-unavailable',
+                error: originalBlocker,
+              },
+            }, { ok: false, status: 503 })
+          }
+        }
+      }
+
+      return jsonResponse({ accepted: true }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotCommand(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        {
+          sleepImpl: async () => {},
+          runDogzillaConnectionActionImpl: async (action) => ({ status: 'ok', action }),
+        },
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.equal(result.retriedAfterNavigationRepair, true)
+      assert.equal(result.firstAttempt.error, originalBlocker)
+
+      const events = getNav2Stability().recentEvents
+      const failureEvent = events.find(
+        (event) => event.source === 'command-dispatch' && event.nextState === 'blocked' && event.blocker === originalBlocker,
+      )
+      assert.ok(failureEvent, 'event log records the original command-dispatch blocker')
+      assert.equal(failureEvent.repairAction, 'command-time-nav2-repair')
+      assert.equal(failureEvent.readinessStep, 'action_server')
+
+      const failureIndex = events.indexOf(failureEvent)
+      const repairSuccess = events
+        .slice(failureIndex + 1)
+        .find((event) => event.source === 'command-dispatch' && event.nextState === 'ready')
+      assert.ok(repairSuccess, 'repair success logged after the original blocker')
+
+      const repairStart = events
+        .slice(failureIndex + 1)
+        .find((event) => event.nextState === 'repairing')
+      assert.ok(repairStart, 'repair start logged after the original blocker')
+      assert.ok(events.indexOf(repairStart) < events.indexOf(repairSuccess), 'repair start precedes repair success')
+    },
+  )
+
+  resetNav2Stability()
+})

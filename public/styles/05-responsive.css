@@ -230,18 +230,17 @@
     justify-content: space-between;
   }
 
-  .map-workflow-grid {
-    grid-template-columns: 1fr;
+  .map-workflow-step {
+    flex-wrap: wrap;
   }
 
-  .map-workflow-panel summary {
-    align-items: flex-start;
+  .map-step-label {
+    min-width: 0;
+  }
+
+  .map-workflow-head {
     flex-direction: column;
-  }
-
-  .map-workflow-status {
-    max-width: 100%;
-    text-align: left;
+    align-items: flex-start;
   }
 
   .recon-snapshot-item {

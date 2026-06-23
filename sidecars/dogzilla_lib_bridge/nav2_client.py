@@ -20,7 +20,7 @@ DEFAULT_NAV2_ALLOWED_FRAMES = {
     for frame in os.environ.get("DOGZILLA_NAV2_ALLOWED_FRAMES", "map,odom").split(",")
     if frame.strip()
 }
-DEFAULT_NAV2_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_WAIT_TIMEOUT", "2.0"))
+DEFAULT_NAV2_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_WAIT_TIMEOUT", "12.0"))
 DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_GOAL_RESPONSE_TIMEOUT", "3.0"))
 DEFAULT_NAV2_CANCEL_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_CANCEL_TIMEOUT", "1.0"))
 DEFAULT_NAV2_STATUS_CACHE_SEC = float(os.environ.get("DOGZILLA_NAV2_STATUS_CACHE_SEC", "5.0"))
@@ -169,6 +169,56 @@ def probe_nav2_lifecycle(node: Any, *, nodes: tuple[str, ...], timeout_sec: floa
     return status
 
 
+def probe_nav2_lifecycle_with_retry(
+    node: Any,
+    *,
+    nodes: tuple[str, ...],
+    timeout_sec: float,
+    retry_delay_sec: float = 1.5,
+) -> dict[str, Any]:
+    """Probe Nav2 lifecycle with one auto-retry on transient failures.
+
+    The first probe can return a false-not-active result when the Pi lifecycle
+    services answer slower than the per-node probe window. Retrying once with
+    a short delay before declaring blocked eliminates that known false blocker.
+    """
+    first = probe_nav2_lifecycle(node, nodes=nodes, timeout_sec=timeout_sec)
+    if first.get("active") is True:
+        return first
+
+    inactive = [
+        item for item in first.get("nodes") or []
+        if isinstance(item, dict) and item.get("active") is not True
+    ]
+    if not inactive:
+        return first
+
+    time.sleep(max(float(retry_delay_sec), 0.0))
+    second = probe_nav2_lifecycle(node, nodes=nodes, timeout_sec=timeout_sec)
+    if second.get("active") is True:
+        second["recoveredAfterRetry"] = True
+        return second
+
+    return second
+
+
+def probe_scan_topic_with_retry(
+    node: Any,
+    *,
+    topic: str,
+    timeout_sec: float,
+    retry_delay_sec: float = 1.0,
+) -> dict[str, Any]:
+    first = probe_scan_topic(node, topic=topic, timeout_sec=timeout_sec)
+    if first.get("available") is True:
+        return first
+    time.sleep(max(float(retry_delay_sec), 0.0))
+    second = probe_scan_topic(node, topic=topic, timeout_sec=timeout_sec)
+    if second.get("available") is True and first.get("available") is not True:
+        second["recoveredAfterRetry"] = True
+    return second
+
+
 def probe_scan_topic(node: Any, *, topic: str, timeout_sec: float) -> dict[str, Any]:
     try:
         import rclpy
@@ -219,8 +269,16 @@ def probe_nav2_prerequisites(
 ) -> dict[str, Any]:
     return {
         "odom": probe_live_odom(node, topic=odom_topic, timeout_sec=odom_timeout_sec),
-        "lifecycle": probe_nav2_lifecycle(node, nodes=lifecycle_nodes, timeout_sec=lifecycle_timeout_sec),
-        "scan": probe_scan_topic(node, topic=scan_topic, timeout_sec=scan_timeout_sec),
+        "lifecycle": probe_nav2_lifecycle_with_retry(
+            node,
+            nodes=lifecycle_nodes,
+            timeout_sec=lifecycle_timeout_sec,
+        ),
+        "scan": probe_scan_topic_with_retry(
+            node,
+            topic=scan_topic,
+            timeout_sec=scan_timeout_sec,
+        ),
     }
 
 

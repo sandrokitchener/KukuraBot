@@ -82,8 +82,8 @@ Readiness should progress through:
 1. `nav2_msgs` import works, no `No module named 'nav2_msgs'`.
 2. `/navigate_to_pose` action server is available.
 3. `/odom` message and TF are available.
-4. Nav2 lifecycle nodes are active.
-5. Filtered scan is available on `/scan_nav2`.
+4. Nav2 lifecycle nodes are active. (`probe_nav2_lifecycle_with_retry` auto-retries once on transient failures to avoid the slow-lifecycle false blocker.)
+5. Filtered scan is available on `/scan_nav2`. (`probe_scan_topic_with_retry` auto-retries once.)
 6. `ready: true`.
 
 Startup prints these as separate terminal gates before app launch:
@@ -92,6 +92,31 @@ Nav2 lifecycle nodes, `/scan_nav2` filtered scan, and map-frame pose. `npm
 start` blocks before spawning the app when DOGZILLA waypoint navigation remains
 unready. Standalone `node server.mjs` applies the same gate before listen. Use
 `APP_DOGZILLA_STARTUP_REQUIRE_NAV=0` only for non-navigation debugging.
+After launch, `server.mjs` keeps a DOGZILLA startup watchdog monitor running
+(`APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS`, default 12 seconds). The monitor
+sets `repairState.repairing = true` while actively repairing, which the UI
+surfaces as a `Repairing navigation...` status with yellow severity. If the
+app sees the direct bridge or Nav2 waypoint prerequisites degrade, the monitor
+reuses the same self-heal path instead of waiting for the next operator
+command.
+
+`nav2Stability` in `/api/robot/state` is derived from the **current** bridge
+health probe only, not the cached display health. When the current probe fails
+or is absent, the tracker records `disconnected`/`blocked` truthfully even if a
+cached prior health payload is still being used for display continuity (robot
+state, telemetry, waypoints). The snapshot exposes
+`bridgeHealthCachedForDisplay` so the UI can tell display-derived data apart
+from a fresh probe. Command-time repair in `lib/robot-sidecar-client.mjs`
+records the original command-dispatch blocker via `recordNav2CommandFailure`
+before logging repair start/result, so the Nav2 event log answers what failed,
+when, from where, and whether repair worked.
+
+**Note:** The 12-second monitor interval is a deliberate trade-off. It was
+reduced from 30s to detect Nav2 degradation faster so the user does not wait
+nearly half a minute before auto-repair kicks in. If the Pi SSH load from the
+monitor probe becomes a problem, raise `APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS`
+to 20000-30000. Do not lower below 8s without proving the Pi lifecycle probes
+and direct-bridge health still complete in time.
 
 `/state` is the fast liveness probe. `/preflight` is heavier.
 
@@ -101,17 +126,30 @@ Direct-bridge Nav2 checks intentionally allow slow Pi lifecycle responses:
 without proving command-time `/controller_server/get_state`,
 `/planner_server/get_state`, `/bt_navigator/get_state`, and
 `/behavior_server/get_state` responses stay fast under load.
+Command-time `NavigateToPose` server waits also default to 12 seconds
+(`DOGZILLA_NAV2_WAIT_TIMEOUT`) because Pi action-server discovery can lag even
+when `/healthz` is green.
+If a waypoint command still returns a command-time `Nav2 NavigateToPose action
+server unavailable` response, `lib/robot-sidecar-client.mjs` treats it as
+recoverable for DOGZILLA Direct Bridge: it starts map-pose localization, starts
+Nav2 waypoint navigation, waits for readiness, then retries the original
+waypoint command once before surfacing the error.
 
 If dispatch fails with `Nav2 lifecycle nodes are not active:
 controller_server, planner_server, bt_navigator, behavior_server`, verify the
 command-time path before changing waypoints or restarting Nav2. `/healthz` is a
 snapshot and `/commands` re-probes prerequisites before sending a goal; those can
-temporarily disagree when lifecycle services are slow. Check that `/healthz`
-reports `lifecycleWaitTimeoutSec: 12` and `dockerStatusTimeoutSec: 30`, then
-tail `/home/pi/robodoge/sidecars/dogzilla_lib_bridge/command_log.ndjson` and
-query the four lifecycle services inside `robodoge-lidar-bridge`.
+temporarily disagree when lifecycle services are slow. Use the recurring
+lifecycle-dispatch recipe in `docs/COMMANDS.md` to verify bridge timing,
+command logs, and lifecycle services.
 
 ## Starting and deploying
+
+`start-map-pose` and `start-navigation` are wrapped in a 3-attempt retry loop
+(`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s) at both startup and
+command-time repair. This mirrors the existing `start-direct` 3-attempt pattern
+from `robot-startup-sequence.mjs` and addresses the SSH-hiccup failure mode
+where a single transient start failure would leave Nav2 down for the session.
 
 Start navigation:
 
@@ -143,6 +181,27 @@ npm run dogzilla:validate-waypoints
 
 After saving a new SLAM map, existing origins and app-map waypoints should report stale until recaptured against the new active map identity.
 
+### Stale waypoint recapture
+
+When waypoints go stale (map identity mismatch, origin drift, etc.), the
+waypoint-readiness panel in the UI lists the affected waypoints with a
+`Recapture here` button. Cartographer laser-only localization does NOT
+require Nav2 or odometry, so the user can pick up the robot, carry it to the
+physical waypoint spot, set it down, wait for `waypointSafe: true`, and click
+`Recapture here` to overwrite the waypoint with the current map pose.
+
+The recapture flow calls `POST /api/dogzilla/waypoints` with the stale
+waypoint's name. The endpoint requires a `waypointSafe` pose. When current map
+identity and a matching map-origin snapshot are available, it overwrites the
+waypoint in `config/robot-waypoints.json` as `app_map` and writes the new
+`mapFingerprint` / `mapId` so readiness can flip back to ready. If origin
+state is stale or missing, the endpoint falls back to storing a raw `map` pose
+instead of pretending the app-map identity is safe.
+
+There is no batch-recapture: the robot must physically be at each waypoint
+spot. Recapture is always explicit — waypoints are never silently rewritten
+or downgraded (see `AGENTS.md`).
+
 SSH config:
 
 ```text
@@ -152,22 +211,8 @@ host: 10.0.4.32
 user: pi
 ```
 
-Manual Nav2 message fix if needed:
-
-```powershell
-scp -F output/pi-ssh/config scripts/install-nav2-msgs-in-container.sh dogzilla:/home/pi/robodoge/
-ssh -F output/pi-ssh/config dogzilla "docker exec robodoge-lidar-bridge sudo bash /home/pi/robodoge/install-nav2-msgs-in-container.sh"
-ssh -F output/pi-ssh/config dogzilla "sudo systemctl restart robodoge-direct-bridge.service; sleep 5"
-```
-
-Deploy changed direct-bridge Nav2 client:
-
-```powershell
-scp -F output/pi-ssh/config sidecars/dogzilla_lib_bridge/nav2_client.py dogzilla:/home/pi/robodoge/sidecars/dogzilla_lib_bridge/nav2_client.py
-ssh -F output/pi-ssh/config dogzilla "rm -f /home/pi/robodoge/sidecars/dogzilla_lib_bridge/__pycache__/nav2_client.cpython-311.pyc"
-ssh -F output/pi-ssh/config dogzilla "sudo systemctl restart robodoge-direct-bridge.service; sleep 5"
-node scripts/probe-dogzilla-nav-readiness.mjs
-```
+Operational recipes such as the manual Nav2 message fix and direct-bridge Nav2
+client deploy live in `docs/COMMANDS.md`.
 
 ## Tuning
 

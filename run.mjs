@@ -186,6 +186,7 @@ if (existingAppConfig && reuseExistingApp) {
         APP_PORT: String(PORT),
         APP_MODEL_PROFILE: MODEL_PROFILE,
         APP_DOGZILLA_STARTUP_WATCHDOG: '0',
+        APP_DOGZILLA_STARTUP_MONITOR: process.env.APP_DOGZILLA_STARTUP_MONITOR ?? '1',
         ROBOT_RUNTIME_TARGET: robotRuntimeConfig.activeTargetId,
         KUKURA_HOST: HOST,
         KUKURA_PORT: String(PORT),

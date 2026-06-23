@@ -260,7 +260,7 @@ body {
 
 .robot-column {
   display: grid;
-  grid-template-rows: auto minmax(118px, auto) minmax(116px, auto) minmax(250px, 1fr) minmax(180px, 0.72fr);
+  grid-template-rows: auto minmax(86px, auto) minmax(90px, auto) minmax(250px, 1fr) minmax(180px, 0.72fr);
   gap: clamp(10px, 1vh, 16px);
   min-height: 0;
 }
@@ -268,7 +268,7 @@ body {
 .robot-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  min-height: 42px;
+  min-height: 38px;
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -371,25 +371,25 @@ body {
 }
 
 .robot-state-panel {
-  padding: 12px 0 0;
+  padding: 8px 0 0;
   border-top: 1px solid var(--line);
 }
 
 .manual-control-panel {
-  padding: 12px 0 0;
+  padding: 8px 0 0;
   border-top: 1px solid var(--line);
   display: grid;
   grid-template-rows: auto auto auto auto;
-  gap: 9px;
+  gap: 6px;
 }
 
 .robot-map-panel {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(320px, 1fr) auto;
   gap: 10px;
-  min-height: 238px;
+  min-height: 430px;
 }
 
 .robot-camera-panel {

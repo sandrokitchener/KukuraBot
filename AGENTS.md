@@ -69,6 +69,13 @@ Open these only when a compact doc explicitly routes you there or the task direc
 - After meaningful changes, update the relevant `.md` file briefly and factually.
 - If status is live-environment dependent and you did not verify it this turn, write `Unknown / not confirmed`.
 
+## Context doc cleanup rules
+
+- Keep `AGENTS.md` as the router, not a subsystem encyclopedia.
+- Keep reusable command recipes in `docs/COMMANDS.md`; subsystem docs should point there instead of duplicating long command blocks.
+- Keep `docs/KNOWN_ISSUES.md` limited to repeated failures, stable traps, and current blockers; move background detail to the subsystem doc or archive when it grows.
+- Prefer deleting stale or duplicated text over adding new sections. Add durable facts only when verified from repo source or live runtime evidence in the current turn.
+
 ## Standing project rules
 
 - For DOGZILLA robot behavior, navigation, LiDAR, mapping, patrol, obstacle avoidance, and waypoint work, check `docs/DOGZILLA-main` and the relevant Yahboom PDFs before inventing a new approach.
@@ -99,3 +106,47 @@ http://127.0.0.1:3037
 - Fall back to raw shell only when RTK lacks the needed command, exact unfiltered output is required, or RTK itself is broken; mention the fallback briefly.
 - System prompt for `rtk gain`/meta-commands at `.opencode/opencode.md`
 - **Known issue**: npm-published `openrtk` v0.1.0 has ESM extensionless import bug â€” patch applied in `node_modules/openrtk/lib/index.js` (adds `.js` to `./rewrite` import). Re-patch after `npm install`/`npm ci`.
+
+
+<!-- headroom:rtk-instructions -->
+# RTK (Rust Token Killer) - Token-Optimized Commands
+
+When running shell commands, **always prefix with `rtk`**. This reduces context
+usage by 60-90% with zero behavior change. If rtk has no filter for a command,
+it passes through unchanged — so it is always safe to use.
+
+## Key Commands
+```bash
+# Git (59-80% savings)
+rtk git status          rtk git diff            rtk git log
+
+# Files & Search (60-75% savings)
+rtk ls <path>           rtk read <file>         rtk grep <pattern>
+rtk find <pattern>      rtk diff <file>
+
+# Test (90-99% savings) — shows failures only
+rtk pytest tests/       rtk cargo test          rtk test <cmd>
+
+# Build & Lint (80-90% savings) — shows errors only
+rtk tsc                 rtk lint                rtk cargo build
+rtk prettier --check    rtk mypy                rtk ruff check
+
+# Analysis (70-90% savings)
+rtk err <cmd>           rtk log <file>          rtk json <file>
+rtk summary <cmd>       rtk deps                rtk env
+
+# GitHub (26-87% savings)
+rtk gh pr view <n>      rtk gh run list         rtk gh issue list
+
+# Infrastructure (85% savings)
+rtk docker ps           rtk kubectl get         rtk docker logs <c>
+
+# Package managers (70-90% savings)
+rtk pip list            rtk pnpm install        rtk npm run <script>
+```
+
+## Rules
+- In command chains, prefix each segment: `rtk git add . && rtk git commit -m "msg"`
+- For debugging, use raw command without rtk prefix
+- `rtk proxy <cmd>` runs command without filtering but tracks usage
+<!-- /headroom:rtk-instructions -->

@@ -43,6 +43,14 @@ import {
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
 import { deriveNavigationStatus } from './lib/dogzilla-navigation-status.mjs'
+import { getDogzillaRepairState, setDogzillaRepairing } from './lib/dogzilla-repair-state.mjs'
+import {
+  deriveNav2StabilityFromHealth,
+  getNav2Stability,
+  isNav2StabilityTrackerEnabled,
+  recordNav2RepairStart,
+  recordNav2RepairResult,
+} from './lib/dogzilla-nav2-stability.mjs'
 import {
   runDogzillaStartupWatchdog,
   shouldBlockDogzillaAppLaunchForNavigation,
@@ -69,6 +77,8 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
 )
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '0.0.0.0'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
+const DOGZILLA_STARTUP_MONITOR_INTERVAL_MS = Number(process.env.APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS || 12_000)
+const DOGZILLA_STARTUP_MONITOR_INITIAL_DELAY_MS = Number(process.env.APP_DOGZILLA_STARTUP_MONITOR_INITIAL_DELAY_MS || 10_000)
 const appConfig = await loadAppConfig()
 const dogzillaStartupResult = await runDogzillaStartupWatchdog({ logger: console }).catch((error) => ({
   status: 'degraded',
@@ -241,8 +251,133 @@ server.listen(PORT, HOST, async () => {
   console.log(green(`     |               \`--' |`))
   console.log(green(` ____|_       ___|   |___.'`))
   console.log(green(`/_/_____/____/_______|`))
+  startDogzillaStartupWatchdogMonitor()
   void warmActiveModel(profileConfig.activeProfile)
 })
+
+function startDogzillaStartupWatchdogMonitor({
+  env = process.env,
+  logger = console,
+  intervalMs = DOGZILLA_STARTUP_MONITOR_INTERVAL_MS,
+  initialDelayMs = DOGZILLA_STARTUP_MONITOR_INITIAL_DELAY_MS,
+} = {}) {
+  const override = String(env.APP_DOGZILLA_STARTUP_MONITOR ?? env.DOGZILLA_STARTUP_MONITOR ?? '').trim().toLowerCase()
+  if (['0', 'false', 'no', 'off'].includes(override)) {
+    logger.log?.('DOGZILLA startup watchdog monitor disabled.')
+    return null
+  }
+
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    logger.warn?.(`DOGZILLA startup watchdog monitor disabled: invalid interval ${intervalMs}.`)
+    return null
+  }
+
+  let running = false
+  let hasRun = false
+  const runMonitor = async () => {
+    if (running) {
+      return
+    }
+
+    running = true
+    setDogzillaRepairing(true, { source: 'startup-monitor' })
+    if (isNav2StabilityTrackerEnabled()) {
+      recordNav2RepairStart({ source: 'startup-monitor', repairAction: 'watchdog' })
+    }
+    const bufferedLogger = hasRun ? createBufferedLogger(logger) : null
+    try {
+      const result = await runDogzillaStartupWatchdog({
+        env: {
+          ...env,
+          APP_DOGZILLA_STARTUP_WATCHDOG: '1',
+        },
+        logger: bufferedLogger || logger,
+      })
+    if (result.status === 'degraded' || didDogzillaStartupWatchdogDoWork(result)) {
+      bufferedLogger?.flush()
+    }
+    if (result.status === 'degraded') {
+      logger.warn?.('DOGZILLA startup watchdog monitor repaired or attempted degraded navigation services.')
+      if (isNav2StabilityTrackerEnabled()) {
+          recordNav2RepairResult(false, {
+            source: 'startup-monitor',
+            repairAction: 'watchdog',
+            blocker: 'Startup watchdog completed with degraded services',
+          })
+        }
+      } else if (isNav2StabilityTrackerEnabled()) {
+        recordNav2RepairResult(true, {
+          source: 'startup-monitor',
+          repairAction: 'watchdog',
+        })
+      }
+    } catch (error) {
+      bufferedLogger?.flush()
+      logger.warn?.(`DOGZILLA startup watchdog monitor failed: ${error instanceof Error ? error.message : String(error)}`)
+      if (isNav2StabilityTrackerEnabled()) {
+        recordNav2RepairResult(false, {
+          source: 'startup-monitor',
+          repairAction: 'watchdog',
+          blocker: error instanceof Error ? error.message : String(error),
+        })
+      }
+    } finally {
+      running = false
+      hasRun = true
+      setDogzillaRepairing(false, { source: 'startup-monitor', finishedAt: new Date().toISOString() })
+    }
+  }
+
+  const firstDelay = Number.isFinite(initialDelayMs) && initialDelayMs >= 0 ? initialDelayMs : intervalMs
+  const initialTimer = setTimeout(() => {
+    void runMonitor()
+  }, firstDelay)
+  const interval = setInterval(() => {
+    void runMonitor()
+  }, intervalMs)
+  initialTimer.unref?.()
+  interval.unref?.()
+  return { initialTimer, interval }
+}
+
+function createBufferedLogger(logger = console) {
+  const entries = []
+  const push = (method, args) => {
+    entries.push({ method, args })
+  }
+
+  return {
+    log: (...args) => push('log', args),
+    warn: (...args) => push('warn', args),
+    error: (...args) => push('error', args),
+    flush: () => {
+      for (const entry of entries) {
+        logger[entry.method]?.(...entry.args)
+      }
+      entries.length = 0
+    },
+  }
+}
+
+function didDogzillaStartupWatchdogDoWork(result = {}) {
+  if (result.directBridge?.enabled && result.directBridge.reusedBridge === false) {
+    return true
+  }
+
+  if (result.waypointNavigation?.enabled && result.waypointNavigation.reusedNavigation === false) {
+    return true
+  }
+
+  const services = result.requiredServices?.results
+  if (!services || typeof services !== 'object') {
+    return false
+  }
+
+  return Object.values(services).some((service) => (
+    service?.status === 'ok'
+    && (service.reusedService === false || service.recoveredAfterStartError === true)
+  ))
+}
 
 async function warmActiveModel(profile) {
   if (process.env.APP_MODEL_WARMUP === '0' || process.env.APP_MODEL_WARMUP === 'false') {
@@ -377,6 +512,16 @@ async function buildCurrentRobotStateSnapshot() {
     ? [bridgeRobot, ...streamRobots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
     : streamRobots
 
+  const currentBridgeHealthBody = bridgeHealth?.status === 'ok' ? bridgeHealth.body : null
+  const bridgeHealthCachedForDisplay = !currentBridgeHealthBody && !!cachedBridgeHealth
+
+  if (isNav2StabilityTrackerEnabled()) {
+    deriveNav2StabilityFromHealth(currentBridgeHealthBody, {
+      source: 'state-snapshot',
+      bridgeDestination: bridgeHealth?.destination || null,
+    })
+  }
+
   return {
     ...streamSnapshot,
     status,
@@ -386,6 +531,7 @@ async function buildCurrentRobotStateSnapshot() {
     activeTarget: robotRuntimeConfig.activeTarget,
     bridgeState,
     bridgeHealth,
+    bridgeHealthCachedForDisplay,
     poseState,
     mapOrigin: mapOriginStatus,
     poseTrack,
@@ -396,7 +542,9 @@ async function buildCurrentRobotStateSnapshot() {
       bridgeRuntime,
       poseState,
       dogzillaWaypointReadiness,
+      repairState: getDogzillaRepairState(),
     }),
+    nav2Stability: isNav2StabilityTrackerEnabled() ? getNav2Stability() : null,
   }
 }
 

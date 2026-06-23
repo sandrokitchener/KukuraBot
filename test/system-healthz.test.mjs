@@ -355,3 +355,25 @@ test('collectHealthzProbes reads the configured YOLO vision health endpoint', as
   assert.equal(probes.vision.latestFrameAgeSec, 0.25)
   assert.equal(probes.vision.frames, 9)
 })
+
+test('collectHealthzProbes gives slow direct bridge health a longer timeout', async () => {
+  const probes = await collectHealthzProbes({
+    timeoutMs: 10,
+    robotBridgeTimeoutMs: 80,
+    loadDogzillaConnectionConfigImpl: async () => ({}),
+    buildRobotStateSnapshotImpl: async () => ({ status: 'ok' }),
+    getRobotSidecarHealthImpl: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      return { status: 'ok' }
+    },
+    getDogzillaLidarHealthImpl: async () => ({ status: 'disabled' }),
+    getDogzillaRobotPoseImpl: async () => ({ status: 'disabled' }),
+    getDogzillaCameraStatusImpl: async () => ({ status: 'unconfigured' }),
+    getDogzillaAudioCueHealthImpl: async () => ({ status: 'disabled' }),
+    getSpeechSidecarHealthImpl: async () => ({ status: 'disabled' }),
+    getIsaacSidecarHealthImpl: async () => ({ status: 'disabled' }),
+    fetchImpl: async () => Response.json({ ok: false }),
+  })
+
+  assert.equal(probes.robotBridge.status, 'ok')
+})
