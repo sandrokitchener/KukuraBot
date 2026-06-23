@@ -2,6 +2,8 @@
 .omo/
 .codex-remote-attachments/
 .playwright-mcp/
+.headroom/
+headroom_memory.db
 node_modules/
 models/
 output/
