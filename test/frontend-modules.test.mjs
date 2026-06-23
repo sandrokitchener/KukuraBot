@@ -15,18 +15,29 @@ import {
   updateManualBarkTriggerState,
 } from '../public/manual-control.js'
 import {
+  clusterLidarPoints,
   createRobotMapRenderer,
   formatLidarFailureSummary,
   formatRobotMapWaypointTitle,
   formatWaypointReadinessSummary,
   getMapGridView,
   getRenderableRobotMapWaypoints,
+  getRobotMapRouteSegments,
   getSlamMapView,
   getRobotMapRangeMeters,
   headingRadiansToCssRotation,
   lidarPointToMapPose,
   poseToMapPosition,
+  projectLidarPointToEgoView,
 } from '../public/robot-map.js'
+import {
+  buildNavChainComponents,
+  deriveOperatorLastCommand,
+  deriveSafeNextAction,
+  getConnectionActionConfirmation,
+  isDangerousConnectionAction,
+  summarizeNavChain,
+} from '../public/operator-status.js'
 
 test('normalizeDogzillaAudioVolume clamps persisted UI values', () => {
   assert.equal(normalizeDogzillaAudioVolume(0.4), 0.4)
@@ -424,6 +435,44 @@ test('poseToMapPosition returns null for invalid pose', () => {
   assert.equal(poseToMapPosition({}, 4), null)
 })
 
+test('robot map route trail breaks across charger origin reset', () => {
+  const segments = getRobotMapRouteSegments([
+    { frame: 'map', x: 1, y: 1, theta: 0, seq: 1 },
+    { frame: 'map', x: 1.1, y: 1.1, theta: 0, seq: 2 },
+    { frame: 'app_map', x: 0, y: 0, theta: 0, originLabel: 'charger_origin', originSavedAt: '2026-06-21T00:41:48.567Z', seq: 3 },
+    { frame: 'app_map', x: 0.1, y: 0.05, theta: 0, originLabel: 'charger_origin', originSavedAt: '2026-06-21T00:41:48.567Z', seq: 4 },
+  ])
+
+  assert.equal(segments.length, 2)
+  assert.deepEqual(segments.map((segment) => segment.map((pose) => pose.frame)), [
+    ['map', 'map'],
+    ['app_map', 'app_map'],
+  ])
+})
+
+test('robot map route trail drops implausible jump segments', () => {
+  const segments = getRobotMapRouteSegments([
+    { frame: 'app_map', x: 0, y: 0, theta: 0, originSavedAt: 'same', seq: 1 },
+    { frame: 'app_map', x: 0.1, y: 0.1, theta: 0, originSavedAt: 'same', seq: 2 },
+    { frame: 'app_map', x: 8, y: 8, theta: 0, originSavedAt: 'same', seq: 3 },
+    { frame: 'app_map', x: 8.1, y: 8.1, theta: 0, originSavedAt: 'same', seq: 4 },
+  ], { maxSegmentMeters: 1.5 })
+
+  assert.equal(segments.length, 2)
+  assert.deepEqual(segments.map((segment) => segment.length), [2, 2])
+})
+
+test('robot map route trail keeps normal contiguous motion connected', () => {
+  const segments = getRobotMapRouteSegments([
+    { frame: 'app_map', x: 0, y: 0, theta: 0, originSavedAt: 'same', seq: 1 },
+    { frame: 'app_map', x: 0.1, y: 0.05, theta: 0, originSavedAt: 'same', seq: 2 },
+    { frame: 'app_map', x: 0.2, y: 0.08, theta: 0, originSavedAt: 'same', seq: 3 },
+  ])
+
+  assert.equal(segments.length, 1)
+  assert.equal(segments[0].length, 3)
+})
+
 test('robot map range prefers map-frame render coordinates over app_map display coordinates', () => {
   const waypoints = getRenderableRobotMapWaypoints([{
     id: 'garage',
@@ -516,6 +565,46 @@ test('lidar points transform around the current robot map pose', () => {
   assert(Math.abs(rotatedLeft.y - 3) < 0.000001)
 })
 
+test('ego view projects forward LiDAR points upward from the robot', () => {
+  const near = projectLidarPointToEgoView({ x: 0.5, y: 0, range: 0.5 }, { width: 360, height: 360 })
+  const far = projectLidarPointToEgoView({ x: 4, y: 0, range: 4 }, { width: 360, height: 360 })
+
+  assert.ok(near)
+  assert.ok(far)
+  assert.equal(near.x, 180)
+  assert.equal(far.x, 180)
+  assert.ok(far.y < near.y)
+})
+
+test('ego view projects left and right LiDAR points to matching sides', () => {
+  const left = projectLidarPointToEgoView({ x: 2, y: 1, range: 2.24 }, { width: 360, height: 360 })
+  const right = projectLidarPointToEgoView({ x: 2, y: -1, range: 2.24 }, { width: 360, height: 360 })
+
+  assert.ok(left)
+  assert.ok(right)
+  assert.ok(left.x < 180)
+  assert.ok(right.x > 180)
+  assert.equal(Math.round(180 - left.x), Math.round(right.x - 180))
+})
+
+test('LiDAR cluster grouping keeps nearby obstacles and ignores sparse noise', () => {
+  const clusters = clusterLidarPoints([
+    { x: 1.9, y: 0.42, range: 1.95 },
+    { x: 2.0, y: 0.46, range: 2.05 },
+    { x: 2.08, y: 0.5, range: 2.14 },
+    { x: 4.8, y: -1.8, range: 5.12 },
+    { x: 5.8, y: 2.3, range: 6.24 },
+  ], {
+    maxClusterDistance: 0.35,
+    minPoints: 3,
+  })
+
+  assert.equal(clusters.length, 1)
+  assert.equal(clusters[0].count, 3)
+  assert.ok(clusters[0].x > 1.9 && clusters[0].x < 2.1)
+  assert.ok(clusters[0].y > 0.4 && clusters[0].y < 0.52)
+})
+
 test('robot map heading converts ROS yaw to CSS arrow rotation', () => {
   assert.equal(headingRadiansToCssRotation(0), Math.PI / 2)
   assert.equal(headingRadiansToCssRotation(Math.PI / 2), 0)
@@ -557,4 +646,136 @@ test('formatWaypointReadinessSummary distinguishes ready and blocked map waypoin
       'no ready map waypoints in source of truth',
     ],
   }), 'Waypoints not ready: map origin not ready: stale-missing-map-identity; 12 invalid map waypoint(s) in source of truth.')
+})
+
+test('deriveOperatorLastCommand renders last command and result from dispatch payload', () => {
+  assert.equal(
+    deriveOperatorLastCommand({}, { command: 'go to the living room', result: 'sent' }),
+    'go to the living room → sent',
+  )
+  assert.equal(
+    deriveOperatorLastCommand({}, { command: 'sit-test', result: 'error' }),
+    'sit-test → error',
+  )
+  assert.equal(
+    deriveOperatorLastCommand({}, { command: 'emergency-stop', result: null }),
+    'emergency-stop',
+  )
+})
+
+test('deriveOperatorLastCommand falls back to navigation target only when no dispatch recorded', () => {
+  assert.equal(
+    deriveOperatorLastCommand({ navigationStatus: { targetWaypoint: 'kitchen' } }, null),
+    'kitchen',
+  )
+  assert.equal(
+    deriveOperatorLastCommand({ navigationStatus: { status: 'repairing' } }, null),
+    'repairing...',
+  )
+  assert.equal(deriveOperatorLastCommand({}, null), '-')
+})
+
+test('deriveOperatorLastCommand prefers real dispatch over navigationStatus.targetWaypoint', () => {
+  assert.equal(
+    deriveOperatorLastCommand(
+      { navigationStatus: { targetWaypoint: 'kitchen' } },
+      { command: 'go to garage', result: 'sent' },
+    ),
+    'go to garage → sent',
+  )
+})
+
+test('deriveSafeNextAction surfaces disabled/safe-next blocker for nav2 blocked state', () => {
+  const blocked = deriveSafeNextAction({
+    activeRobot: { uuid: 'dogzilla' },
+    nav2Stability: { state: 'blocked', currentBlocker: 'Nav2 NavigateToPose action server is not running' },
+  })
+  assert.equal(blocked.action, 'Start Nav')
+  assert.match(blocked.blocker, /NavigateToPose action server/)
+
+  const disconnected = deriveSafeNextAction({
+    activeRobot: { uuid: 'dogzilla' },
+    nav2Stability: { state: 'disconnected', currentBlocker: 'No runtime data from bridge' },
+  })
+  assert.equal(disconnected.action, 'Start Nav')
+  assert.match(disconnected.blocker, /No runtime data from bridge/)
+
+  const poseBlocked = deriveSafeNextAction({
+    activeRobot: { uuid: 'dogzilla' },
+    poseState: { status: 'error', error: 'Pose not waypoint-safe' },
+  })
+  assert.equal(poseBlocked.action, 'Restart map localization')
+  assert.match(poseBlocked.blocker, /Pose not waypoint-safe/)
+
+  const ready = deriveSafeNextAction({
+    activeRobot: { uuid: 'dogzilla' },
+    nav2Stability: { state: 'ready' },
+    navigationStatus: { status: 'ready' },
+  })
+  assert.equal(ready.action, 'Send movement command')
+  assert.equal(ready.blocker, null)
+})
+
+test('buildNavChainComponents renders full chain as unknown when readiness payload is missing', () => {
+  const components = buildNavChainComponents(null)
+  assert.equal(components.length, 6)
+  assert.ok(components.every((c) => c.status === 'unknown'))
+  assert.match(summarizeNavChain(components), /0\/6 ready \(unknown\)/)
+
+  const emptyComponents = buildNavChainComponents({})
+  assert.ok(emptyComponents.every((c) => c.status === 'unknown'))
+})
+
+test('buildNavChainComponents reports ok/fail/unknown for every chain step', () => {
+  const components = buildNavChainComponents({
+    navigation: {
+      scanReady: true,
+      odomReady: false,
+      odomTfAvailable: true,
+      actionAvailable: true,
+      lifecycleActive: false,
+    },
+    mapOrigin: { configured: true },
+  })
+
+  assert.deepEqual(
+    components.map((c) => ({ id: c.id, status: c.status })),
+    [
+      { id: 'lidar', status: 'ok' },
+      { id: 'localization', status: 'ok' },
+      { id: 'odom', status: 'fail' },
+      { id: 'action', status: 'ok' },
+      { id: 'lifecycle', status: 'fail' },
+      { id: 'scan', status: 'ok' },
+    ],
+  )
+  assert.match(summarizeNavChain(components), /4\/6 ready \(Odom \+ TF, Nav2 lifecycle\)/)
+})
+
+test('dangerous maintenance actions require confirmation with consequence text', () => {
+  assert.ok(isDangerousConnectionAction('sync-bridges'))
+  assert.ok(isDangerousConnectionAction('stop-vendor-app'))
+  assert.ok(isDangerousConnectionAction('stop-bridges'))
+  assert.ok(isDangerousConnectionAction('capture-map-origin'))
+  assert.ok(isDangerousConnectionAction('start-map-pose-mapping'))
+  assert.ok(isDangerousConnectionAction('save-map-pose'))
+
+  assert.equal(isDangerousConnectionAction('probe-bridges'), false)
+  assert.equal(isDangerousConnectionAction('start-direct'), false)
+  assert.equal(isDangerousConnectionAction('check-ssh'), false)
+
+  const sync = getConnectionActionConfirmation('sync-bridges')
+  assert.ok(sync)
+  assert.ok(sync.title)
+  assert.match(sync.message, /overwrite the bridge scripts|restart the direct bridge/i)
+
+  const stopBridges = getConnectionActionConfirmation('stop-bridges')
+  assert.ok(stopBridges)
+  assert.match(stopBridges.message, /stop all Robo-Doge bridges|unavailable until bridges are restarted/i)
+
+  const stopVendor = getConnectionActionConfirmation('stop-vendor-app')
+  assert.ok(stopVendor)
+  assert.match(stopVendor.message, /stop the vendor DOGZILLA app|unavailable until it is restarted/i)
+
+  assert.equal(getConnectionActionConfirmation('probe-bridges'), null)
 })

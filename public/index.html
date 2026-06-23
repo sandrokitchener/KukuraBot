@@ -33,6 +33,18 @@
             <span class="app-action-label">Diagnostics</span>
           </button>
           <button
+            id="help-toggle"
+            class="help-toggle"
+            type="button"
+            aria-controls="help-drawer"
+            aria-expanded="false"
+            aria-label="Toggle help"
+            title="Help"
+          >
+            <span class="help-icon" aria-hidden="true">?</span>
+            <span class="app-action-label">Help</span>
+          </button>
+          <button
             id="settings-toggle"
             class="settings-toggle"
             type="button"
@@ -52,8 +64,6 @@
           <div class="rail-brand" title="Questing Beast">
             <img src="/assets/questing-beast-qb-mark.png" alt="Questing Beast icon" />
           </div>
-          <span class="rail-icon is-active" title="Command center">+</span>
-          <span class="rail-icon" title="Robot fleet">o</span>
           <button
             id="recon-gallery-toggle"
             class="rail-icon rail-icon-button"
@@ -67,14 +77,32 @@
               <span></span>
             </span>
           </button>
-          <span class="rail-icon" title="Telemetry">~</span>
-          <span class="rail-icon rail-icon-accent" title="Speech online">.</span>
           <span class="rail-spacer" aria-hidden="true"></span>
           <img class="rail-company-logo" src="/assets/dtx-logo-black.webp" alt="DTX" title="DTX" />
-          <span class="rail-icon" title="Diagnostics">*</span>
         </aside>
 
         <section class="command-zone">
+          <div class="operator-status-strip" id="operator-status-strip" data-state="waiting">
+            <div class="operator-status-row">
+              <div class="operator-status-field">
+                <span class="operator-status-label">Last cmd</span>
+                <strong id="operator-last-cmd-state" class="operator-status-value">-</strong>
+              </div>
+            </div>
+            <div class="operator-safe-next-row">
+              <span class="operator-safe-next-label">Next:</span>
+              <strong id="operator-safe-next-action" class="operator-safe-next-action">Waiting for robot</strong>
+              <span id="operator-safe-next-blocker" class="operator-safe-next-blocker" hidden></span>
+            </div>
+          </div>
+
+          <button
+            id="persistent-emergency-stop"
+            class="persistent-emergency-stop"
+            type="button"
+            aria-label="Emergency stop robot"
+          >Emergency Stop</button>
+
           <div class="intro-head">
             <div class="intro-copy">
               <p id="app-eyebrow" class="eyebrow">Quadruped inspection console</p>
@@ -196,15 +224,25 @@
                 </div>
                 <div id="robot-telemetry-meta" class="meta-note"></div>
               </div>
-              <div>
-                <span class="robot-state-label">Target</span>
-                <strong id="runtime-target-name">Loading...</strong>
-                <div id="runtime-target-source" class="meta-note"></div>
-              </div>
               <div id="robot-nav-status-row">
                 <span class="robot-state-label">Navigation</span>
                 <strong id="robot-nav-status">-</strong>
                 <div id="robot-nav-target" class="meta-note"></div>
+              </div>
+              <div id="robot-nav-chain-row" class="robot-nav-chain-row" hidden>
+                <span class="robot-state-label">Nav chain</span>
+                <div id="robot-nav-chain-dots" class="robot-nav-chain-dots" role="button" tabindex="0" aria-label="Navigation chain health" aria-expanded="false">
+                  <span class="robot-nav-chain-dot" data-component="lidar" title="LiDAR"></span>
+                  <span class="robot-nav-chain-dot" data-component="localization" title="Localization"></span>
+                  <span class="robot-nav-chain-dot" data-component="odom" title="Odom + TF"></span>
+                  <span class="robot-nav-chain-dot" data-component="action" title="Nav2 action"></span>
+                  <span class="robot-nav-chain-dot" data-component="lifecycle" title="Nav2 lifecycle"></span>
+                  <span class="robot-nav-chain-dot" data-component="scan" title="Filtered scan"></span>
+                </div>
+                <strong id="robot-nav-chain-summary" class="robot-nav-chain-summary">-</strong>
+              </div>
+              <div id="robot-nav-chain-detail" class="robot-nav-chain-detail" hidden>
+                <div id="robot-nav-chain-detail-content"></div>
               </div>
             </div>
           </section>
@@ -223,34 +261,51 @@
                 <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
               </div>
             </div>
-            <details id="map-workflow-panel" class="map-workflow-panel">
-              <summary>
-                <span>Mapping</span>
+            <div id="map-workflow-panel" class="map-workflow-panel">
+              <div class="map-workflow-head">
+                <span class="map-workflow-title">Navigation Setup</span>
                 <span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
-              </summary>
-              <div class="map-workflow-grid">
-                <div class="map-workflow-group">
-                  <span class="map-workflow-label">Current saved map</span>
+              </div>
+              <div class="map-workflow-steps">
+                <div class="map-workflow-step">
+                  <span class="map-step-number">1</span>
+                  <span class="map-step-label">Map your space</span>
                   <div class="map-workflow-actions">
-                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Localize on saved map</button>
-                    <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Set charger origin here</button>
-                    <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check waypoint readiness</button>
-                  </div>
-                  <div class="waypoint-capture-row">
-                    <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
-                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as a waypoint">Save waypoint here</button>
-                    <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
+                    <button type="button" class="map-slam-button" data-connection-action="start-map-pose-mapping">New Map</button>
+                    <button type="button" class="map-slam-button show-on-slam" data-connection-action="save-map-pose">Save Map</button>
                   </div>
                 </div>
-                <div class="map-workflow-group">
-                  <span class="map-workflow-label">New SLAM map</span>
+                <div class="map-workflow-step">
+                  <span class="map-step-number">2</span>
+                  <span class="map-step-label">Set home position</span>
                   <div class="map-workflow-actions">
-                    <button type="button" class="map-slam-button" data-connection-action="start-map-pose-mapping">Start new SLAM map</button>
-                    <button type="button" class="map-slam-button show-on-slam" data-connection-action="save-map-pose">Save new map identity</button>
+                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Find Position</button>
+                    <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Set Home</button>
+                  </div>
+                </div>
+                <div class="map-workflow-step">
+                  <span class="map-step-number">3</span>
+                  <span class="map-step-label">Save waypoints</span>
+                  <div class="waypoint-capture-row">
+                    <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
+                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as a waypoint">Save Spot</button>
+                    <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
+                  </div>
+                  <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
+                    <span class="stale-waypoints-label">Out of date — move robot here, then click Re-save</span>
+                    <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
+                  </div>
+                </div>
+                <div class="map-workflow-step">
+                  <span class="map-step-number">4</span>
+                  <span class="map-step-label">Start navigation</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check Ready</button>
+                    <button type="button" class="map-workflow-button" data-connection-action="start-navigation">Start Nav</button>
                   </div>
                 </div>
               </div>
-            </details>
+            </div>
             <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
@@ -260,6 +315,11 @@
               <span id="robot-map-dot" class="robot-map-dot" aria-hidden="true"></span>
               <span id="robot-nav-badge" class="robot-nav-badge" aria-hidden="true"></span>
               <span id="robot-pose-readout" class="robot-pose-readout">pose -</span>
+              <div class="robot-map-zoom-controls">
+                <button type="button" class="robot-map-zoom-btn" data-zoom-action="in" aria-label="Zoom in" title="Zoom in">+</button>
+                <span class="robot-map-zoom-indicator" role="button" tabindex="0" aria-label="Zoom level — click to reset" title="Zoom: 100% — scroll to zoom, click to reset">100%</span>
+                <button type="button" class="robot-map-zoom-btn" data-zoom-action="out" aria-label="Zoom out" title="Zoom out">−</button>
+              </div>
             </div>
             <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>
           </section>
@@ -267,10 +327,11 @@
           <section id="robot-camera-panel" class="robot-camera-panel" hidden>
             <div class="robot-map-head">
               <h2>Camera</h2>
-              <div class="robot-camera-actions">
-                <button id="robot-camera-refresh-button" class="camera-refresh-button" type="button" aria-label="Refresh camera view" title="Refresh camera view" disabled>Refresh</button>
-                <span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
-              </div>
+<div class="robot-camera-actions">
+<button id="robot-camera-refresh-button" class="camera-refresh-button" type="button" aria-label="Refresh camera view" title="Refresh camera view" disabled>Refresh</button>
+<button id="robot-camera-recover-button" class="camera-refresh-button camera-recover-button" type="button" aria-label="Restart YOLO camera feed" title="Restart YOLO camera feed" disabled>Fix black feed</button>
+<span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
+</div>
             </div>
             <div class="robot-camera-frame-wrap">
               <img id="robot-camera-frame" class="robot-camera-frame" alt="DOGZILLA camera stream" />
@@ -406,10 +467,6 @@
               <strong id="dogzilla-robot-id">-</strong>
             </div>
             <div>
-              <span class="meta-label">Robot name</span>
-              <strong id="dogzilla-robot-name">Questing Beast</strong>
-            </div>
-            <div>
               <span class="meta-label">Robot bridge</span>
               <strong id="dogzilla-direct-url">-</strong>
             </div>
@@ -431,14 +488,13 @@
             <button type="button" data-connection-action="start-audio">Restart Pi audio</button>
             <button type="button" data-connection-action="start-lidar">Restart lidar bridge</button>
             <button type="button" data-connection-action="start-map-pose">Restart map localization</button>
-            <button type="button" data-connection-action="start-navigation">Start waypoint navigator</button>
           </div>
           <details class="advanced-service-tools">
             <summary>Maintenance controls</summary>
             <div class="bridge-action-grid">
               <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
-              <button type="button" data-connection-action="save-map-pose">Save SLAM map</button>
-              <button type="button" data-connection-action="start-map-pose-mapping">Start mapping mode</button>
+              <button type="button" data-connection-action="save-map-pose">Save Map</button>
+              <button type="button" data-connection-action="start-map-pose-mapping">Start Mapping</button>
               <button type="button" data-connection-action="stop-vendor-app">Stop vendor app</button>
               <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
             </div>
@@ -495,13 +551,6 @@
           </div>
           <div id="robot-sit-test-status" class="settings-status">Ready.</div>
 
-          <div class="settings-row emergency-stop-row">
-            <label for="emergency-stop-button">Safety</label>
-            <div class="settings-static-field">stop</div>
-            <button id="emergency-stop-button" class="danger-button" type="button">Emergency stop</button>
-          </div>
-          <div id="emergency-stop-status" class="settings-status">Ready.</div>
-
           <div class="settings-row">
             <label for="speech-profile-select">Speech profile</label>
             <select id="speech-profile-select"></select>
@@ -518,7 +567,168 @@
           <pre id="runtime-feedback-output" class="runtime-preview">Waiting for runtime feedback.</pre>
         </section>
       </aside>
+
+      <aside id="help-drawer" class="help-drawer" hidden>
+        <div class="help-drawer-head">
+          <h2>Help</h2>
+        </div>
+
+        <section class="help-panel">
+          <h3>How to set up navigation</h3>
+          <div id="help-mermaid-container" class="help-mermaid-container">
+            <pre class="mermaid">
+flowchart TD
+    A[Start mapping mode] --> B[Walk robot around space slowly]
+    B --> C[Return to starting area]
+    C --> D[Save new map identity]
+    D --> E[Start localization on saved map]
+    E --> F[Set charger origin here]
+    F --> G[Carry/walk robot to waypoint spot]
+    G --> H[Wait for pose stable]
+    H --> I[Save waypoint here]
+    I --> J{More waypoints?}
+    J -->|yes| G
+    J -->|no| K[Check waypoint readiness]
+    K --> L{All ready?}
+    L -->|no| M[Recapture stale waypoints]
+    M --> K
+    L -->|yes| N[Start waypoint navigator]
+    N --> O[Say 'go to kitchen']
+            </pre>
+          </div>
+          <div id="help-mermaid-fallback" class="help-mermaid-fallback" hidden>
+            <p>Diagram could not be rendered. Flow:</p>
+            <ol class="help-fallback-list">
+              <li>Start mapping mode</li>
+              <li>Walk robot around space slowly</li>
+              <li>Return to starting area</li>
+              <li>Save new map identity</li>
+              <li>Start localization on saved map</li>
+              <li>Set charger origin here</li>
+              <li>Carry/walk robot to waypoint spot</li>
+              <li>Wait for pose stable</li>
+              <li>Save waypoint here</li>
+              <li>Repeat for more waypoints</li>
+              <li>Check waypoint readiness</li>
+              <li>Recapture stale waypoints if needed</li>
+              <li>Start waypoint navigator</li>
+              <li>Say "go to kitchen"</li>
+            </ol>
+          </div>
+        </section>
+
+        <section class="help-panel">
+          <h3>Step-by-step instructions</h3>
+          <ol class="help-steps">
+            <li>
+              <strong>Start mapping mode</strong>
+              <p>Open the Mapping panel and click "Start mapping mode". This puts Cartographer into SLAM mode to build a new map.</p>
+            </li>
+            <li>
+              <strong>Walk robot around space slowly</strong>
+              <p>Use manual controls or carry the robot upright at a steady pace. Keep the LiDAR clear of obstacles. Walk the entire area you want to map.</p>
+            </li>
+            <li>
+              <strong>Return to starting area</strong>
+              <p>Bring the robot back to where you started mapping. This helps Cartographer close the loop and improve map quality.</p>
+            </li>
+            <li>
+              <strong>Save new map identity</strong>
+              <p>In the Mapping panel, click "Save new map identity". This saves the occupancy grid and assigns a unique map ID.</p>
+            </li>
+            <li>
+              <strong>Start localization on saved map</strong>
+              <p>Click "Localize on saved map". Cartographer switches to localization mode, matching the current LiDAR scan against the saved map.</p>
+            </li>
+            <li>
+              <strong>Set charger origin here</strong>
+              <p>Place the robot on its charger. Click "Set charger origin here". This establishes the (0,0) reference point for all waypoints.</p>
+            </li>
+            <li>
+              <strong>Carry/walk robot to waypoint spot</strong>
+              <p>Move the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch).</p>
+            </li>
+            <li>
+              <strong>Wait for pose stable</strong>
+              <p>Wait until the pose indicator shows "waypointSafe". This means Cartographer has localized the robot reliably on the map.</p>
+            </li>
+            <li>
+              <strong>Save waypoint here</strong>
+              <p>Enter a waypoint name (e.g., "kitchen") and click "Save waypoint here". The current pose is saved with the map identity.</p>
+            </li>
+            <li>
+              <strong>Repeat for more waypoints</strong>
+              <p>Move to each waypoint location and repeat steps 7-9.</p>
+            </li>
+            <li>
+              <strong>Check waypoint readiness</strong>
+              <p>Click "Check waypoint readiness". This verifies all waypoints are valid and Nav2 is ready.</p>
+            </li>
+            <li>
+              <strong>Recapture stale waypoints if needed</strong>
+              <p>If any waypoints show as stale (map identity mismatch), click "Recapture" next to each one and re-save at the correct location.</p>
+            </li>
+            <li>
+              <strong>Start waypoint navigator</strong>
+              <p>In the Diagnostics drawer, click "Start waypoint navigator". This launches Nav2 with the saved map and waypoints.</p>
+            </li>
+            <li>
+              <strong>Say "go to kitchen"</strong>
+              <p>Use voice or text to command the robot to navigate to a waypoint. The robot will plan a path and walk there.</p>
+            </li>
+          </ol>
+        </section>
+
+        <section class="help-panel">
+          <h3>Troubleshooting</h3>
+          <details class="help-troubleshoot">
+            <summary>Robot won't start mapping</summary>
+            <ul>
+              <li>Check LiDAR is connected and spinning</li>
+              <li>Verify DOGZILLA IP is set in Diagnostics drawer</li>
+              <li>Run "Check network" and "Check robot link" in Diagnostics</li>
+            </ul>
+          </details>
+          <details class="help-troubleshoot">
+            <summary>Pose not stable (not waypointSafe)</summary>
+            <ul>
+              <li>Ensure robot is on a flat, stable surface</li>
+              <li>Check LiDAR has clear view of surroundings</li>
+              <li>Wait 10-15 seconds for Cartographer to converge</li>
+              <li>Try restarting map localization in Diagnostics</li>
+            </ul>
+          </details>
+          <details class="help-troubleshoot">
+            <summary>Waypoints show as stale</summary>
+            <ul>
+              <li>Map identity changed (new map saved)</li>
+              <li>Click "Recapture" next to each stale waypoint</li>
+              <li>Re-save waypoint at the correct location</li>
+            </ul>
+          </details>
+          <details class="help-troubleshoot">
+            <summary>Nav2 won't start</summary>
+            <ul>
+              <li>Check navigation chain health dots in Robot Info panel</li>
+              <li>Verify map localization is running (pose should be stable)</li>
+              <li>Try "Restart map localization" in Diagnostics</li>
+              <li>Check for "Repairing navigation..." status in nav badge</li>
+            </ul>
+          </details>
+        </section>
+      </aside>
     </main>
+
+    <div id="confirm-modal-overlay" class="confirm-modal-overlay" hidden>
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <h3 id="confirm-modal-title" class="confirm-modal-title">Confirm Action</h3>
+        <p id="confirm-modal-message" class="confirm-modal-message"></p>
+        <div class="confirm-modal-actions">
+          <button id="confirm-modal-cancel" class="confirm-modal-cancel" type="button">Cancel</button>
+          <button id="confirm-modal-confirm" class="confirm-modal-confirm" type="button">Confirm</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

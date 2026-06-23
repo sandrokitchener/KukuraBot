@@ -1,0 +1,213 @@
+/* Robo-Doge CSS: operator-status.css - Operator status strip, safe next action, confirmation modal */
+
+.operator-status-strip {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.operator-status-strip[data-state="waiting"] {
+  opacity: 0.7;
+}
+
+.operator-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.operator-status-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.operator-status-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.operator-status-value {
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+
+.operator-safe-next-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.operator-safe-next-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.operator-safe-next-action {
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.operator-safe-next-blocker {
+  font-size: 0.78rem;
+  color: var(--warning);
+  font-style: italic;
+}
+
+.persistent-emergency-stop {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.persistent-emergency-stop:hover {
+  background: #c03a32;
+}
+
+.persistent-emergency-stop:active {
+  background: #a32e27;
+}
+
+.confirm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+}
+
+.confirm-modal-overlay[hidden] {
+  display: none;
+}
+
+.confirm-modal {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+.confirm-modal-title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.confirm-modal-message {
+  margin: 0 0 20px;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.confirm-modal-cancel,
+.confirm-modal-confirm {
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+}
+
+.confirm-modal-cancel {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.confirm-modal-cancel:hover {
+  background: var(--panel-3);
+}
+
+.confirm-modal-confirm {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.confirm-modal-confirm:hover {
+  background: #c03a32;
+}
+
+@media (max-width: 900px) {
+  .operator-status-row {
+    gap: 10px;
+  }
+
+  .operator-status-field {
+    min-width: 60px;
+  }
+}
+
+@media (max-width: 600px) {
+  .operator-status-strip {
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+
+  .operator-status-row {
+    gap: 8px;
+  }
+
+  .operator-status-field {
+    min-width: 50px;
+  }
+
+  .persistent-emergency-stop {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    margin-bottom: 8px;
+  }
+}
+
+html.android-app .operator-status-strip {
+  background: transparent;
+  border-color: var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html.android-app .persistent-emergency-stop {
+  background: var(--danger);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+html.android-app[data-mobile-view='chat'] .operator-status-strip,
+html.android-app[data-mobile-view='chat'] .persistent-emergency-stop,
+html.android-app[data-mobile-view='audio'] .operator-status-strip,
+html.android-app[data-mobile-view='audio'] .persistent-emergency-stop {
+  display: block;
+}

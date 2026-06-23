@@ -8,6 +8,14 @@ import {
   createRobotMapRenderer,
   formatWaypointReadinessSummary,
 } from './robot-map.js'
+import {
+  buildNavChainComponents,
+  deriveOperatorLastCommand,
+  deriveSafeNextAction,
+  getConnectionActionConfirmation,
+  isDangerousConnectionAction,
+  summarizeNavChain,
+} from './operator-status.js'
 
 const appEyebrow = document.querySelector('#app-eyebrow')
 const appTitle = document.querySelector('#app-title')
@@ -21,8 +29,6 @@ const promptFile = document.querySelector('#prompt-file')
 const schemaFile = document.querySelector('#schema-file')
 const commandTypesFile = document.querySelector('#command-types-file')
 const waypointsFile = document.querySelector('#waypoints-file')
-const runtimeTargetName = document.querySelector('#runtime-target-name')
-const runtimeTargetSource = document.querySelector('#runtime-target-source')
 const robotRuntimeFile = document.querySelector('#robot-runtime-file')
 const robotRos2File = document.querySelector('#robot-ros2-file')
 const profileSelect = document.querySelector('#profile-select')
@@ -35,8 +41,6 @@ const robotTargetLockNote = document.querySelector('#robot-target-lock-note')
 const robotTargetStatus = document.querySelector('#robot-target-status')
 const testRobotSitButton = document.querySelector('#test-robot-sit-button')
 const robotSitTestStatus = document.querySelector('#robot-sit-test-status')
-const emergencyStopButton = document.querySelector('#emergency-stop-button')
-const emergencyStopStatus = document.querySelector('#emergency-stop-status')
 const manualControlPanel = document.querySelector('#manual-control-panel')
 const manualControlChip = document.querySelector('#manual-control-chip')
 const manualControlToggleButton = document.querySelector('#manual-control-toggle-button')
@@ -65,6 +69,7 @@ const NAV_STATUS_ICONS = {
   blocked: '\u26A0',
   ready: '\u25CF',
   idle: '\u25CB',
+  repairing: '\u2699',
   unknown: '',
 }
 
@@ -88,16 +93,19 @@ const robotNavStatusRow = document.querySelector('#robot-nav-status-row')
 const robotMapTrack = document.querySelector('#robot-map-track')
 const robotMapWaypoints = document.querySelector('#robot-map-waypoints')
 const robotMapDot = document.querySelector('#robot-map-dot')
+const robotMapElement = document.querySelector('#robot-map')
 const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
 const robotMapGridMeta = document.querySelector('#robot-map-grid-meta')
 const robotPoseReadout = document.querySelector('#robot-pose-readout')
+const robotNavBadge = document.querySelector('#robot-nav-badge')
 const robotMapPanel = document.querySelector('.robot-map-panel')
 const robotCameraPanel = document.querySelector('#robot-camera-panel')
 const robotCameraFrame = document.querySelector('#robot-camera-frame')
 const robotCameraChip = document.querySelector('#robot-camera-chip')
 const robotCameraMeta = document.querySelector('#robot-camera-meta')
 const robotCameraRefreshButton = document.querySelector('#robot-camera-refresh-button')
+const robotCameraRecoverButton = document.querySelector('#robot-camera-recover-button')
 const robotCameraSnapshotButton = document.querySelector('#robot-camera-snapshot-button')
 const robotCameraSnapshotNote = document.querySelector('#robot-camera-snapshot-note')
 const reconGalleryToggle = document.querySelector('#recon-gallery-toggle')
@@ -110,6 +118,10 @@ const settingsToggle = document.querySelector('#settings-toggle')
 const settingsDrawer = document.querySelector('#settings-drawer')
 const connectionToggle = document.querySelector('#connection-toggle')
 const connectionDrawer = document.querySelector('#connection-drawer')
+const helpToggle = document.querySelector('#help-toggle')
+const helpDrawer = document.querySelector('#help-drawer')
+const helpMermaidContainer = document.querySelector('#help-mermaid-container')
+const helpMermaidFallback = document.querySelector('#help-mermaid-fallback')
 const connectionChip = document.querySelector('#connection-chip')
 const dogzillaBackendUrlInput = document.querySelector('#dogzilla-backend-url-input')
 const saveDogzillaBackendButton = document.querySelector('#save-dogzilla-backend-button')
@@ -120,7 +132,6 @@ const dogzillaRemoteRootInput = document.querySelector('#dogzilla-remote-root-in
 const saveDogzillaConnectionButton = document.querySelector('#save-dogzilla-connection-button')
 const connectionStatus = document.querySelector('#connection-status')
 const dogzillaRobotId = document.querySelector('#dogzilla-robot-id')
-const dogzillaRobotName = document.querySelector('#dogzilla-robot-name')
 const dogzillaDirectUrl = document.querySelector('#dogzilla-direct-url')
 const dogzillaRos2Url = document.querySelector('#dogzilla-ros2-url')
 const dogzillaAudioVolumeInput = document.querySelector('#dogzilla-audio-volume-input')
@@ -277,6 +288,20 @@ let speechController = null
 let mobileView = MOBILE_DEFAULT_VIEW
 let mobileTouch = null
 let dogzillaStartupRepairAttempted = false
+let lastOperatorCommand = null
+
+function recordOperatorCommand({ command, result } = {}) {
+  const cmd = typeof command === 'string' ? command.trim() : ''
+  const res = typeof result === 'string' || typeof result === 'number' ? String(result).trim() : ''
+  if (!cmd && !res) {
+    return
+  }
+  lastOperatorCommand = {
+    command: cmd || null,
+    result: res || null,
+    at: Date.now(),
+  }
+}
 const isaacCompletionState = {
   initialized: false,
   lastEventId: null,
@@ -314,12 +339,14 @@ const manualControl = createManualControlController({
 })
 const robotMap = createRobotMapRenderer({
   elements: {
+    map: robotMapElement,
     dot: robotMapDot,
     lidarScan: robotLidarScan,
     meta: robotMapMeta,
     poseReadout: robotPoseReadout,
     track: robotMapTrack,
     waypoints: robotMapWaypoints,
+    navStatusBadge: robotNavBadge,
   },
   defaultRobotRuntime: DEFAULT_ROBOT_RUNTIME,
   getRuntimeConfig: () => runtimeConfig,
@@ -334,11 +361,75 @@ saveProfileButton.addEventListener('click', handleProfileSave)
 saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
 testRobotSitButton.addEventListener('click', handleRobotSitTest)
-emergencyStopButton.addEventListener('click', handleEmergencyStop)
+const persistentEmergencyStop = document.getElementById('persistent-emergency-stop')
+persistentEmergencyStop?.addEventListener('click', handleEmergencyStop)
+
+const confirmModalOverlay = document.getElementById('confirm-modal-overlay')
+const confirmModalTitle = document.getElementById('confirm-modal-title')
+const confirmModalMessage = document.getElementById('confirm-modal-message')
+const confirmModalCancel = document.getElementById('confirm-modal-cancel')
+const confirmModalConfirm = document.getElementById('confirm-modal-confirm')
+let confirmModalResolve = null
+
+function showConfirmModal(title, message) {
+  return new Promise((resolve) => {
+    confirmModalResolve = resolve
+    confirmModalTitle.textContent = title
+    confirmModalMessage.textContent = message
+    confirmModalOverlay.hidden = false
+    confirmModalCancel.focus()
+  })
+}
+
+function hideConfirmModal() {
+  confirmModalOverlay.hidden = true
+  confirmModalResolve = null
+}
+
+confirmModalCancel?.addEventListener('click', () => {
+  if (confirmModalResolve) {
+    confirmModalResolve(false)
+  }
+  hideConfirmModal()
+})
+
+confirmModalConfirm?.addEventListener('click', () => {
+  if (confirmModalResolve) {
+    confirmModalResolve(true)
+  }
+  hideConfirmModal()
+})
+
+confirmModalOverlay?.addEventListener('click', (event) => {
+  if (event.target === confirmModalOverlay) {
+    if (confirmModalResolve) {
+      confirmModalResolve(false)
+    }
+    hideConfirmModal()
+  }
+})
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !confirmModalOverlay?.hidden) {
+    if (confirmModalResolve) {
+      confirmModalResolve(false)
+    }
+    hideConfirmModal()
+  }
+})
 manualControlToggleButton.addEventListener('click', manualControl.handleToggle)
 manualControlNeutralButton.addEventListener('click', manualControl.handleNeutral)
 settingsToggle.addEventListener('click', handleSettingsToggle)
 connectionToggle.addEventListener('click', handleConnectionToggle)
+helpToggle.addEventListener('click', handleHelpToggle)
+const navChainDots = document.querySelector('#robot-nav-chain-dots')
+navChainDots?.addEventListener('click', handleNavChainDotsClick)
+navChainDots?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    handleNavChainDotsClick()
+  }
+})
 robotNameEditButton.addEventListener('click', handleRobotNameEditStart)
 robotNameEditForm.addEventListener('submit', handleRobotNameSave)
 robotNameInput.addEventListener('keydown', handleRobotNameInputKeydown)
@@ -348,6 +439,7 @@ runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
 dogzillaAudioVolumeInput?.addEventListener('input', dogzillaAudio.handleVolumeInput)
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
 robotCameraRefreshButton.addEventListener('click', handleDogzillaCameraRefresh)
+robotCameraRecoverButton.addEventListener('click', handleDogzillaCameraRecover)
 reconGalleryToggle.addEventListener('click', handleReconGalleryToggle)
 reconGalleryClose.addEventListener('click', closeReconGallery)
 reconSnapshotList.addEventListener('click', handleReconSnapshotListClick)
@@ -368,6 +460,17 @@ waypointReadinessButton?.addEventListener('click', handleWaypointReadinessCheck)
 const mapViewToggle = document.getElementById('map-view-toggle')
 const mapViewModeLabel = document.querySelector('.map-view-mode-label')
 mapViewToggle?.addEventListener('click', handleMapViewToggle)
+
+document.querySelectorAll('.robot-map-zoom-btn[data-zoom-action]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const action = btn.getAttribute('data-zoom-action')
+    if (action === 'in') {
+      robotMap.setZoom(robotMap.getZoom() - 0.25)
+    } else if (action === 'out') {
+      robotMap.setZoom(robotMap.getZoom() + 0.25)
+    }
+  })
+})
 
 for (const tab of robotTabs) {
   tab.addEventListener('click', handleRobotTabClick)
@@ -584,6 +687,11 @@ async function handleChatSubmit(event) {
 
   try {
     const payload = await submitChatMessage(message)
+
+    recordOperatorCommand({
+      command: message,
+      result: payload?.robotDispatch?.status || payload?.isaacDispatch?.status || null,
+    })
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
     const completionState = isActiveDispatchFailure(payload) ? 'error' : 'idle'
@@ -883,6 +991,10 @@ async function handleRobotSitTest() {
     }, null, 2)
     setRuntimeFeedbackStatus(summary, dispatchPayload.dispatch?.status === 'error' || healthPayload.status === 'error')
     setStatus(summary, dispatchPayload.dispatch?.status === 'error' ? 'error' : 'idle')
+    recordOperatorCommand({
+      command: 'sit-test',
+      result: dispatchPayload.dispatch?.status || null,
+    })
     await refreshRobotState()
   } catch (error) {
     const message = formatError(error)
@@ -893,9 +1005,11 @@ async function handleRobotSitTest() {
   }
 }
 
-async function handleEmergencyStop() {
-  emergencyStopButton.disabled = true
-  emergencyStopStatus.textContent = 'Sending stop...'
+async function handleEmergencyStop(event) {
+  const triggerButton = event?.currentTarget
+  if (triggerButton) {
+    triggerButton.disabled = true
+  }
   setStatus('Sending emergency stop.', 'busy')
 
   try {
@@ -913,20 +1027,24 @@ async function handleEmergencyStop() {
     }
 
     const summary = formatEmergencyStopSummary(payload.dispatch)
-    emergencyStopStatus.textContent = summary
     runtimeFeedbackOutput.textContent = JSON.stringify({
       emergencyStop: payload,
     }, null, 2)
     setRuntimeFeedbackStatus(summary, false)
     setStatus(summary)
+    recordOperatorCommand({
+      command: 'emergency-stop',
+      result: payload.dispatch?.status || null,
+    })
     await refreshRobotFeedback()
     await refreshRobotState()
   } catch (error) {
     const message = formatError(error)
-    emergencyStopStatus.textContent = message
     setStatus(message, 'error')
   } finally {
-    emergencyStopButton.disabled = false
+    if (triggerButton) {
+      triggerButton.disabled = false
+    }
   }
 }
 
@@ -1185,6 +1303,8 @@ async function refreshDogzillaWaypointReadiness() {
   if (!isRealRobotTargetActive()) {
     runtimeConfig.robotRuntime.waypointReadiness = null
     robotMap.setWaypointReadiness('')
+    renderStaleWaypoints([])
+    renderNavigationChainHealth(null)
     return null
   }
 
@@ -1198,12 +1318,82 @@ async function refreshDogzillaWaypointReadiness() {
 
     runtimeConfig.robotRuntime.waypointReadiness = payload
     robotMap.setWaypointReadiness(formatWaypointReadinessSummary(payload))
+    renderStaleWaypoints(extractStaleWaypoints(payload))
+    renderNavigationChainHealth(payload)
     return payload
   } catch (error) {
     runtimeConfig.robotRuntime.waypointReadiness = null
     robotMap.setWaypointReadiness(`Waypoints not ready: ${formatError(error)}.`)
+    renderStaleWaypoints([])
+    renderNavigationChainHealth(null)
     return null
   }
+}
+
+function extractStaleWaypoints(payload) {
+  if (!payload || typeof payload !== 'object') return []
+  const results = Array.isArray(payload.results) ? payload.results : []
+  return results
+    .filter((result) => {
+      if (!result || result.kind !== 'map_pose') return false
+      if (result.enabled === false && result.verified === true) return true
+      if (result.ok === false && result.verified === true) return true
+      return false
+    })
+    .map((result) => {
+      const problems = Array.isArray(result.problems) ? result.problems.filter(Boolean) : []
+      const reason = problems[0] || result.status || 'stale map identity'
+      return {
+        name: result.name || 'unknown',
+        reason: String(reason),
+      }
+    })
+}
+
+function renderStaleWaypoints(staleWaypoints) {
+  const panel = document.querySelector('#stale-waypoints-panel')
+  const list = document.querySelector('#stale-waypoints-list')
+  if (!panel || !list) return
+
+  if (!staleWaypoints || staleWaypoints.length === 0) {
+    panel.hidden = true
+    list.replaceChildren()
+    return
+  }
+
+  panel.hidden = false
+  const items = staleWaypoints.map((waypoint) => {
+    const li = document.createElement('li')
+    li.className = 'stale-waypoints-item'
+    li.dataset.waypointName = waypoint.name
+
+    const nameSpan = document.createElement('span')
+    nameSpan.className = 'stale-waypoints-name'
+    nameSpan.textContent = waypoint.name
+
+    const reasonSpan = document.createElement('span')
+    reasonSpan.className = 'stale-waypoints-reason'
+    reasonSpan.textContent = waypoint.reason
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'stale-waypoints-recapture'
+    button.textContent = 'Re-save'
+    button.dataset.waypointName = waypoint.name
+    button.addEventListener('click', () => handleStaleWaypointRecapture(waypoint.name))
+
+    li.append(nameSpan, reasonSpan, button)
+    return li
+  })
+  list.replaceChildren(...items)
+}
+
+async function handleStaleWaypointRecapture(waypointName) {
+  const captureNameInput = document.querySelector('#waypoint-capture-name')
+  if (captureNameInput) {
+    captureNameInput.value = waypointName
+  }
+  await handleWaypointCapture({ preventDefault: () => {} })
 }
 
 async function handleReconSnapshot() {
@@ -1285,6 +1475,8 @@ function handleReconGalleryToggle() {
     settingsToggle.setAttribute('aria-expanded', 'false')
     connectionDrawer.hidden = true
     connectionToggle.setAttribute('aria-expanded', 'false')
+    helpDrawer.hidden = true
+    helpToggle.setAttribute('aria-expanded', 'false')
     void refreshReconSnapshots()
   }
 }
@@ -1303,6 +1495,8 @@ function handleSettingsToggle() {
   if (shouldOpen) {
     connectionDrawer.hidden = true
     connectionToggle.setAttribute('aria-expanded', 'false')
+    helpDrawer.hidden = true
+    helpToggle.setAttribute('aria-expanded', 'false')
     closeReconGallery()
   }
 }
@@ -1315,8 +1509,46 @@ function handleConnectionToggle() {
   if (shouldOpen) {
     settingsDrawer.hidden = true
     settingsToggle.setAttribute('aria-expanded', 'false')
+    helpDrawer.hidden = true
+    helpToggle.setAttribute('aria-expanded', 'false')
     closeReconGallery()
     void refreshDogzillaConnection()
+  }
+}
+
+let mermaidLoaded = false
+
+async function loadMermaidOnce() {
+  if (mermaidLoaded) return
+  try {
+    const mermaid = await import('mermaid')
+    mermaid.default.initialize({ startOnLoad: false, theme: 'default' })
+    mermaidLoaded = true
+    const mermaidEl = helpMermaidContainer.querySelector('.mermaid')
+    if (mermaidEl && !mermaidEl.dataset.rendered) {
+      const { svg } = await mermaid.default.render('help-mermaid-svg', mermaidEl.textContent.trim())
+      mermaidEl.innerHTML = svg
+      mermaidEl.dataset.rendered = 'true'
+    }
+  } catch (error) {
+    console.warn('Mermaid load failed:', error)
+    helpMermaidContainer.hidden = true
+    helpMermaidFallback.hidden = false
+  }
+}
+
+function handleHelpToggle() {
+  const shouldOpen = helpDrawer.hidden
+
+  helpDrawer.hidden = !shouldOpen
+  helpToggle.setAttribute('aria-expanded', String(shouldOpen))
+  if (shouldOpen) {
+    connectionDrawer.hidden = true
+    connectionToggle.setAttribute('aria-expanded', 'false')
+    settingsDrawer.hidden = true
+    settingsToggle.setAttribute('aria-expanded', 'false')
+    closeReconGallery()
+    void loadMermaidOnce()
   }
 }
 
@@ -1470,6 +1702,17 @@ async function handleDogzillaConnectionSave() {
 
 async function handleDogzillaConnectionAction(event) {
   const action = event.currentTarget.dataset.connectionAction
+
+  const confirmation = getConnectionActionConfirmation(action)
+  if (confirmation) {
+    const confirmed = await showConfirmModal(
+      confirmation.title,
+      confirmation.message,
+    )
+    if (!confirmed) {
+      return
+    }
+  }
 
   setConnectionActionsDisabled(true)
   connectionStatus.textContent = `Running ${formatConnectionAction(action)}...`
@@ -1713,7 +1956,6 @@ function renderDogzillaConnection(payload) {
   dogzillaUserInput.value = ssh.user || 'pi'
   dogzillaRemoteRootInput.value = config.remoteRoot || '/home/pi/robodoge'
   dogzillaRobotId.textContent = robotId || '-'
-  dogzillaRobotName.textContent = robotName || DEFAULT_ROBOT_RUNTIME.robotName
   dogzillaDirectUrl.textContent = bridges.direct?.baseUrl || '-'
   dogzillaRos2Url.textContent = bridges.ros2?.baseUrl || '-'
   connectionChip.textContent = ssh.host ? ssh.host : 'No IP'
@@ -1801,6 +2043,20 @@ function setConnectionActionsDisabled(disabled) {
   }
   for (const button of connectionActionButtons) {
     button.disabled = disabled
+  }
+}
+
+function setWaypointButtonsEnabled(enabled, reason = '') {
+  const captureButton = document.querySelector('#waypoint-capture-button')
+  if (captureButton) {
+    captureButton.disabled = !enabled
+    captureButton.title = enabled ? '' : (reason || 'Waypoint capture unavailable while navigation is not ready')
+  }
+  for (const button of document.querySelectorAll('[data-connection-action="start-navigation"]')) {
+    button.disabled = !enabled
+    if (!enabled) {
+      button.title = reason || 'Start navigation is unavailable'
+    }
   }
 }
 
@@ -2024,10 +2280,6 @@ function applyRobotRuntimeConfig() {
   const robotRuntime = runtimeConfig.robotRuntime
   const activeTarget = robotRuntime.activeTarget
 
-  runtimeTargetName.textContent = activeTarget.label
-  if (runtimeTargetSource) {
-    runtimeTargetSource.textContent = ''
-  }
   runtimeTargetChip.textContent = activeTarget.label
   const robotName = robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
   if (primaryRobotTabName) {
@@ -2161,6 +2413,83 @@ function renderRobotFeedback(healthPayload, feedbackPayload) {
   }, null, 2)}`
 }
 
+function renderNavigationChainHealth(readinessPayload) {
+  const chainRow = document.querySelector('#robot-nav-chain-row')
+  const chainDots = document.querySelector('#robot-nav-chain-dots')
+  const chainSummary = document.querySelector('#robot-nav-chain-summary')
+  const chainDetail = document.querySelector('#robot-nav-chain-detail')
+  const chainDetailContent = document.querySelector('#robot-nav-chain-detail-content')
+
+  if (!chainRow || !chainDots || !chainSummary) return
+
+  const components = buildNavChainComponents(readinessPayload)
+  const anyUnknown = components.some((c) => c.status === 'unknown')
+
+  chainRow.hidden = false
+
+  const statusIconFor = (status) => status === 'ok' ? '✓' : status === 'fail' ? '✗' : '?'
+
+  for (const dot of chainDots.querySelectorAll('.robot-nav-chain-dot')) {
+    const componentId = dot.dataset.component
+    const component = components.find((c) => c.id === componentId)
+    if (component) {
+      dot.dataset.status = component.status
+      dot.title = `${component.label}: ${component.detail}`
+    } else {
+      dot.dataset.status = 'unknown'
+    }
+  }
+
+  chainSummary.textContent = summarizeNavChain(components)
+
+  if (chainDetail && chainDetailContent) {
+    const rowsToShow = anyUnknown ? components : components.filter((c) => c.status !== 'ok')
+    const detailRows = rowsToShow
+      .map((c) => {
+        const statusIcon = statusIconFor(c.status)
+        let actions = ''
+        if (c.status !== 'ok') {
+          if (c.id === 'localization') {
+            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-map-pose">Restart map localization</button></div>'
+          } else if (c.id === 'action') {
+            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-navigation">Start Nav</button></div>'
+          }
+        }
+        return `
+          <div class="robot-nav-chain-detail-row">
+            <span class="robot-nav-chain-detail-status" data-status="${c.status}">${statusIcon}</span>
+            <div class="robot-nav-chain-detail-content">
+              <strong>${c.label}</strong>
+              <p>${c.detail}</p>
+              ${actions}
+            </div>
+          </div>
+        `
+      })
+      .join('')
+
+    if (detailRows) {
+      chainDetailContent.innerHTML = detailRows
+      chainDetail.hidden = false
+    } else {
+      chainDetail.hidden = true
+    }
+
+    for (const button of chainDetail.querySelectorAll('[data-connection-action]')) {
+      button.addEventListener('click', handleDogzillaConnectionAction)
+    }
+  }
+}
+
+function handleNavChainDotsClick() {
+  const chainDetail = document.querySelector('#robot-nav-chain-detail')
+  const chainDots = document.querySelector('#robot-nav-chain-dots')
+  if (!chainDetail || !chainDots) return
+  const isHidden = chainDetail.hidden
+  chainDetail.hidden = !isHidden
+  chainDots.setAttribute('aria-expanded', String(!isHidden))
+}
+
 function renderRobotStateSnapshot(snapshot) {
   robotStatePanel.hidden = false
 
@@ -2213,14 +2542,14 @@ function renderRobotStateSnapshot(snapshot) {
     }
     robotNavTarget.textContent = navStatus.targetWaypoint ? `Target: ${navStatus.targetWaypoint}` : ''
     if (robotMap.setNavStatusBadge) {
-      robotMap.setNavStatusBadge(`${icon} ${navStatus.text || ''}`)
+      robotMap.setNavStatusBadge(`${icon} ${navStatus.text || ''}`, navStatus.severity)
     }
   } else {
     robotNavStatus.textContent = '-'
     delete robotNavStatusRow?.dataset?.severity
     robotNavTarget.textContent = ''
     if (robotMap.setNavStatusBadge) {
-      robotMap.setNavStatusBadge('')
+      robotMap.setNavStatusBadge('', null)
     }
   }
 
@@ -2229,6 +2558,54 @@ function renderRobotStateSnapshot(snapshot) {
   robotMap.renderWaypoints(robot)
   robotMap.renderPoseTrack(snapshot?.poseTrack || [], robot)
   robotMap.renderDot(robot)
+  applyWaypointButtonsToNavStatus(navStatus)
+  renderOperatorStatus(snapshot)
+}
+
+function applyWaypointButtonsToNavStatus(navStatus) {
+  if (!navStatus) {
+    setWaypointButtonsEnabled(true, '')
+    return
+  }
+  if (navStatus.status === 'ready' || navStatus.status === 'idle' || navStatus.status === 'navigating' || navStatus.status === 'arrived' || navStatus.status === 'finding_waypoint' || navStatus.status === 'repairing') {
+    setWaypointButtonsEnabled(true, '')
+    return
+  }
+  if (navStatus.status === 'blocked' || navStatus.status === 'stuck') {
+    setWaypointButtonsEnabled(false, navStatus.text || 'Navigation not ready')
+    return
+  }
+  setWaypointButtonsEnabled(true, '')
+}
+
+function renderOperatorStatus(snapshot) {
+  const strip = document.getElementById('operator-status-strip')
+  if (!strip) return
+
+  const robot = snapshot?.activeRobot
+
+  strip.dataset.state = robot ? 'ready' : 'waiting'
+
+  const lastCmdEl = document.getElementById('operator-last-cmd-state')
+  if (lastCmdEl) {
+    lastCmdEl.textContent = deriveOperatorLastCommand(snapshot, lastOperatorCommand)
+  }
+
+  const safeNext = deriveSafeNextAction(snapshot)
+  const safeNextEl = document.getElementById('operator-safe-next-action')
+  const safeNextBlockerEl = document.getElementById('operator-safe-next-blocker')
+  if (safeNextEl) {
+    safeNextEl.textContent = safeNext.action
+  }
+  if (safeNextBlockerEl) {
+    if (safeNext.blocker) {
+      safeNextBlockerEl.textContent = safeNext.blocker
+      safeNextBlockerEl.hidden = false
+    } else {
+      safeNextBlockerEl.textContent = ''
+      safeNextBlockerEl.hidden = true
+    }
+  }
 }
 
 function renderRobotStateInactive() {
@@ -2381,8 +2758,9 @@ function applyDogzillaCameraConfig() {
     robotCameraFrame.dataset.statusPath = ''
     robotCameraFrame.dataset.snapshotPath = ''
     robotCameraFrame.dataset.viewerMode = ''
-    robotCameraRefreshButton.disabled = true
-    robotCameraSnapshotButton.disabled = true
+robotCameraRefreshButton.disabled = true
+robotCameraRecoverButton.disabled = true
+robotCameraSnapshotButton.disabled = true
     robotCameraChip.textContent = 'No stream'
     robotCameraMeta.textContent = 'Camera stream not configured.'
     return
@@ -2392,8 +2770,9 @@ function applyDogzillaCameraConfig() {
   robotCameraFrame.dataset.statusPath = camera?.proxyStatusPath || ''
   robotCameraFrame.dataset.snapshotPath = camera?.proxySnapshotPath ? toApiUrl(camera.proxySnapshotPath) : ''
   robotCameraFrame.dataset.viewerMode = 'stream'
-  robotCameraRefreshButton.disabled = false
-  robotCameraSnapshotButton.disabled = false
+robotCameraRefreshButton.disabled = false
+robotCameraRecoverButton.disabled = false
+robotCameraSnapshotButton.disabled = false
   robotCameraChip.textContent = robotCameraFrame.getAttribute('src') === streamUrl ? 'Live' : 'Starting'
   robotCameraMeta.textContent = formatDogzillaCameraSource(camera, upstreamStreamUrl)
 }
@@ -2457,6 +2836,46 @@ function handleDogzillaCameraRefresh() {
 
   robotCameraRefreshButton.disabled = true
   startDogzillaCameraViewer({ forceRefresh: true })
+}
+
+async function handleDogzillaCameraRecover() {
+  const streamUrl = robotCameraFrame.dataset.streamUrl || ''
+  if (!streamUrl) {
+    robotCameraChip.textContent = 'No stream'
+    robotCameraMeta.textContent = 'Camera stream not configured.'
+    return
+  }
+
+  robotCameraRecoverButton.disabled = true
+  robotCameraRefreshButton.disabled = true
+  robotCameraChip.textContent = 'Restarting'
+  robotCameraMeta.textContent = 'Restarting YOLO camera feed on the robot...'
+
+  try {
+    const response = await apiFetch('/api/dogzilla/connection/action', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'start-yolo' }),
+    })
+    const payload = await response.json()
+    if (!response.ok || payload.status === 'error') {
+      throw new Error(payload.error || payload.stderr || 'Could not restart YOLO camera feed.')
+    }
+
+    robotCameraChip.textContent = 'Restarted'
+    robotCameraMeta.textContent = 'YOLO camera feed restarted. Reconnecting stream...'
+    setStatus('DOGZILLA YOLO camera feed restarted.')
+    startDogzillaCameraViewer({ forceRefresh: true })
+  } catch (error) {
+    robotCameraChip.textContent = 'Restart failed'
+    robotCameraMeta.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+    robotCameraRefreshButton.disabled = false
+  } finally {
+    robotCameraRecoverButton.disabled = false
+  }
 }
 
 function scheduleDogzillaCameraLoadTimeout() {
@@ -2824,9 +3243,6 @@ function applyRobotTargetSelectionState() {
   }
   robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
   robotSitTestStatus.textContent = runtimeConfig.robotRuntime.dryRun ? 'Ready. Dry-run on.' : 'Ready. Live enabled.'
-  emergencyStopStatus.textContent = isRealRobotTargetActive()
-    ? 'Ready.'
-    : 'Switch to a real robot target before stop can reach DOGZILLA.'
   manualControl.applyState()
 }
 
@@ -3094,6 +3510,9 @@ function formatRobotSummary(robotRuntime, robotDispatch, payload) {
   }
 
   if (robotDispatch?.status === 'navigation-unavailable' || robotDispatch?.status === 'waypoint-blocked') {
+    if (robotDispatch.recovery) {
+      return `Repairing navigation: ${robotDispatch.recovery}`
+    }
     return robotDispatch.operatorMessage
       || 'Waypoint not sent: DOGZILLA map pose is available, but no waypoint navigation server is running. Manual controls and non-waypoint actions are still available.'
   }
@@ -3118,7 +3537,13 @@ function formatRobotSummary(robotRuntime, robotDispatch, payload) {
 }
 
 function isRobotDispatchFailure(robotDispatch) {
-  return ['error', 'navigation-unavailable', 'waypoint-blocked', 'preempt-failed'].includes(robotDispatch?.status)
+  if (!robotDispatch) return false
+  const status = robotDispatch.status
+  if (!status) return false
+  if (status === 'navigation-unavailable' && robotDispatch.recovery) {
+    return false
+  }
+  return ['error', 'navigation-unavailable', 'waypoint-blocked', 'preempt-failed'].includes(status)
 }
 
 function isActiveDispatchFailure(payload) {
