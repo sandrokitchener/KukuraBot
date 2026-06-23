@@ -107,13 +107,19 @@ http://127.0.0.1:3037
 - System prompt for `rtk gain`/meta-commands at `.opencode/opencode.md`
 - **Known issue**: npm-published `openrtk` v0.1.0 has ESM extensionless import bug â€” patch applied in `node_modules/openrtk/lib/index.js` (adds `.js` to `./rewrite` import). Re-patch after `npm install`/`npm ci`.
 
+## Headroom files
+
+- Do not delete, move, reset, clean, prune, or otherwise modify Headroom files or folders unless the user explicitly requests it in the current turn.
+- Treat `.headroom/`, `headroom_memory.db`, global Headroom state such as `C:\Users\sandr\.headroom\`, and any Headroom cache/log/database files as user-owned tool state, even when they are untracked by git.
+- Dirty-worktree cleanup must leave Headroom files untouched; do not include them in commits or cleanup sweeps unless directly instructed.
+
 
 <!-- headroom:rtk-instructions -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
 
 When running shell commands, **always prefix with `rtk`**. This reduces context
 usage by 60-90% with zero behavior change. If rtk has no filter for a command,
-it passes through unchanged — so it is always safe to use.
+it passes through unchanged ï¿½ so it is always safe to use.
 
 ## Key Commands
 ```bash
@@ -124,10 +130,10 @@ rtk git status          rtk git diff            rtk git log
 rtk ls <path>           rtk read <file>         rtk grep <pattern>
 rtk find <pattern>      rtk diff <file>
 
-# Test (90-99% savings) — shows failures only
+# Test (90-99% savings) ï¿½ shows failures only
 rtk pytest tests/       rtk cargo test          rtk test <cmd>
 
-# Build & Lint (80-90% savings) — shows errors only
+# Build & Lint (80-90% savings) ï¿½ shows errors only
 rtk tsc                 rtk lint                rtk cargo build
 rtk prettier --check    rtk mypy                rtk ruff check
 
