@@ -4,7 +4,11 @@ import net from 'node:net'
 import path from 'node:path'
 import { forceDogzillaDirectBridgeOnStartup } from './lib/dogzilla-direct-bridge-launcher.mjs'
 import { forceDogzillaRequiredServicesOnStartup } from './lib/dogzilla-required-services-launcher.mjs'
-import { forceDogzillaWaypointNavigationOnStartup } from './lib/dogzilla-waypoint-navigation-launcher.mjs'
+import {
+  forceDogzillaNavModeViaBridge,
+  forceDogzillaWaypointNavigationOnStartup,
+  shouldUseBridgeNavOwner,
+} from './lib/dogzilla-waypoint-navigation-launcher.mjs'
 import {
   getDogzillaLidarHealth,
   startDogzillaLidarClient,
@@ -575,12 +579,21 @@ function startNav2Background({ runtimeConfig, ros2Config }) {
         }
       }
 
+      if (shouldUseBridgeNavOwner(process.env)) {
+        return forceDogzillaNavModeViaBridge({
+          runtimeConfig,
+          ros2Config,
+          logger: console,
+        })
+      }
+
       return forceDogzillaWaypointNavigationOnStartup({
         runtimeConfig,
         ros2Config,
         logger: console,
       })
     })
+
     .then((nav2Result) => {
     if (nav2Result.status === 'ok') {
       console.log(green('DOGZILLA Nav2 waypoint navigation ready.'))

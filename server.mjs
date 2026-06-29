@@ -51,7 +51,11 @@ import {
 import { deriveNavigationStatus } from './lib/dogzilla-navigation-status.mjs'
 import { getDogzillaRepairState } from './lib/dogzilla-repair-state.mjs'
 import { getDogzillaWaypointNavigationReadiness } from './lib/dogzilla-navigation-readiness.mjs'
-import { forceDogzillaWaypointNavigationOnStartup } from './lib/dogzilla-waypoint-navigation-launcher.mjs'
+import {
+  forceDogzillaNavModeViaBridge,
+  forceDogzillaWaypointNavigationOnStartup,
+  shouldUseBridgeNavOwner,
+} from './lib/dogzilla-waypoint-navigation-launcher.mjs'
 import {
   deriveNav2StabilityFromHealth,
   getNav2Stability,
@@ -315,7 +319,10 @@ function startDogzillaNav2RepairWatchdog({
     }
 
     try {
-      const result = await forceDogzillaWaypointNavigationOnStartup({
+      const navRepairFn = shouldUseBridgeNavOwner(env)
+        ? forceDogzillaNavModeViaBridge
+        : forceDogzillaWaypointNavigationOnStartup
+      const result = await navRepairFn({
         runtimeConfig,
         ros2Config,
         logger,

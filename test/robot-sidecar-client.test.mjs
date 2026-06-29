@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { probeRobotSidecarHealth, sendRobotCommand, sendRobotEmergencyStop } from '../lib/robot-sidecar-client.mjs'
+import { enterDogzillaNavMode, fetchDogzillaNavMode, probeRobotSidecarHealth, sendRobotCommand, sendRobotEmergencyStop } from '../lib/robot-sidecar-client.mjs'
 import {
   actionOncePreview,
   dogzillaMapPoseBody,
@@ -1082,6 +1082,69 @@ test('sendRobotCommand does not preempt manual relative motion updates', async (
       assert.equal(result.preempt, null)
       assert.equal(requests.length, 1)
       assert.equal(requests[0].envelope.canonicalPlan.kind, 'locomotion.relative')
+    },
+  )
+})
+
+test('enterDogzillaNavMode posts mode to bridge and reports ok', async () => {
+  const calls = []
+  await withMockedFetch(
+    async (url, options) => {
+      calls.push({ url: String(url), method: options?.method, body: parseRequestBody(options) })
+      return jsonResponse({ ok: true, mode: 'navigate', previousMode: 'idle' }, { status: 200 })
+    },
+    async () => {
+      const result = await enterDogzillaNavMode(
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        'navigate',
+      )
+
+      assert.equal(result.ok, true)
+      assert.equal(result.status, 'ok')
+      assert.equal(result.mode, 'navigate')
+      assert.equal(result.previousMode, 'idle')
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0].method, 'POST')
+      assert.ok(calls[0].url.endsWith('/mode'))
+      assert.deepEqual(calls[0].body, { mode: 'navigate' })
+    },
+  )
+})
+
+test('enterDogzillaNavMode reports error on bridge failure', async () => {
+  await withMockedFetch(
+    async () => jsonResponse({ ok: false, error: 'invalid_nav_mode:dance' }, { status: 400 }),
+    async () => {
+      const result = await enterDogzillaNavMode(
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        'dance',
+      )
+
+      assert.equal(result.ok, false)
+      assert.equal(result.status, 'error')
+      assert.equal(result.mode, 'dance')
+    },
+  )
+})
+
+test('fetchDogzillaNavMode reads current nav mode', async () => {
+  await withMockedFetch(
+    async (url) => {
+      if (String(url).endsWith('/mode')) {
+        return jsonResponse({ ok: true, navMode: 'localize', mode: 'localize' })
+      }
+      return jsonResponse({ ok: true })
+    },
+    async () => {
+      const result = await fetchDogzillaNavMode(
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.ok, true)
+      assert.equal(result.navMode, 'localize')
     },
   )
 })

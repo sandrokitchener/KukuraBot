@@ -141,7 +141,19 @@ Control modes via the bridge:
 - After `DOGZILLA_NAV_MODE_IDLE_DELAY_SEC` (default 300 s) of inactivity the bridge demotes toward `idle`.
 - Default at startup is `navigate` for compatibility; set `DOGZILLA_DEFAULT_NAV_MODE=idle` to keep the Pi cool at boot.
 
-`/healthz-lite` and `/healthz` now include compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, and `gaitBlockedReason`. Use `/healthz-lite` for frequent UI polls; full `/healthz` is for diagnostics or failures only.
+The app defaults to bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and the `server.mjs` Nav2 repair watchdog call `POST /mode navigate` on the bridge instead of independently launching SSH scripts. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center "Restart Nav" remains an explicit SSH repair path.
+
+## Velocity smoother bypass
+
+If Nav2 accepts a goal but `/cmd_vel` stays silent (dog does not move), the velocity smoother may be stalling. Bypass it by pointing the gait adapter at the raw controller output:
+
+```bash
+export DOGZILLA_NAV2_GAIT_SMOOTHER_BYPASS=1
+```
+
+This sets `DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC=/cmd_vel_nav` (raw controller output) instead of `/cmd_vel` (smoothed output). Only enable after confirming Nav2 accepts goals; tune the smoother after movement is restored.
+
+`/healthz-lite` and `/healthz` now include compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, and `gaitBlockedReason`. Use `/healthz-lite` for frequent UI polls; full `/healthz` is for diagnostics or failures only. The UI slows state/map polling when `navMode` is `idle` or `sleep`.
 
 ## Starting and deploying
 

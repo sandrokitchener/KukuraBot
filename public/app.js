@@ -1172,9 +1172,23 @@ function startRobotStatePolling() {
   void refreshRobotState()
 
   const pollMs = runtimeConfig.robotRuntime.statePollMs || DEFAULT_ROBOT_RUNTIME.statePollMs
+  window._statePollBaseMs = pollMs
+  window._statePollIntervalMs = pollMs
   robotStateTimerId = window.setInterval(() => {
     void refreshRobotState()
   }, pollMs)
+}
+
+function adaptStatePollInterval(navMode) {
+  if (!robotStateTimerId) return
+  const baseMs = window._statePollBaseMs || runtimeConfig.robotRuntime?.statePollMs || DEFAULT_ROBOT_RUNTIME.statePollMs
+  const targetMs = (navMode === 'idle' || navMode === 'sleep') ? Math.max(baseMs * 2, 5000) : baseMs
+  if (window._statePollIntervalMs === targetMs) return
+  window._statePollIntervalMs = targetMs
+  window.clearInterval(robotStateTimerId)
+  robotStateTimerId = window.setInterval(() => {
+    void refreshRobotState()
+  }, targetMs)
 }
 
 function startRobotLidarPolling() {
@@ -1219,6 +1233,10 @@ async function refreshRobotState() {
     }
 
     renderRobotStateSnapshot(payload)
+    const navMode = payload?.navMode || payload?.bridgeState?.navMode || payload?.runtime?.navMode
+    if (navMode) {
+      adaptStatePollInterval(navMode)
+    }
   } catch (error) {
     robotStatePanel.hidden = false
     robotStatePanel.dataset.state = 'error'
@@ -1343,7 +1361,13 @@ function renderMapStatus(mapPayload, healthPayload) {
 
 function adaptMapPollInterval(healthPayload) {
   const mode = healthPayload?.map?.mode || healthPayload?.body?.runtime?.map?.mode
-  const mapPollMs = mode === 'mapping' ? 1500 : 3000
+  const navMode = healthPayload?.navMode || healthPayload?.body?.navMode || healthPayload?.body?.runtime?.navMode
+  let mapPollMs = 3000
+  if (mode === 'mapping') {
+    mapPollMs = 1500
+  } else if (navMode === 'idle' || navMode === 'sleep') {
+    mapPollMs = 6000
+  }
   if (!robotMapTimerId) return
   if (window._mapPollIntervalMs === mapPollMs) return
   window._mapPollIntervalMs = mapPollMs

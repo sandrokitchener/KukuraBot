@@ -18,6 +18,7 @@ test('shouldRunDogzillaStartupWatchdog follows direct DOGZILLA target and opt-ou
 test('runDogzillaStartupWatchdog repairs support services before direct bridge and Nav2', async () => {
   const calls = []
   const result = await runDogzillaStartupWatchdog({
+    env: { APP_DOGZILLA_NAV_OWNER: 'ssh' },
     logger: quietLogger(),
     loadRobotRuntimeConfigImpl: async () => directRuntimeConfig(),
     loadRobotRos2ConfigImpl: async () => directRos2Config(),
@@ -37,6 +38,34 @@ test('runDogzillaStartupWatchdog repairs support services before direct bridge a
 
   assert.equal(result.status, 'ok')
   assert.deepEqual(calls, ['required-services', 'direct-bridge', 'waypoint-navigation'])
+})
+
+test('runDogzillaStartupWatchdog uses bridge nav owner by default', async () => {
+  const calls = []
+  const result = await runDogzillaStartupWatchdog({
+    logger: quietLogger(),
+    loadRobotRuntimeConfigImpl: async () => directRuntimeConfig(),
+    loadRobotRos2ConfigImpl: async () => directRos2Config(),
+    forceDogzillaRequiredServicesOnStartupImpl: async () => {
+      calls.push('required-services')
+      return { status: 'ok' }
+    },
+    forceDogzillaDirectBridgeOnStartupImpl: async () => {
+      calls.push('direct-bridge')
+      return { status: 'ok' }
+    },
+    forceDogzillaWaypointNavigationOnStartupImpl: async () => {
+      calls.push('ssh-waypoint-navigation')
+      return { status: 'ok' }
+    },
+    forceDogzillaNavModeViaBridgeImpl: async () => {
+      calls.push('bridge-nav-mode')
+      return { status: 'ok' }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.deepEqual(calls, ['required-services', 'direct-bridge', 'bridge-nav-mode'])
 })
 
 test('shouldBlockDogzillaAppLaunchForNavigation blocks failed Nav2 readiness by default', () => {
