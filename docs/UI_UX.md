@@ -19,9 +19,9 @@ This is not a visual redesign plan. The priority is operator confidence, state c
 - Robot status, map, mapping workflow, diagnostics, logs, settings, help, and snapshots are split across tabs, drawers, and details panels.
 - Navigation health dots are compact but too cryptic. When readiness is absent, the chain can disappear instead of showing `unknown`.
 - Critical navigation setup lives behind the collapsed `Mapping` panel, so the required flow is easy to miss.
-- Similar-looking actions have very different consequences: `Localize on saved map`, `Set charger origin here`, `Start new SLAM map`, and `Save new map identity`.
+- Similar-looking actions have very different consequences: `Localize on Map`, `Mark Origin`, `New Map`, and `Save Map`.
 - Map identity and charger-origin actions can invalidate waypoints, but that consequence is not visible at the button site.
-- `Start waypoint navigator` is grouped with service restarts, blurring the difference between normal navigation prep and infrastructure recovery.
+- `Restart Nav` is now a repair control in the Navigation Setup panel, separated from the normal localize → origin → waypoints → check-ready flow.
 - Dangerous maintenance actions are hidden in a disclosure, but once opened they are still one-click actions.
 - Emergency stop is too buried. It should be visible near robot operation controls, not only under Settings.
 - Runtime feedback and errors live away from the command/map workflow, so the user may not see why a command failed.
@@ -56,8 +56,8 @@ Use existing robot state, navigation status, dispatch result, and telemetry data
 Show one clear next action near the status area:
 
 - Disconnected: `Check robot link`
-- Pose missing/untrusted: `Restart map localization`
-- Nav2 missing: `Start waypoint navigator`
+- Pose missing/untrusted: `Localize on Map`
+- Nav2 missing: `Restart Nav`
 - Stale waypoints: `Check waypoint readiness`
 - Ready: `Send movement command`
 - Moving/stuck/error: `Emergency stop`
@@ -77,9 +77,9 @@ If an action is disabled, show the blocker as visible text, not only a tooltip.
 
 Add confirmations for high-impact actions:
 
-- `Set charger origin here`
-- `Start new SLAM map`
-- `Save new map identity`
+- `Mark Origin`
+- `New Map`
+- `Save Map`
 - `Stop vendor app`
 - `Stop bridges`
 - `Deploy bridge code`
@@ -140,6 +140,8 @@ output/app-cache/nav2-events.ndjson
 ```
 
 Only write when state changes or the blocker changes. Do not log every poll.
+
+State-snapshot stability should use cached bridge health for display continuity and require two consecutive failing /api/robot/state samples before leaving eady; command dispatch and repair failures still record immediately.
 
 ### API Shape
 

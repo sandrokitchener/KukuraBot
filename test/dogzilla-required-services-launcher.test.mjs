@@ -7,6 +7,30 @@ import {
   shouldForceDogzillaRequiredServices,
 } from '../lib/dogzilla-required-services-launcher.mjs'
 
+const ROSBRIDGE_URL = 'ws://dogzilla:9090'
+
+function healthyLidar() {
+  return { ok: true, status: 'ok', destination: ROSBRIDGE_URL }
+}
+
+function healthyPose() {
+  return {
+    ok: true,
+    status: 'ok',
+    waypointSafe: true,
+    mapPose: { frame: 'map', x: 0, y: 0, theta: 0 },
+    destination: ROSBRIDGE_URL,
+  }
+}
+
+function disabledLidar() {
+  return { ok: false, status: 'disconnected', destination: ROSBRIDGE_URL }
+}
+
+function noPose() {
+  return { ok: false, status: 'no-pose', waypointSafe: false, destination: ROSBRIDGE_URL }
+}
+
 test('shouldForceDogzillaRequiredServices follows required YOLO, audio, and lidar config', () => {
   assert.equal(shouldForceDogzillaRequiredServices({}), false)
   assert.equal(shouldForceDogzillaRequiredServices({ vision: { enabled: true } }), true)
@@ -18,7 +42,7 @@ test('shouldForceDogzillaRequiredServices follows required YOLO, audio, and lida
 })
 
 test('buildRequiredServiceDescriptors maps YOLO, audio, lidar, and map pose to startup actions', () => {
-  assert.deepEqual(buildRequiredServiceDescriptors({
+  const descriptors = buildRequiredServiceDescriptors({
     vision: {
       enabled: true,
       statusUrl: 'http://dogzilla:8894/healthz',
@@ -29,48 +53,36 @@ test('buildRequiredServiceDescriptors maps YOLO, audio, lidar, and map pose to s
     },
     lidar: {
       enabled: true,
-      healthUrl: 'http://dogzilla:8896/healthz',
-      poseUrl: 'http://dogzilla:8896/pose',
+      transport: 'rosbridge',
+      rosbridgeUrl: ROSBRIDGE_URL,
     },
-  }), [
-    {
-      id: 'vision',
-      label: 'DOGZILLA YOLO object recognition',
-      action: 'start-yolo',
-      healthUrl: 'http://dogzilla:8894/healthz',
-    },
-    {
-      id: 'audio',
-      label: 'DOGZILLA Pi speaker cues',
-      action: 'start-audio',
-      healthUrl: 'http://dogzilla:8895/healthz',
-    },
-    {
-      id: 'lidar',
-      label: 'DOGZILLA lidar bridge',
-      action: 'start-lidar',
-      healthUrl: 'http://dogzilla:8896/healthz',
-    },
-    {
-      id: 'mapPose',
-      label: 'DOGZILLA map pose localization',
-      action: 'start-map-pose',
-      healthUrl: 'http://dogzilla:8896/pose',
-      expectMapPose: true,
-      requiresService: 'lidar',
-    },
-  ])
+  })
+
+  assert.equal(descriptors.length, 4)
+  assert.equal(descriptors[0].id, 'audio')
+  assert.equal(descriptors[0].action, 'start-audio')
+  assert.equal(descriptors[0].healthUrl, 'http://dogzilla:8895/healthz')
+  assert.equal(descriptors[1].id, 'vision')
+  assert.equal(descriptors[1].action, 'start-yolo')
+  assert.equal(descriptors[1].healthUrl, 'http://dogzilla:8894/healthz')
+  assert.equal(descriptors[2].id, 'lidar')
+  assert.equal(descriptors[2].label, 'DOGZILLA rosbridge')
+  assert.equal(descriptors[2].action, 'start-lidar')
+  assert.equal(typeof descriptors[2].probe, 'function')
+  assert.equal(descriptors[2].destination, ROSBRIDGE_URL)
+  assert.equal(descriptors[3].id, 'mapPose')
+  assert.equal(descriptors[3].label, 'DOGZILLA map pose localization')
+  assert.equal(descriptors[3].action, 'start-map-pose')
+  assert.equal(typeof descriptors[3].probe, 'function')
+  assert.equal(descriptors[3].expectMapPose, true)
+  assert.equal(descriptors[3].requiresService, 'lidar')
+  assert.equal(descriptors[3].destination, ROSBRIDGE_URL)
 })
 
 test('forceDogzillaRequiredServicesOnStartup starts configured services that are not healthy', async () => {
   const startedActions = []
+  const probeState = { lidar: false, pose: false }
   const readyUrls = new Set()
-  const urlByAction = new Map([
-    ['start-yolo', 'http://dogzilla:8894/healthz'],
-    ['start-audio', 'http://dogzilla:8895/healthz'],
-    ['start-lidar', 'http://dogzilla:8896/healthz'],
-    ['start-map-pose', 'http://dogzilla:8896/pose'],
-  ])
 
   const result = await forceDogzillaRequiredServicesOnStartup({
     config: {
@@ -84,31 +96,27 @@ test('forceDogzillaRequiredServicesOnStartup starts configured services that are
       },
       lidar: {
         enabled: true,
-        healthUrl: 'http://dogzilla:8896/healthz',
-        poseUrl: 'http://dogzilla:8896/pose',
+        transport: 'rosbridge',
+        rosbridgeUrl: ROSBRIDGE_URL,
       },
     },
     logger: silentLogger(),
-    fetchImpl: async (url) => jsonResponse(true, String(url).endsWith('/pose')
-      ? {
-        ok: readyUrls.has(String(url)),
-        waypointSafe: readyUrls.has(String(url)),
-        mapPose: readyUrls.has(String(url)) ? { frame: 'map' } : null,
-      }
-      : { ok: readyUrls.has(String(url)) }),
+    fetchImpl: async (url) => jsonResponse({ ok: readyUrls.has(String(url)) }),
+    getDogzillaLidarHealthImpl: async () => (probeState.lidar ? healthyLidar() : disabledLidar()),
+    getDogzillaRobotPoseImpl: async () => (probeState.pose ? healthyPose() : noPose()),
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)
-      readyUrls.add(urlByAction.get(action))
-      return {
-        status: 'ok',
-        action,
-      }
+      if (action === 'start-audio') readyUrls.add('http://dogzilla:8895/healthz')
+      if (action === 'start-yolo') readyUrls.add('http://dogzilla:8894/healthz')
+      if (action === 'start-lidar') probeState.lidar = true
+      if (action === 'start-map-pose') probeState.pose = true
+      return { status: 'ok', action }
     },
     sleepImpl: async () => {},
   })
 
   assert.equal(result.status, 'ok')
-  assert.deepEqual(startedActions, ['start-yolo', 'start-audio', 'start-lidar', 'start-map-pose'])
+  assert.deepEqual(startedActions, ['start-audio', 'start-yolo', 'start-lidar', 'start-map-pose'])
   assert.equal(result.results.vision.reusedService, false)
   assert.equal(result.results.audio.reusedService, false)
   assert.equal(result.results.lidar.reusedService, false)
@@ -129,24 +137,17 @@ test('forceDogzillaRequiredServicesOnStartup reuses healthy services', async () 
       },
       lidar: {
         enabled: true,
-        healthUrl: 'http://dogzilla:8896/healthz',
-        poseUrl: 'http://dogzilla:8896/pose',
+        transport: 'rosbridge',
+        rosbridgeUrl: ROSBRIDGE_URL,
       },
     },
     logger: silentLogger(),
-    fetchImpl: async (url) => jsonResponse(true, String(url).endsWith('/pose')
-      ? {
-        ok: true,
-        waypointSafe: true,
-        mapPose: { frame: 'map' },
-      }
-      : { ok: true }),
+    fetchImpl: async (url) => jsonResponse({ ok: true }),
+    getDogzillaLidarHealthImpl: healthyLidar,
+    getDogzillaRobotPoseImpl: healthyPose,
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)
-      return {
-        status: 'ok',
-        action,
-      }
+      return { status: 'ok', action }
     },
   })
 
@@ -164,26 +165,25 @@ test('forceDogzillaRequiredServicesOnStartup reuses top-level map pose response'
     config: {
       lidar: {
         enabled: true,
-        healthUrl: 'http://dogzilla:8896/healthz',
-        poseUrl: 'http://dogzilla:8896/pose',
+        transport: 'rosbridge',
+        rosbridgeUrl: ROSBRIDGE_URL,
       },
     },
     logger: silentLogger(),
-    fetchImpl: async (url) => jsonResponse(true, String(url).endsWith('/pose')
-      ? {
-        ok: true,
-        waypointSafe: true,
-        frame: 'map',
-        x: 0.00211,
-        y: -0.00497,
-      }
-      : { ok: true }),
+    fetchImpl: async () => jsonResponse({ ok: false }),
+    getDogzillaLidarHealthImpl: healthyLidar,
+    getDogzillaRobotPoseImpl: async () => ({
+      ok: true,
+      status: 'ok',
+      waypointSafe: true,
+      frame: 'map',
+      x: 0.00211,
+      y: -0.00497,
+      destination: ROSBRIDGE_URL,
+    }),
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)
-      return {
-        status: 'ok',
-        action,
-      }
+      return { status: 'ok', action }
     },
   })
 
@@ -207,30 +207,23 @@ test('forceDogzillaRequiredServicesOnStartup replaces healthy services when requ
       },
       lidar: {
         enabled: true,
-        healthUrl: 'http://dogzilla:8896/healthz',
-        poseUrl: 'http://dogzilla:8896/pose',
+        transport: 'rosbridge',
+        rosbridgeUrl: ROSBRIDGE_URL,
       },
     },
     logger: silentLogger(),
     replaceExisting: true,
-    fetchImpl: async (url) => jsonResponse(true, String(url).endsWith('/pose')
-      ? {
-        ok: true,
-        waypointSafe: true,
-        mapPose: { frame: 'map' },
-      }
-      : { ok: true }),
+    fetchImpl: async (url) => jsonResponse({ ok: true }),
+    getDogzillaLidarHealthImpl: healthyLidar,
+    getDogzillaRobotPoseImpl: healthyPose,
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)
-      return {
-        status: 'ok',
-        action,
-      }
+      return { status: 'ok', action }
     },
   })
 
   assert.equal(result.status, 'ok')
-  assert.deepEqual(startedActions, ['start-yolo', 'start-audio', 'start-lidar', 'start-map-pose'])
+  assert.deepEqual(startedActions, ['start-audio', 'start-yolo', 'start-lidar', 'start-map-pose'])
   assert.equal(result.results.vision.reusedService, false)
   assert.equal(result.results.audio.reusedService, false)
   assert.equal(result.results.lidar.reusedService, false)
@@ -239,34 +232,24 @@ test('forceDogzillaRequiredServicesOnStartup replaces healthy services when requ
 
 test('forceDogzillaRequiredServicesOnStartup starts map pose when lidar is healthy but pose is not map-safe', async () => {
   const startedActions = []
-  const readyUrls = new Set(['http://dogzilla:8896/healthz'])
+  let poseHealthy = false
 
   const result = await forceDogzillaRequiredServicesOnStartup({
     config: {
       lidar: {
         enabled: true,
-        healthUrl: 'http://dogzilla:8896/healthz',
-        poseUrl: 'http://dogzilla:8896/pose',
+        transport: 'rosbridge',
+        rosbridgeUrl: ROSBRIDGE_URL,
       },
     },
     logger: silentLogger(),
-    fetchImpl: async (url) => jsonResponse(true, String(url).endsWith('/pose')
-      ? {
-        ok: readyUrls.has(String(url)),
-        status: readyUrls.has(String(url)) ? 'ok' : 'no-pose',
-        waypointSafe: readyUrls.has(String(url)),
-        mapPose: readyUrls.has(String(url)) ? { frame: 'map' } : null,
-      }
-      : { ok: readyUrls.has(String(url)) }),
+    fetchImpl: async () => jsonResponse({ ok: false }),
+    getDogzillaLidarHealthImpl: healthyLidar,
+    getDogzillaRobotPoseImpl: async () => (poseHealthy ? healthyPose() : noPose()),
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)
-      if (action === 'start-map-pose') {
-        readyUrls.add('http://dogzilla:8896/pose')
-      }
-      return {
-        status: 'ok',
-        action,
-      }
+      if (action === 'start-map-pose') poseHealthy = true
+      return { status: 'ok', action }
     },
     sleepImpl: async () => {},
   })
@@ -288,7 +271,7 @@ test('forceDogzillaRequiredServicesOnStartup accepts health recovery after start
       },
     },
     logger: silentLogger(),
-    fetchImpl: async (url) => jsonResponse(true, { ok: readyUrls.has(String(url)) }),
+    fetchImpl: async (url) => jsonResponse({ ok: readyUrls.has(String(url)) }),
     runDogzillaConnectionActionImpl: async () => {
       readyUrls.add('http://dogzilla:8894/healthz')
       return {
@@ -313,14 +296,16 @@ test('forceDogzillaRequiredServicesOnStartup skips map pose when lidar startup f
     config: {
       lidar: {
         enabled: true,
-        healthUrl: 'http://dogzilla:8896/healthz',
-        poseUrl: 'http://dogzilla:8896/pose',
+        transport: 'rosbridge',
+        rosbridgeUrl: ROSBRIDGE_URL,
       },
     },
     logger: silentLogger(),
     readyTimeoutMs: 1,
     pollIntervalMs: 1,
-    fetchImpl: async () => jsonResponse(false, { ok: false }),
+    fetchImpl: async () => jsonResponse({ ok: false }),
+    getDogzillaLidarHealthImpl: disabledLidar,
+    getDogzillaRobotPoseImpl: noPose,
     runDogzillaConnectionActionImpl: async (action) => {
       startedActions.push(action)
       return {
@@ -339,10 +324,10 @@ test('forceDogzillaRequiredServicesOnStartup skips map pose when lidar startup f
   assert.match(result.results.mapPose.reason, /lidar is not ready/)
 })
 
-function jsonResponse(ok, body) {
+function jsonResponse(body) {
   return {
-    ok,
-    status: ok ? 200 : 503,
+    ok: Boolean(body?.ok),
+    status: body?.ok ? 200 : 503,
     async json() {
       return body
     },

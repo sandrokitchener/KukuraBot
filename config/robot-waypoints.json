@@ -21,13 +21,13 @@
         "living_room": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": -0.13887,
-          "y": -0.32116,
-          "yaw": 3.00075,
+          "x": -1.7173,
+          "y": -5.19267,
+          "yaw": -1.63796,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "living_room",
           "verified": true,
-          "capturedAt": "2026-06-23T05:20:27.651Z",
+          "capturedAt": "2026-06-24T14:27:25.536Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
           "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
@@ -61,11 +61,11 @@
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": -0.00512,
-            "y": 0.01104,
-            "yaw": -0.0044,
+            "x": 0.01326,
+            "y": -0.00256,
+            "yaw": 0.00494,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-23T05:17:50.190Z",
+            "savedAt": "2026-06-24T14:23:57.714Z",
             "mapId": "robodoge_home",
             "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
             "map": {
@@ -97,26 +97,26 @@
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": -0.1454,
-            "y": -0.30951,
-            "yaw": 2.99635,
-            "theta": 2.99635,
+            "x": -1.67837,
+            "y": -5.20365,
+            "yaw": -1.63302,
+            "theta": -1.63302,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-23T05:20:27.651Z (app_map frame)."
+            "Captured from app at 2026-06-24T14:27:25.536Z (app_map frame)."
           ]
         },
         "kitchen": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": -0.1782,
-          "y": -0.14691,
-          "yaw": 0.27628,
+          "x": 1.94518,
+          "y": 3.89334,
+          "yaw": -0.6566,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "kitchen",
           "verified": true,
-          "capturedAt": "2026-06-23T05:19:44.419Z",
+          "capturedAt": "2026-06-24T14:26:08.998Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
           "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
@@ -150,11 +150,11 @@
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": -0.00512,
-            "y": 0.01104,
-            "yaw": -0.0044,
+            "x": 0.01326,
+            "y": -0.00256,
+            "yaw": 0.00494,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-23T05:17:50.190Z",
+            "savedAt": "2026-06-24T14:23:57.714Z",
             "mapId": "robodoge_home",
             "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
             "map": {
@@ -186,26 +186,26 @@
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": -0.18396,
-            "y": -0.13508,
-            "yaw": 0.27188,
-            "theta": 0.27188,
+            "x": -1.92254,
+            "y": -1.90549,
+            "yaw": -0.65166,
+            "theta": -0.65166,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-23T05:19:44.419Z (app_map frame)."
+            "Captured from app at 2026-06-24T14:26:08.998Z (app_map frame)."
           ]
         },
         "garage": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": 0.01171,
-          "y": -0.02307,
-          "yaw": -0.00808,
+          "x": -1.86183,
+          "y": -1.24677,
+          "yaw": 3.06975,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "garage",
           "verified": true,
-          "capturedAt": "2026-06-23T05:18:34.115Z",
+          "capturedAt": "2026-06-25T03:38:46.792Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
           "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
@@ -239,11 +239,11 @@
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": -0.00512,
-            "y": 0.01104,
-            "yaw": -0.0044,
+            "x": -0.82237,
+            "y": -0.45429,
+            "yaw": 3.02537,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-23T05:17:50.190Z",
+            "savedAt": "2026-06-25T03:17:10.553Z",
             "mapId": "robodoge_home",
             "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
             "map": {
@@ -275,14 +275,14 @@
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": 0.00649,
-            "y": -0.01208,
-            "yaw": -0.01248,
-            "theta": -0.01248,
+            "x": 1.17148,
+            "y": 0.56817,
+            "yaw": -0.18807,
+            "theta": -0.18807,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-23T05:18:34.115Z (app_map frame)."
+            "Captured from app at 2026-06-25T03:38:46.792Z (app_map frame)."
           ]
         },
         "bedroom": {
@@ -318,13 +318,13 @@
         "master_bedroom": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": -0.00132,
-          "y": 0.00983,
-          "yaw": 0.00639,
+          "x": -2.08021,
+          "y": -6.56311,
+          "yaw": -2.65149,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "master_bedroom",
           "verified": true,
-          "capturedAt": "2026-06-23T05:23:05.007Z",
+          "capturedAt": "2026-06-24T14:30:00.367Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
           "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
@@ -358,11 +358,11 @@
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": -0.00512,
-            "y": 0.01104,
-            "yaw": -0.0044,
+            "x": 0.01326,
+            "y": -0.00256,
+            "yaw": 0.00494,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-23T05:17:50.190Z",
+            "savedAt": "2026-06-24T14:23:57.714Z",
             "mapId": "robodoge_home",
             "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
             "map": {
@@ -394,14 +394,14 @@
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": -0.0064,
-            "y": 0.02088,
-            "yaw": 0.00199,
-            "theta": 0.00199,
+            "x": -2.0345,
+            "y": -6.57587,
+            "yaw": -2.64655,
+            "theta": -2.64655,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-23T05:23:05.007Z (app_map frame)."
+            "Captured from app at 2026-06-24T14:30:00.367Z (app_map frame)."
           ]
         },
         "game_room": {
@@ -518,13 +518,13 @@
         "charger": {
           "kind": "map_pose",
           "frame": "app_map",
-          "x": -1.37706,
-          "y": -0.10583,
-          "yaw": -0.27947,
+          "x": -0.28118,
+          "y": 0.44944,
+          "yaw": -2.91849,
           "arrivalToleranceMeters": 0.25,
           "physicalSpot": "charger",
           "verified": true,
-          "capturedAt": "2026-06-23T05:15:38.348Z",
+          "capturedAt": "2026-06-25T03:24:22.012Z",
           "capturedFrom": "dogzilla pose bridge",
           "mapId": "robodoge_home",
           "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
@@ -558,11 +558,11 @@
             "frame": "app_map",
             "sourceFrame": "map",
             "label": "charger_origin",
-            "x": 1.29889,
-            "y": 0.46081,
-            "yaw": 0.26286,
+            "x": -0.82237,
+            "y": -0.45429,
+            "yaw": 3.02537,
             "source": "tf:map->base_link",
-            "savedAt": "2026-06-23T05:15:03.984Z",
+            "savedAt": "2026-06-25T03:17:10.553Z",
             "mapId": "robodoge_home",
             "mapFingerprint": "c0a5a870cefd2bc8ecdbfb5ef40be3e5bc15b1d32625b28c9131293a49bfcf3f",
             "map": {
@@ -594,14 +594,14 @@
           },
           "capturedMapPose": {
             "frame": "map",
-            "x": -0.00337,
-            "y": 0.0008,
-            "yaw": -0.01661,
-            "theta": -0.01661,
+            "x": -0.5952,
+            "y": -0.9333,
+            "yaw": 0.10688,
+            "theta": 0.10688,
             "source": ""
           },
           "notes": [
-            "Captured from app at 2026-06-23T05:15:38.348Z (app_map frame)."
+            "Captured from app at 2026-06-25T03:24:22.012Z (app_map frame)."
           ]
         },
         "kit": {

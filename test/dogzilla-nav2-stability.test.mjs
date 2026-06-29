@@ -15,9 +15,17 @@ test.beforeEach(() => {
   resetNav2Stability()
 })
 
-test('ready -> disconnected when current bridge probe fails despite cached prior health', () => {
+function recordConfirmedStateSnapshotFailure(body) {
+  deriveNav2StabilityFromHealth(body, { source: 'state-snapshot' })
+  deriveNav2StabilityFromHealth(body, { source: 'state-snapshot' })
+}
+
+test('ready state tolerates one missed bridge probe before disconnected', () => {
   const readyHealth = nav2HealthBody()
   deriveNav2StabilityFromHealth(readyHealth, { source: 'state-snapshot', bridgeDestination: 'http://10.0.4.32:8893' })
+  assert.equal(getNav2Stability().state, 'ready')
+
+  deriveNav2StabilityFromHealth(null, { source: 'state-snapshot', bridgeDestination: 'http://10.0.4.32:8893' })
   assert.equal(getNav2Stability().state, 'ready')
 
   deriveNav2StabilityFromHealth(null, { source: 'state-snapshot', bridgeDestination: 'http://10.0.4.32:8893' })
@@ -25,10 +33,8 @@ test('ready -> disconnected when current bridge probe fails despite cached prior
   const stability = getNav2Stability()
   assert.equal(stability.state, 'disconnected')
   assert.match(stability.currentBlocker, /No runtime data from bridge/)
-  assert.equal(stability.lastReadyAt, stability.lastFailureAt ? stability.lastReadyAt : null)
   assert.ok(stability.recentEvents.some((event) => event.nextState === 'disconnected' && event.source === 'state-snapshot'))
 })
-
 test('ready -> blocked with action/lifecycle/odom/TF/scan blockers', () => {
   const readyHealth = nav2HealthBody()
   deriveNav2StabilityFromHealth(readyHealth, { source: 'state-snapshot' })
@@ -37,7 +43,7 @@ test('ready -> blocked with action/lifecycle/odom/TF/scan blockers', () => {
   const actionMissing = nav2HealthBody({
     nav2: { available: false, serverAvailable: false, serverError: 'Nav2 NavigateToPose action server is not running' },
   })
-  deriveNav2StabilityFromHealth(actionMissing, { source: 'state-snapshot' })
+  recordConfirmedStateSnapshotFailure(actionMissing)
   assert.equal(getNav2Stability().state, 'blocked')
   assert.match(getNav2Stability().currentBlocker, /NavigateToPose action server/)
   assert.equal(getNav2Stability().recentEvents.at(-1).readinessStep, 'action_server')
@@ -47,7 +53,7 @@ test('ready -> blocked with action/lifecycle/odom/TF/scan blockers', () => {
   const lifecycleMissing = nav2HealthBody({
     navigation: { blockers: ['Nav2 lifecycle nodes are not active: controller_server'] },
   })
-  deriveNav2StabilityFromHealth(lifecycleMissing, { source: 'state-snapshot' })
+  recordConfirmedStateSnapshotFailure(lifecycleMissing)
   assert.equal(getNav2Stability().state, 'blocked')
   assert.equal(getNav2Stability().recentEvents.at(-1).readinessStep, 'lifecycle')
 
@@ -56,7 +62,7 @@ test('ready -> blocked with action/lifecycle/odom/TF/scan blockers', () => {
   const odomMissing = nav2HealthBody({
     navigation: { blockers: ['/odom not available'] },
   })
-  deriveNav2StabilityFromHealth(odomMissing, { source: 'state-snapshot' })
+  recordConfirmedStateSnapshotFailure(odomMissing)
   assert.equal(getNav2Stability().state, 'blocked')
   assert.equal(getNav2Stability().recentEvents.at(-1).readinessStep, 'odom')
 
@@ -65,7 +71,7 @@ test('ready -> blocked with action/lifecycle/odom/TF/scan blockers', () => {
   const tfMissing = nav2HealthBody({
     navigation: { blockers: ['map->base_link TF unavailable'] },
   })
-  deriveNav2StabilityFromHealth(tfMissing, { source: 'state-snapshot' })
+  recordConfirmedStateSnapshotFailure(tfMissing)
   assert.equal(getNav2Stability().state, 'blocked')
   assert.equal(getNav2Stability().recentEvents.at(-1).readinessStep, 'tf')
 
@@ -74,7 +80,7 @@ test('ready -> blocked with action/lifecycle/odom/TF/scan blockers', () => {
   const scanMissing = nav2HealthBody({
     navigation: { blockers: ['Filtered scan not ready on /scan_nav2'] },
   })
-  deriveNav2StabilityFromHealth(scanMissing, { source: 'state-snapshot' })
+  recordConfirmedStateSnapshotFailure(scanMissing)
   assert.equal(getNav2Stability().state, 'blocked')
   assert.equal(getNav2Stability().recentEvents.at(-1).readinessStep, 'scan')
 })

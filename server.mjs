@@ -1,17 +1,23 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadAppConfig } from './lib/app-config.mjs'
 import {
   createDogzillaBatteryStateTracker,
+  normalizeLastKnownBattery,
   normalizeDogzillaBatterySample,
 } from './lib/dogzilla-battery-state.mjs'
 import {
   loadDogzillaConnectionConfig,
 } from './lib/dogzilla-connection-center.mjs'
-import { getDogzillaRobotPose, getDogzillaLidarScan } from './lib/dogzilla-lidar-client.mjs'
+import {
+  getDogzillaLidarScan,
+  getDogzillaRobotPose,
+  getRosbridgeClient,
+  startDogzillaLidarClient,
+} from './lib/dogzilla-lidar-client.mjs'
 import {
   DOGZILLA_CAMERA_SNAPSHOT_PROXY_PATH,
   DOGZILLA_CAMERA_STREAM_PROXY_PATH,
@@ -43,7 +49,9 @@ import {
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
 import { deriveNavigationStatus } from './lib/dogzilla-navigation-status.mjs'
-import { getDogzillaRepairState, setDogzillaRepairing } from './lib/dogzilla-repair-state.mjs'
+import { getDogzillaRepairState } from './lib/dogzilla-repair-state.mjs'
+import { getDogzillaWaypointNavigationReadiness } from './lib/dogzilla-navigation-readiness.mjs'
+import { forceDogzillaWaypointNavigationOnStartup } from './lib/dogzilla-waypoint-navigation-launcher.mjs'
 import {
   deriveNav2StabilityFromHealth,
   getNav2Stability,
@@ -51,10 +59,6 @@ import {
   recordNav2RepairStart,
   recordNav2RepairResult,
 } from './lib/dogzilla-nav2-stability.mjs'
-import {
-  runDogzillaStartupWatchdog,
-  shouldBlockDogzillaAppLaunchForNavigation,
-} from './lib/dogzilla-startup-watchdog.mjs'
 import { buildSystemHealthz } from './lib/system-healthz.mjs'
 import { green, printStartupBanner } from './lib/startup-banner.mjs'
 import { loadRobotWaypointsConfig } from './lib/isaacsim-config.mjs'
@@ -77,24 +81,12 @@ const TRANSFORMERS_ORT_DIST_DIR = path.join(
 )
 const HOST = process.env.APP_HOST || process.env.KUKURA_HOST || '0.0.0.0'
 const PORT = Number(process.env.APP_PORT || process.env.KUKURA_PORT || 3037)
-const DOGZILLA_STARTUP_MONITOR_INTERVAL_MS = Number(process.env.APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS || 12_000)
-const DOGZILLA_STARTUP_MONITOR_INITIAL_DELAY_MS = Number(process.env.APP_DOGZILLA_STARTUP_MONITOR_INITIAL_DELAY_MS || 10_000)
 const appConfig = await loadAppConfig()
-const dogzillaStartupResult = await runDogzillaStartupWatchdog({ logger: console }).catch((error) => ({
-  status: 'degraded',
-  waypointNavigation: {
-    status: 'error',
-    error: error instanceof Error ? error.message : String(error),
-  },
-}))
+const dogzillaConfig = await loadDogzillaConnectionConfig()
+const dogzillaStartupResult = await startSimplifiedDogzillaStack({ logger: console })
 
-if (shouldBlockDogzillaAppLaunchForNavigation(dogzillaStartupResult)) {
-  const reason = dogzillaStartupResult.waypointNavigation?.error
-    || dogzillaStartupResult.waypointNavigation?.health?.error
-    || dogzillaStartupResult.waypointNavigation?.health?.body?.runtime?.nav2?.serverError
-    || 'DOGZILLA Nav2 waypoint readiness is not proven.'
-  console.error(`App launch blocked: DOGZILLA navigation is not ready. ${reason}`)
-  console.error('Set APP_DOGZILLA_STARTUP_REQUIRE_NAV=0 only for non-navigation debugging.')
+if (dogzillaStartupResult.blocked) {
+  console.error(`App launch blocked: ${dogzillaStartupResult.error}`)
   process.exit(1)
 }
 
@@ -106,11 +98,17 @@ printStartupBanner({
 const APP_GENERATION_ID = randomUUID()
 const APP_STARTED_AT = new Date().toISOString()
 let robotBridgeStateSeq = 0
-const dogzillaBatteryStateTracker = createDogzillaBatteryStateTracker()
+const DOGZILLA_BATTERY_STATE_FILE = path.join(__dirname, 'output', 'app-cache', 'dogzilla-battery-state.json')
+const dogzillaBatteryStateTracker = createDogzillaBatteryStateTracker({
+  lastKnown: await loadPersistedDogzillaBatteryState(),
+  onUpdate: persistDogzillaBatteryState,
+})
 const DOGZILLA_POSE_TRACK_LIMIT = 80
 const DOGZILLA_HEALTH_CACHE_MAX_AGE_MS = 30_000
+const DOGZILLA_HEALTH_REFRESH_TIMEOUT_MS = Number(process.env.APP_DOGZILLA_HEALTH_REFRESH_TIMEOUT_MS || 20_000)
 const dogzillaPoseTrack = []
 let lastDogzillaBridgeHealth = null
+let dogzillaBridgeHealthRefresh = null
 const navigationDispatch = {
   waypointName: null,
   dispatchedAt: null,
@@ -251,132 +249,149 @@ server.listen(PORT, HOST, async () => {
   console.log(green(`     |               \`--' |`))
   console.log(green(` ____|_       ___|   |___.'`))
   console.log(green(`/_/_____/____/_______|`))
-  startDogzillaStartupWatchdogMonitor()
+  startRosbridgeConnectionMonitor()
+  startDogzillaNav2RepairWatchdog()
   void warmActiveModel(profileConfig.activeProfile)
 })
 
-function startDogzillaStartupWatchdogMonitor({
+async function startSimplifiedDogzillaStack({ logger = console } = {}) {
+  if (dogzillaConfig.lidar?.enabled === true) {
+    logger.log?.('Connecting to DOGZILLA rosbridge...')
+    await startDogzillaLidarClient({ config: dogzillaConfig })
+    const rosbridge = getRosbridgeClient()
+    await waitFor(() => rosbridge.connected, 5000, 250)
+    if (!rosbridge.connected) {
+      return {
+        blocked: true,
+        error: 'Could not connect to DOGZILLA rosbridge. Start the Pi rosbridge stack first.',
+      }
+    }
+    logger.log?.(green(`Connected to DOGZILLA rosbridge at ${rosbridge.url}.`))
+  }
+
+  return { blocked: false }
+}
+
+function startDogzillaNav2RepairWatchdog({
   env = process.env,
   logger = console,
-  intervalMs = DOGZILLA_STARTUP_MONITOR_INTERVAL_MS,
-  initialDelayMs = DOGZILLA_STARTUP_MONITOR_INITIAL_DELAY_MS,
+  intervalMs = Number(env.APP_DOGZILLA_NAV2_WATCHDOG_INTERVAL_MS || 60_000),
+  minBatteryPct = Number(env.APP_DOGZILLA_NAV2_WATCHDOG_MIN_BATTERY_PCT || 25),
 } = {}) {
-  const override = String(env.APP_DOGZILLA_STARTUP_MONITOR ?? env.DOGZILLA_STARTUP_MONITOR ?? '').trim().toLowerCase()
+  const override = String(env.APP_DOGZILLA_NAV2_WATCHDOG ?? env.DOGZILLA_NAV2_WATCHDOG ?? '').trim().toLowerCase()
   if (['0', 'false', 'no', 'off'].includes(override)) {
-    logger.log?.('DOGZILLA startup watchdog monitor disabled.')
     return null
   }
 
-  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
-    logger.warn?.(`DOGZILLA startup watchdog monitor disabled: invalid interval ${intervalMs}.`)
-    return null
-  }
+  let repairing = false
+  const tick = async () => {
+    if (repairing) return
 
-  let running = false
-  let hasRun = false
-  const runMonitor = async () => {
-    if (running) {
+    const runtimeConfig = await loadRobotRuntimeConfig()
+    if (runtimeConfig.enabled === false || runtimeConfig.activeTarget?.kind !== 'dogzilla-direct') return
+
+    const ros2Config = await loadRobotRos2Config()
+    const health = await probeRobotSidecarHealth(runtimeConfig, withRobotStateProbeMinimumTimeout(ros2Config, 4000))
+    if (health.status !== 'ok') return
+
+    const bridgeState = await fetchRobotBridgeState(runtimeConfig, withRobotStateProbeTimeout(ros2Config, 4000))
+    const battery = normalizeFiniteNumber(bridgeState?.state?.battery)
+    if (Number.isFinite(battery) && Number.isFinite(minBatteryPct) && battery <= minBatteryPct) {
+      logger.warn?.(`DOGZILLA Nav2 watchdog skipped: battery ${battery}% <= ${minBatteryPct}%.`)
       return
     }
 
-    running = true
-    setDogzillaRepairing(true, { source: 'startup-monitor' })
+    const runtime = health.body?.runtime && typeof health.body.runtime === 'object' ? health.body.runtime : null
+    const readiness = getDogzillaWaypointNavigationReadiness(runtime)
+    if (readiness.ready || readiness.discovering) return
+
+    repairing = true
     if (isNav2StabilityTrackerEnabled()) {
-      recordNav2RepairStart({ source: 'startup-monitor', repairAction: 'watchdog' })
-    }
-    const bufferedLogger = hasRun ? createBufferedLogger(logger) : null
-    try {
-      const result = await runDogzillaStartupWatchdog({
-        env: {
-          ...env,
-          APP_DOGZILLA_STARTUP_WATCHDOG: '1',
-        },
-        logger: bufferedLogger || logger,
+      recordNav2RepairStart({
+        source: 'server-watchdog',
+        repairAction: 'watchdog-nav2-repair',
+        bridgeDestination: health.destination || null,
       })
-    if (result.status === 'degraded' || didDogzillaStartupWatchdogDoWork(result)) {
-      bufferedLogger?.flush()
     }
-    if (result.status === 'degraded') {
-      logger.warn?.('DOGZILLA startup watchdog monitor repaired or attempted degraded navigation services.')
+
+    try {
+      const result = await forceDogzillaWaypointNavigationOnStartup({
+        runtimeConfig,
+        ros2Config,
+        logger,
+      })
+      const ok = result?.status === 'ok'
       if (isNav2StabilityTrackerEnabled()) {
-          recordNav2RepairResult(false, {
-            source: 'startup-monitor',
-            repairAction: 'watchdog',
-            blocker: 'Startup watchdog completed with degraded services',
-          })
-        }
-      } else if (isNav2StabilityTrackerEnabled()) {
-        recordNav2RepairResult(true, {
-          source: 'startup-monitor',
-          repairAction: 'watchdog',
+        recordNav2RepairResult(ok, {
+          source: 'server-watchdog',
+          repairAction: 'watchdog-nav2-repair',
+          bridgeDestination: health.destination || null,
+          error: ok ? undefined : (result?.error || result?.reason || result?.status),
         })
       }
     } catch (error) {
-      bufferedLogger?.flush()
-      logger.warn?.(`DOGZILLA startup watchdog monitor failed: ${error instanceof Error ? error.message : String(error)}`)
       if (isNav2StabilityTrackerEnabled()) {
         recordNav2RepairResult(false, {
-          source: 'startup-monitor',
-          repairAction: 'watchdog',
-          blocker: error instanceof Error ? error.message : String(error),
+          source: 'server-watchdog',
+          repairAction: 'watchdog-nav2-repair',
+          bridgeDestination: health.destination || null,
+          error: error instanceof Error ? error.message : String(error),
         })
       }
+      logger.warn?.(`DOGZILLA Nav2 watchdog repair failed: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
-      running = false
-      hasRun = true
-      setDogzillaRepairing(false, { source: 'startup-monitor', finishedAt: new Date().toISOString() })
+      repairing = false
     }
   }
 
-  const firstDelay = Number.isFinite(initialDelayMs) && initialDelayMs >= 0 ? initialDelayMs : intervalMs
-  const initialTimer = setTimeout(() => {
-    void runMonitor()
-  }, firstDelay)
   const interval = setInterval(() => {
-    void runMonitor()
-  }, intervalMs)
-  initialTimer.unref?.()
+    tick().catch((error) => {
+      logger.warn?.(`DOGZILLA Nav2 watchdog check failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }, Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 60_000)
   interval.unref?.()
-  return { initialTimer, interval }
+  return { interval }
+}
+function startRosbridgeConnectionMonitor({
+  env = process.env,
+  logger = console,
+  intervalMs = 12_000,
+} = {}) {
+  const override = String(env.APP_DOGZILLA_STARTUP_MONITOR ?? env.DOGZILLA_STARTUP_MONITOR ?? '').trim().toLowerCase()
+  if (['0', 'false', 'no', 'off'].includes(override)) {
+    return null
+  }
+
+  const rosbridge = getRosbridgeClient()
+  if (!rosbridge) {
+    return null
+  }
+
+  rosbridge.on('disconnected', () => {
+    logger.warn?.(`DOGZILLA rosbridge disconnected from ${rosbridge.url}.`)
+  })
+  rosbridge.on('connected', () => {
+    logger.log?.(green(`DOGZILLA rosbridge reconnected to ${rosbridge.url}.`))
+  })
+
+  const interval = setInterval(() => {
+    if (!rosbridge.connected) {
+      logger.warn?.(`DOGZILLA rosbridge still disconnected from ${rosbridge.url}; will retry.`)
+    }
+  }, intervalMs)
+  interval.unref?.()
+  return { interval }
 }
 
-function createBufferedLogger(logger = console) {
-  const entries = []
-  const push = (method, args) => {
-    entries.push({ method, args })
+async function waitFor(predicate, timeoutMs, intervalMs) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) {
+      return true
+    }
+    await new Promise((resolve) => { setTimeout(resolve, intervalMs) })
   }
-
-  return {
-    log: (...args) => push('log', args),
-    warn: (...args) => push('warn', args),
-    error: (...args) => push('error', args),
-    flush: () => {
-      for (const entry of entries) {
-        logger[entry.method]?.(...entry.args)
-      }
-      entries.length = 0
-    },
-  }
-}
-
-function didDogzillaStartupWatchdogDoWork(result = {}) {
-  if (result.directBridge?.enabled && result.directBridge.reusedBridge === false) {
-    return true
-  }
-
-  if (result.waypointNavigation?.enabled && result.waypointNavigation.reusedNavigation === false) {
-    return true
-  }
-
-  const services = result.requiredServices?.results
-  if (!services || typeof services !== 'object') {
-    return false
-  }
-
-  return Object.values(services).some((service) => (
-    service?.status === 'ok'
-    && (service.reusedService === false || service.recoveredAfterStartError === true)
-  ))
+  return predicate()
 }
 
 async function warmActiveModel(profile) {
@@ -401,6 +416,27 @@ async function warmActiveModel(profile) {
     console.warn(`Model warm-up skipped: ${message}`)
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+async function loadPersistedDogzillaBatteryState() {
+  try {
+    const raw = await readFile(DOGZILLA_BATTERY_STATE_FILE, 'utf-8')
+    return normalizeLastKnownBattery(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+async function persistDogzillaBatteryState(state) {
+  const normalized = normalizeLastKnownBattery(state)
+  if (!normalized) return
+
+  try {
+    await mkdir(path.dirname(DOGZILLA_BATTERY_STATE_FILE), { recursive: true })
+    await writeFile(DOGZILLA_BATTERY_STATE_FILE, `${JSON.stringify(normalized, null, 2)}\n`, 'utf-8')
+  } catch {
+    // Best-effort cache. Battery read itself remains the source of truth.
   }
 }
 
@@ -454,23 +490,22 @@ async function buildCurrentRobotStateSnapshot() {
   const robotRos2Config = await loadRobotRos2Config()
   const robotStateProbeConfig = withRobotStateProbeTimeout(robotRos2Config, 4000)
   const streamSnapshot = getRobotStateSnapshot()
-  const [bridgeState, bridgeHealth, poseState, mapOrigin, waypointConfig] = await Promise.all([
-    fetchRobotBridgeState(robotRuntimeConfig, robotStateProbeConfig),
-    probeRobotSidecarHealth(robotRuntimeConfig, robotStateProbeConfig),
-    getDogzillaRobotPose({ timeoutMs: 1200 }),
-    loadDogzillaMapOrigin(),
-    loadRobotWaypointsConfig(),
-  ])
-  if (bridgeHealth?.status === 'ok') {
-    lastDogzillaBridgeHealth = {
-      body: bridgeHealth.body,
-      receivedAt: Date.now(),
+  void refreshDogzillaBridgeHealth(robotRuntimeConfig, robotRos2Config)
+const [bridgeState, poseState, mapOrigin, waypointConfig] = await Promise.all([
+  fetchRobotBridgeState(robotRuntimeConfig, robotStateProbeConfig),
+  getDogzillaRobotPose({ timeoutMs: 1200 }),
+  loadDogzillaMapOrigin(),
+  loadRobotWaypointsConfig(),
+])
+const cachedBridgeHealth = getFreshDogzillaBridgeHealth()
+const bridgeHealth = cachedBridgeHealth
+  ? { ...cachedBridgeHealth, cached: true }
+  : {
+      attempted: true,
+      status: 'pending',
+      destination: robotRos2Config.transport?.baseUrl || '',
+      error: 'DOGZILLA bridge health refresh pending',
     }
-  }
-  const cachedBridgeHealth = lastDogzillaBridgeHealth
-    && Date.now() - lastDogzillaBridgeHealth.receivedAt <= DOGZILLA_HEALTH_CACHE_MAX_AGE_MS
-    ? lastDogzillaBridgeHealth
-    : null
   const effectiveBridgeHealthBody = bridgeHealth?.status === 'ok'
     ? bridgeHealth.body
     : cachedBridgeHealth?.body || null
@@ -480,7 +515,7 @@ async function buildCurrentRobotStateSnapshot() {
   const activeMap = bridgeRuntime?.map && typeof bridgeRuntime.map === 'object'
     ? bridgeRuntime.map
     : null
-  const mapOriginStatus = getDogzillaMapOriginStatus(mapOrigin, activeMap)
+  const mapOriginStatus = getDogzillaMapOriginStatus(mapOrigin, activeMap, { bridgeReachable: bridgeHealth?.status === 'ok' })
   const dogzillaWaypointReadiness = effectiveBridgeHealthBody
     ? validateDogzillaWaypoints({
         waypointConfig,
@@ -512,12 +547,12 @@ async function buildCurrentRobotStateSnapshot() {
     ? [bridgeRobot, ...streamRobots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
     : streamRobots
 
-  const currentBridgeHealthBody = bridgeHealth?.status === 'ok' ? bridgeHealth.body : null
-  const bridgeHealthCachedForDisplay = !currentBridgeHealthBody && !!cachedBridgeHealth
+  const currentBridgeHealthBody = null
+  const bridgeHealthCachedForDisplay = !!cachedBridgeHealth
 
-  if (isNav2StabilityTrackerEnabled()) {
-    deriveNav2StabilityFromHealth(currentBridgeHealthBody, {
-      source: 'state-snapshot',
+  if (isNav2StabilityTrackerEnabled() && effectiveBridgeHealthBody) {
+    deriveNav2StabilityFromHealth(effectiveBridgeHealthBody, {
+      source: bridgeHealthCachedForDisplay ? 'state-snapshot-cache' : 'state-snapshot',
       bridgeDestination: bridgeHealth?.destination || null,
     })
   }
@@ -548,6 +583,55 @@ async function buildCurrentRobotStateSnapshot() {
   }
 }
 
+function getFreshDogzillaBridgeHealth(now = Date.now()) {
+  if (!lastDogzillaBridgeHealth) {
+    return null
+  }
+  if (now - lastDogzillaBridgeHealth.receivedAt > DOGZILLA_HEALTH_CACHE_MAX_AGE_MS) {
+    return null
+  }
+  return lastDogzillaBridgeHealth
+}
+
+function refreshDogzillaBridgeHealth(runtimeConfig = {}, ros2Config = {}) {
+  if (dogzillaBridgeHealthRefresh) {
+    return dogzillaBridgeHealthRefresh
+  }
+
+  const healthConfig = withRobotStateProbeMinimumTimeout(ros2Config, DOGZILLA_HEALTH_REFRESH_TIMEOUT_MS)
+  dogzillaBridgeHealthRefresh = probeRobotSidecarHealth(runtimeConfig, healthConfig)
+    .then((health) => {
+      if (health?.status === 'ok') {
+        lastDogzillaBridgeHealth = {
+          ...health,
+          receivedAt: Date.now(),
+        }
+      }
+      return health
+    })
+    .finally(() => {
+      dogzillaBridgeHealthRefresh = null
+    })
+
+  return dogzillaBridgeHealthRefresh
+}
+
+function withRobotStateProbeMinimumTimeout(ros2Config = {}, timeoutMs = 4000) {
+  const transport = ros2Config.transport ?? {}
+  const configuredTimeoutMs = Number(transport.timeoutMs)
+  const nextTimeoutMs = Math.max(
+    Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : 0,
+    timeoutMs,
+  )
+
+  return {
+    ...ros2Config,
+    transport: {
+      ...transport,
+      timeoutMs: nextTimeoutMs,
+    },
+  }
+}
 function withRobotStateProbeTimeout(ros2Config = {}, timeoutMs = 4000) {
   const transport = ros2Config.transport ?? {}
   const configuredTimeoutMs = Number(transport.timeoutMs)

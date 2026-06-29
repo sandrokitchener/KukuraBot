@@ -196,7 +196,8 @@ test('buildPreflightChecks blocks map pose when ROS TF and odom publishers are m
       audio: { enabled: false },
       lidar: {
         enabled: true,
-        baseUrl: 'http://10.0.4.32:8896',
+        transport: 'rosbridge',
+        rosbridgeUrl: 'ws://10.0.4.32:9090',
       },
     },
     runtimeConfig: { dryRun: true },

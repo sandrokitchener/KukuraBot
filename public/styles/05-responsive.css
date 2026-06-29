@@ -243,6 +243,11 @@
     align-items: flex-start;
   }
 
+  .slam-mode-chip {
+    order: -1;
+    margin-left: 28px;
+  }
+
   .recon-snapshot-item {
     grid-template-columns: 1fr;
   }

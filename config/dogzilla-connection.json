@@ -26,7 +26,7 @@
     "indexPath": "/"
   },
   "vision": {
-    "enabled": true,
+    "enabled": false,
     "label": "DOGZILLA YOLO annotated camera",
     "baseUrl": "http://10.0.4.32:8894",
     "port": 8894,
@@ -47,13 +47,19 @@
   },
   "lidar": {
     "enabled": true,
-    "label": "DOGZILLA lidar bridge",
-    "baseUrl": "http://10.0.4.32:8896",
-    "port": 8896,
+    "label": "DOGZILLA rosbridge",
+    "transport": "rosbridge",
+    "rosbridgeUrl": "ws://10.0.4.32:9090",
+    "rosbridgePort": 9090,
     "serialPort": "/dev/ttyAMA1",
-    "healthPath": "/healthz",
-    "scanPath": "/scan",
-    "posePath": "/pose"
+    "mapTopic": "/map_cartographer",
+    "rosbridgeTopics": [
+      { "topic": "/scan", "type": "sensor_msgs/LaserScan" },
+      { "topic": "/tf", "type": "tf2_msgs/TFMessage" },
+      { "topic": "/tf_static", "type": "tf2_msgs/TFMessage" },
+      { "topic": "/odom", "type": "nav_msgs/Odometry" },
+      { "topic": "/map_cartographer", "type": "nav_msgs/OccupancyGrid" }
+    ]
   },
   "notes": [
     "DOGZILLA is reserved on eeroWiFi at 10.0.4.32. Hotspot fallback IP was 192.168.8.88.",

@@ -2,7 +2,7 @@ import { execFile, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
-const ROBO_DOGE_LOCAL_PORTS = [3037, 8891, 8892, 8893, 8894, 8895, 8896, 5037]
+const ROBO_DOGE_LOCAL_PORTS = [3037, 8891, 8892, 8893, 8894, 8895, 5037]
 
 await resetLocalRuntime()
 await import('../run.mjs')

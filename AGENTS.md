@@ -75,7 +75,35 @@ Open these only when a compact doc explicitly routes you there or the task direc
 - Keep reusable command recipes in `docs/COMMANDS.md`; subsystem docs should point there instead of duplicating long command blocks.
 - Keep `docs/KNOWN_ISSUES.md` limited to repeated failures, stable traps, and current blockers; move background detail to the subsystem doc or archive when it grows.
 - Prefer deleting stale or duplicated text over adding new sections. Add durable facts only when verified from repo source or live runtime evidence in the current turn.
+## Complex Task Routing
 
+Before making changes, classify the user request as SIMPLE or COMPLEX.
+
+A task is SIMPLE only if:
+- the target file or function is obvious,
+- the change is narrow,
+- no architecture/data-flow decision is needed,
+- and the task can likely be completed by inspecting 1-2 files.
+
+A task is COMPLEX if any of these are true:
+- the root cause is unknown,
+- multiple subsystems may be involved,
+- routing, prompts, state, schemas, audio pipeline, RAG, LLM behavior, model selection, or backend/frontend communication may be affected,
+- more than 3 files may need inspection,
+- the request includes words like investigate, evaluate, refactor, architecture, routing, pipeline, optimize, integrate, debug, broken, not working, or redesign.
+
+For SIMPLE tasks:
+- inspect only the obvious file(s),
+- make the smallest safe change,
+- report files changed and how to test.
+
+For COMPLEX tasks:
+- read "C:\Users\sandr\OneDrive\Documents\Robo-Doge\docs\mict_cognitive_skill.md" before editing,
+- use it as a private workflow,
+- identify likely files before reading broadly,
+- inspect only the highest-probability files first,
+- make the smallest safe implementation,
+- do not output long reasoning, XML blocks, or internal planning unless explicitly requested.
 ## Standing project rules
 
 - For DOGZILLA robot behavior, navigation, LiDAR, mapping, patrol, obstacle avoidance, and waypoint work, check `docs/DOGZILLA-main` and the relevant Yahboom PDFs before inventing a new approach.
@@ -156,3 +184,20 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 - For debugging, use raw command without rtk prefix
 - `rtk proxy <cmd>` runs command without filtering but tracks usage
 <!-- /headroom:rtk-instructions -->
+
+## Perform a context-doc maintenance pass.
+
+Review the code changes in this branch/session and update the smallest relevant files under `/docs`.
+
+Rules:
+- Do not rewrite docs wholesale.
+- Do not add noisy changelog-style notes.
+- Remove or correct stale context.
+- Keep docs optimized for future coding agents.
+- Prefer durable architecture, APIs, gotchas, setup steps, and test instructions.
+- If no docs need updates, say exactly: "Docs checked; no updates needed."
+
+Then summarize:
+1. Docs changed
+2. Why each doc changed
+3. Any docs intentionally left unchanged

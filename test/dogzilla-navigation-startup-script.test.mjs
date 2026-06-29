@@ -13,6 +13,9 @@ const SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-navigation-ssh.ps1', 
 const BRIDGE_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-bridge-ssh.ps1', import.meta.url)
 const YOLO_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-yolo-vision-ssh.ps1', import.meta.url)
 const AUDIO_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-audio-cue-ssh.ps1', import.meta.url)
+const MAP_POSE_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-map-pose-ssh.ps1', import.meta.url)
+const NOIMU_LOCALIZATION_LUA_PATH = new URL('../sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu_localization.lua', import.meta.url)
+const IMU_LOCALIZATION_LUA_PATH = new URL('../sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization.lua', import.meta.url)
 const YOLO_SERVER_PATH = new URL('../sidecars/dogzilla_yolo_vision/server.py', import.meta.url)
 
 test('DOGZILLA Nav2 startup generates doorway-tuned params from upstream defaults', async () => {
@@ -156,9 +159,8 @@ test('DOGZILLA Nav2 startup repairs missing odom TF through map-pose localizatio
 test('DOGZILLA map-pose startup waits for fresh pose after Cartographer restart', async () => {
   const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /started_at = time\.time\(\)/)
-  assert.match(script, /received_at >= started_at - 1\.0/)
-  assert.match(script, /age_sec <= 2\.0/)
+  assert.match(script, /tf_buffer\.lookup_transform\("map", "base_link", rclpy\.time\.Time\(\)\)/)
+  assert.match(script, /"frame": "map"/)
 })
 
 test('DOGZILLA map-pose startup cleanly restarts stale Cartographer processes', async () => {
@@ -359,6 +361,110 @@ test('all tracked .lua files have no CRLF bytes', async () => {
 test('.gitattributes enforces LF for .sh files', async () => {
   const attrCheck = execSync('git check-attr eol -- sidecars/dogzilla_navigation/start-navigation-in-container.sh', { encoding: 'utf-8' }).trim()
   assert.match(attrCheck, /eol: lf$/)
+})
+
+test('DOGZILLA localization lua configs widen real-time scan matcher window', async () => {
+  const noimu = await readFile(NOIMU_LOCALIZATION_LUA_PATH, 'utf-8')
+  const imu = await readFile(IMU_LOCALIZATION_LUA_PATH, 'utf-8')
+
+  for (const script of [noimu, imu]) {
+    assert.match(script, /real_time_correlative_scan_matcher\.linear_search_window = 0\.6/)
+    assert.match(script, /real_time_correlative_scan_matcher\.angular_search_window = math\.rad\(45\.\)/)
+  }
+})
+
+test('DOGZILLA map-pose startup publishes /initialpose in localization mode', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /DOGZILLA_INITIAL_POSE_X="\$\{DOGZILLA_INITIAL_POSE_X:-0\}"/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_Y="\$\{DOGZILLA_INITIAL_POSE_Y:-0\}"/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_YAW="\$\{DOGZILLA_INITIAL_POSE_YAW:-0\}"/)
+  assert.match(script, /if \[ "\$mode" = "localization" \] && \[ "\$DOGZILLA_INITIAL_POSE_SKIP" != "1" \]/)
+  assert.match(script, /create_publisher\(PoseWithCovarianceStamped, "\/initialpose", 1\)/)
+  assert.match(script, /msg\.header\.frame_id = "map"/)
+})
+
+test('DOGZILLA Nav2 startup forwards initial pose env vars to map-pose startup', async () => {
+  const script = await readFile(SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /DOGZILLA_INITIAL_POSE_X="\$\{DOGZILLA_INITIAL_POSE_X:-0\}" \\\n/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_Y="\$\{DOGZILLA_INITIAL_POSE_Y:-0\}" \\\n/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_YAW="\$\{DOGZILLA_INITIAL_POSE_YAW:-0\}" \\\n/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_SKIP="\$\{DOGZILLA_INITIAL_POSE_SKIP:-0\}" \\\n/)
+})
+
+test('DOGZILLA map-pose SSH launcher reads saved origin and passes initial pose env vars', async () => {
+  const script = await readFile(MAP_POSE_SSH_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /output\/app-cache\/dogzilla-map-origin\.json/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_X=\$initialX/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_Y=\$initialY/)
+  assert.match(script, /DOGZILLA_INITIAL_POSE_YAW=\$initialYaw/)
+  assert.match(script, /\$initialPoseEnv/)
+})
+
+test('DOGZILLA map-pose SSH launcher targets own container and falls back to systemd', async () => {
+  const script = await readFile(MAP_POSE_SSH_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /\[string\]\$ContainerName = "robodoge-map-pose"/)
+  assert.doesNotMatch(script, /\[string\]\$ContainerName = "robodoge-lidar-bridge"/)
+  assert.match(script, /DOGZILLA_DOCKER_EXEC=1/)
+  assert.match(script, /docker exec .* \$ContainerName bash \$containerScript/)
+  assert.match(script, /systemctl start robodoge-map-pose\.service/)
+})
+
+const DOCKERFILE_PATH = new URL('../sidecars/dogzilla_map_pose/Dockerfile', import.meta.url)
+const INSTALL_SCRIPT_PATH = new URL('../scripts/install-dogzilla-boot-services-ssh.ps1', import.meta.url)
+
+test('DOGZILLA Cartographer/Nav2 Dockerfile pre-bakes required packages', async () => {
+  const dockerfile = await readFile(DOCKERFILE_PATH, 'utf-8')
+
+  assert.match(dockerfile, /FROM yahboomtechnology\/ros-humble/)
+  assert.match(dockerfile, /ros-humble-cartographer-ros/)
+  assert.match(dockerfile, /ros-humble-cartographer-ros-msgs/)
+  assert.match(dockerfile, /ros-humble-nav2-msgs/)
+  assert.match(dockerfile, /ros-humble-nav2-bringup/)
+  assert.match(dockerfile, /ros-humble-navigation2/)
+})
+
+test('DOGZILLA map-pose startup waits for rosbridge container readiness', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /POSE_HOST="\$\{DOGZILLA_POSE_HOST:-127\.0\.0\.1\}"/)
+  assert.match(script, /POSE_PORT="\$\{POSE_PORT:-9090\}"/)
+  assert.doesNotMatch(script, /curl -sf "http:\/\/\$\{POSE_HOST\}:\$\{POSE_PORT\}\/healthz"/)
+  assert.match(script, /s\.connect\(\(sys\.argv\[1\], int\(sys\.argv\[2\]\)\)\)/)
+  assert.match(script, /for _ in \$\(seq 1 30\)/)
+})
+
+test('DOGZILLA map-pose startup keeps container alive while Cartographer runs', async () => {
+  const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /DOGZILLA_DOCKER_EXEC/)
+  assert.match(script, /Map-pose startup complete; monitoring Cartographer/)
+  assert.match(script, /while pgrep -f "\[c\]artographer_node" >\/dev\/null 2>&1; do/)
+  assert.match(script, /Cartographer process not found; exiting so systemd can restart/)
+  assert.match(script, /exit 1/)
+})
+
+test('DOGZILLA boot service install defaults to pre-baked Cartographer/Nav2 image', async () => {
+  const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /\[string\]\$DockerImage = "robodoge\/ros-humble-cartographer:1\.0"/)
+  assert.match(script, /\[switch\]\$BuildImage/)
+  assert.match(script, /docker build -t "\$\{DOCKER_IMAGE\}" -f "\$REMOTE_ROOT\/sidecars\/dogzilla_map_pose\/Dockerfile"/)
+})
+
+test('DOGZILLA boot service install runs map-pose in its own container', async () => {
+  const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+
+  assert.doesNotMatch(script, /ExecStart=\/usr\/bin\/docker exec .* robodoge-lidar-bridge bash .*start-map-pose-in-container\.sh/)
+  assert.match(script, /ExecStartPre=-\/usr\/bin\/docker rm -f robodoge-map-pose/)
+  assert.match(script, /ExecStart=\/usr\/bin\/docker run --rm --name robodoge-map-pose/)
+  assert.match(script, /ExecStop=-\/usr\/bin\/docker rm -f robodoge-map-pose/)
+  assert.match(script, /Type=simple/)
+  assert.doesNotMatch(script, /RemainAfterExit=yes/)
+  assert.match(script, /bash sidecars\/dogzilla_map_pose\/start-map-pose-in-container\.sh/)
 })
 
 function nodeBlock(source, packageName) {

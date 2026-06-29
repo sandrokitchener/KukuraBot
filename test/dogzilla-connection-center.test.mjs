@@ -31,10 +31,12 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.vision.streamUrl, 'http://192.168.8.88:8894/stream.mjpg')
   assert.equal(config.audio.enabled, false)
   assert.equal(config.audio.cueUrl, 'http://192.168.8.88:8895/cue')
+  assert.equal(config.audio.volumeUrl, 'http://192.168.8.88:8895/volume')
+  assert.equal(config.audio.healthUrl, 'http://192.168.8.88:8895/healthz')
   assert.equal(config.lidar.enabled, false)
   assert.equal(config.lidar.serialPort, '/dev/ttyAMA1')
-  assert.equal(config.lidar.scanUrl, 'http://192.168.8.88:8896/scan')
-  assert.equal(config.lidar.poseUrl, 'http://192.168.8.88:8896/pose')
+  assert.equal(config.lidar.transport, 'rosbridge')
+  assert.equal(config.lidar.rosbridgeUrl, 'ws://192.168.8.88:9090')
   assert.equal(config.lidar.proxyScanPath, '/api/dogzilla/lidar/scan')
   assert.equal(config.lidar.proxyPosePath, '/api/dogzilla/pose')
 })
@@ -96,7 +98,7 @@ test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services ind
     },
     lidar: {
       enabled: true,
-      port: 8896,
+      rosbridgePort: 9090,
     },
   })
 
@@ -122,6 +124,8 @@ test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services ind
   assert.ok(audioPlan.args.includes('-Port'))
   assert.ok(audioPlan.args.includes('8895'))
   assert.ok(audioPlan.args.includes('-Background'))
+  assert.ok(audioPlan.args.includes('-DefaultVolume'))
+  assert.equal(audioPlan.args[audioPlan.args.indexOf('-DefaultVolume') + 1], '0.75')
   assert.ok(yoloPlan.args.some((arg) => arg.endsWith('start-dogzilla-yolo-vision-ssh.ps1')))
   assert.ok(yoloPlan.args.includes('-SshPort'))
   assert.equal(yoloPlan.args[yoloPlan.args.indexOf('-SshPort') + 1], '22')
@@ -131,11 +135,11 @@ test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services ind
   assert.equal(yoloPlan.args[yoloPlan.args.indexOf('-CameraUrl') + 1], '/dev/video0')
   assert.ok(yoloPlan.args.includes('-Background'))
   assert.equal(yoloPlan.args.includes('-ModelPath'), false)
-  assert.ok(lidarPlan.args.some((arg) => arg.endsWith('start-dogzilla-lidar-ssh.ps1')))
+  assert.ok(lidarPlan.args.some((arg) => arg.endsWith('start-dogzilla-rosbridge-ssh.ps1')))
   assert.ok(lidarPlan.args.includes('-SshPort'))
   assert.equal(lidarPlan.args[lidarPlan.args.indexOf('-SshPort') + 1], '22')
   assert.ok(lidarPlan.args.includes('-Port'))
-  assert.ok(lidarPlan.args.includes('8896'))
+  assert.ok(lidarPlan.args.includes('9090'))
   assert.ok(lidarPlan.args.includes('-SerialPort'))
   assert.equal(lidarPlan.args[lidarPlan.args.indexOf('-SerialPort') + 1], '/dev/ttyAMA1')
   assert.ok(lidarPlan.args.includes('-Background'))
@@ -151,7 +155,7 @@ test('buildDogzillaActionPlan starts map pose localization through the lidar con
     remoteRoot: '/home/pi/robodoge',
     lidar: {
       enabled: true,
-      port: 8896,
+      rosbridgePort: 9090,
     },
   })
   const plan = buildDogzillaActionPlan('start-map-pose', config)
@@ -164,7 +168,7 @@ test('buildDogzillaActionPlan starts map pose localization through the lidar con
   assert.ok(plan.args.includes('-RemoteRoot'))
   assert.equal(plan.args[plan.args.indexOf('-RemoteRoot') + 1], '/home/pi/robodoge')
   assert.ok(plan.args.includes('-PosePort'))
-  assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '8896')
+  assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '9090')
   assert.ok(plan.args.includes('-Mode'))
   assert.equal(plan.args[plan.args.indexOf('-Mode') + 1], 'auto')
 })
@@ -179,7 +183,7 @@ test('buildDogzillaActionPlan starts waypoint navigation through the lidar conta
     remoteRoot: '/home/pi/robodoge',
     lidar: {
       enabled: true,
-      port: 8896,
+      rosbridgePort: 9090,
     },
   })
   const plan = buildDogzillaActionPlan('start-navigation', config)
@@ -190,7 +194,7 @@ test('buildDogzillaActionPlan starts waypoint navigation through the lidar conta
   assert.ok(plan.args.includes('-RemoteRoot'))
   assert.equal(plan.args[plan.args.indexOf('-RemoteRoot') + 1], '/home/pi/robodoge')
   assert.ok(plan.args.includes('-PosePort'))
-  assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '8896')
+  assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '9090')
 })
 
 test('buildDogzillaActionPlan passes Nav2 yaw goal tolerance to navigation startup', () => {
@@ -203,7 +207,7 @@ test('buildDogzillaActionPlan passes Nav2 yaw goal tolerance to navigation start
     remoteRoot: '/home/pi/robodoge',
     lidar: {
       enabled: true,
-      port: 8896,
+      rosbridgePort: 9090,
     },
   })
   const plan = buildDogzillaActionPlan('start-navigation', config, {
@@ -260,7 +264,7 @@ test('buildDogzillaActionPlan exposes explicit map mapping and save actions', ()
     remoteRoot: '/home/pi/robodoge',
     lidar: {
       enabled: true,
-      port: 8896,
+      rosbridgePort: 9090,
     },
   })
   const mappingPlan = buildDogzillaActionPlan('start-map-pose-mapping', config)

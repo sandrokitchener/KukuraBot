@@ -1,0 +1,262 @@
+
+> questing-beast@0.1.0 start
+> node scripts/start-clean.mjs
+
+Clean startup reset found no stale local Robo-Doge processes.
+Questing Beast startup at http://127.0.0.1:3037...
+Loading runtime config...
+Starting services...
+Starting speech sidecar via python C:\Users\sandr\OneDrive\Documents\Robo-Doge\sidecars\parakeet_onnx_bridge\server.py --host 127.0.0.1 --port 8893
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+Starting DOGZILLA YOLO object recognition on app startup.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition ready at http://10.0.4.32:8894/healthz.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+Checking waypoint navigator...
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+Ensuring DOGZILLA map pose localization before Nav2 startup.
+Waiting up to 15s for DOGZILLA Cartographer pose to stabilize (waypointSafe=true).
+DOGZILLA pose waypointSafe=true after 27ms.
+Starting DOGZILLA waypoint navigator on app startup.
+DOGZILLA Nav2 startup readiness after repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator ready at http://10.0.4.32:8893/healthz.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+Running robot startup sequence...
+Robot startup sequence ok: audio=ok; gesture=sent.
+Starting Questing Beast server
+Launcher ready. App URL: http://127.0.0.1:3037
+
+     |\_/|
+     | @ @   Woof!
+     |   <>              _
+     |  _/\------____ ((| |))
+     |               `--' |
+ ____|_       ___|   |___.'
+/_/_____/____/_______|
+Questing Beast test app running at http://0.0.0.0:3037 using Local Ollama (nemotron-3-nano:latest)
+
+     |\_/|
+     | @ @   Woof!
+     |   <>              _
+     |  _/\------____ ((| |))
+     |               `--' |
+ ____|_       ___|   |___.'
+/_/_____/____/_______|
+Warming Local Ollama (nemotron-3-nano:latest)...
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition already ready at http://10.0.4.32:8894/healthz. Reusing existing process.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator already ready at http://10.0.4.32:8893/healthz. Reusing existing Nav2 server.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+Warmed Local Ollama (nemotron-3-nano:latest).
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition already ready at http://10.0.4.32:8894/healthz. Reusing existing process.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+DOGZILLA Nav2 lifecycle/odom/scan/pose healthy; action server still discovering. Waiting instead of restarting.
+DOGZILLA Nav2 readiness after discovery wait:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+Ensuring DOGZILLA map pose localization before Nav2 startup.
+Waiting up to 15s for DOGZILLA Cartographer pose to stabilize (waypointSafe=true).
+DOGZILLA pose waypointSafe=true after 15ms.
+Starting DOGZILLA waypoint navigator on app startup.
+DOGZILLA Nav2 startup readiness after repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator ready at http://10.0.4.32:8893/healthz.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+DOGZILLA startup watchdog monitor in repair cooldown (27s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (15s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (3s remaining). Skipping tick.
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+Starting DOGZILLA YOLO object recognition on app startup.
+DOGZILLA YOLO object recognition ready at http://10.0.4.32:8894/healthz.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator already ready at http://10.0.4.32:8893/healthz. Reusing existing Nav2 server.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+DOGZILLA startup watchdog monitor in repair cooldown (29s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (17s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (5s remaining). Skipping tick.
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition already ready at http://10.0.4.32:8894/healthz. Reusing existing process.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+Ensuring DOGZILLA map pose localization before Nav2 startup.
+Waiting up to 15s for DOGZILLA Cartographer pose to stabilize (waypointSafe=true).
+DOGZILLA pose waypointSafe=true after 20ms.
+Starting DOGZILLA waypoint navigator on app startup.
+DOGZILLA Nav2 startup readiness after repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator ready at http://10.0.4.32:8893/healthz.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+DOGZILLA startup watchdog monitor in repair cooldown (25s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (13s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (1s remaining). Skipping tick.
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition already ready at http://10.0.4.32:8894/healthz. Reusing existing process.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+Ensuring DOGZILLA map pose localization before Nav2 startup.
+Waiting up to 15s for DOGZILLA Cartographer pose to stabilize (waypointSafe=true).
+DOGZILLA pose waypointSafe=true after 18ms.
+Starting DOGZILLA waypoint navigator on app startup.
+DOGZILLA Nav2 startup readiness after repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator ready at http://10.0.4.32:8893/healthz.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+DOGZILLA startup watchdog monitor in repair cooldown (23s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (11s remaining). Skipping tick.
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition already ready at http://10.0.4.32:8894/healthz. Reusing existing process.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+Ensuring DOGZILLA map pose localization before Nav2 startup.
+Waiting up to 15s for DOGZILLA Cartographer pose to stabilize (waypointSafe=true).
+DOGZILLA pose waypointSafe=true after 24ms.
+Starting DOGZILLA waypoint navigator on app startup.
+DOGZILLA Nav2 startup readiness after repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator ready at http://10.0.4.32:8893/healthz.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+DOGZILLA startup watchdog monitor in repair cooldown (23s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (11s remaining). Skipping tick.
+DOGZILLA startup watchdog checking support services.
+DOGZILLA Pi speaker cues already ready at http://10.0.4.32:8895/healthz. Reusing existing process.
+DOGZILLA YOLO object recognition already ready at http://10.0.4.32:8894/healthz. Reusing existing process.
+DOGZILLA lidar bridge already ready at http://10.0.4.32:8896/healthz. Reusing existing process.
+DOGZILLA map pose localization already ready at http://10.0.4.32:8896/pose. Reusing existing process.
+DOGZILLA startup watchdog checking direct bridge.
+DOGZILLA direct bridge already ready at http://10.0.4.32:8893/healthz. Reusing existing process.
+DOGZILLA startup watchdog checking Nav2 waypoint navigation.
+DOGZILLA Nav2 startup readiness before repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+Ensuring DOGZILLA map pose localization before Nav2 startup.
+Waiting up to 15s for DOGZILLA Cartographer pose to stabilize (waypointSafe=true).
+DOGZILLA pose waypointSafe=true after 24ms.
+Starting DOGZILLA waypoint navigator on app startup.
+DOGZILLA Nav2 startup readiness after repair:
+  [ok] Nav2 action server: NavigateToPose action server available.
+  [ok] /odom odom samples: /odom publishes live samples (1 publisher(s)).
+  [ok] odom->base TF: odom->base_link/base_footprint TF available.
+  [ok] Nav2 lifecycle nodes: Nav2 lifecycle nodes active.
+  [ok] /scan_nav2 filtered scan: /scan_nav2 has 1 publisher(s) and 2 subscriber(s).
+  [ok] map-frame pose: Map-frame pose waypoint-safe.
+  [ok] Nav2 waypoint readiness: ready.
+DOGZILLA waypoint navigator ready at http://10.0.4.32:8893/healthz.
+DOGZILLA map origin has matching map identity (fingerprint=c0a5a870cefd...). Keeping existing origin coordinates — use capture-dogzilla-map-pose to change the origin.
+DOGZILLA startup watchdog ready.
+DOGZILLA startup watchdog monitor in repair cooldown (23s remaining). Skipping tick.
+DOGZILLA startup watchdog monitor in repair cooldown (11s remaining). Skipping tick.

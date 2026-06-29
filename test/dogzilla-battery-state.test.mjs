@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   createDogzillaBatteryStateTracker,
+  normalizeLastKnownBattery,
   normalizeDogzillaBatterySample,
 } from '../lib/dogzilla-battery-state.mjs'
 
@@ -41,4 +42,46 @@ test('DOGZILLA battery tracker keeps positive out-of-range readings displayable'
   assert.equal(failed.status, 'last-known')
   assert.equal(failed.unit, 'raw')
   assert.equal(failed.lastKnownAt, '2026-06-04T10:00:00.000Z')
+})
+
+test('DOGZILLA battery tracker can seed last-known battery from persisted state', () => {
+  const tracker = createDogzillaBatteryStateTracker({
+    lastKnown: {
+      value: 41,
+      raw: 41,
+      unit: 'percent',
+      lastKnownAt: '2026-06-04T10:00:00.000Z',
+    },
+  })
+
+  const failed = tracker.resolve(normalizeDogzillaBatterySample(null), '2026-06-04T10:00:01.000Z')
+
+  assert.equal(failed.value, 41)
+  assert.equal(failed.status, 'last-known')
+  assert.equal(failed.unit, 'percent')
+  assert.equal(failed.lastKnownAt, '2026-06-04T10:00:00.000Z')
+})
+
+test('DOGZILLA battery tracker reports valid samples to persistence callback', () => {
+  const updates = []
+  const tracker = createDogzillaBatteryStateTracker({
+    onUpdate: (state) => updates.push(state),
+  })
+
+  tracker.resolve(normalizeDogzillaBatterySample(62), '2026-06-04T10:00:00.000Z')
+  tracker.resolve(normalizeDogzillaBatterySample(0), '2026-06-04T10:00:01.000Z')
+
+  assert.deepEqual(updates, [
+    {
+      value: 62,
+      raw: 62,
+      unit: 'percent',
+      lastKnownAt: '2026-06-04T10:00:00.000Z',
+    },
+  ])
+})
+
+test('normalizeLastKnownBattery rejects empty persisted state', () => {
+  assert.equal(normalizeLastKnownBattery({ value: 0, lastKnownAt: 'bad' }), null)
+  assert.equal(normalizeLastKnownBattery(null), null)
 })

@@ -2,6 +2,8 @@ const ROBOT_MAP_RANGE_METERS = 3
 
 const MAP_CELL_FREE = 0
 const MAP_CELL_UNKNOWN = -1
+const MAP_CELL_FREE_THRESHOLD = 50
+const MAP_CELL_OCCUPIED_THRESHOLD = 65
 const EGO_VIEW_MAX_RANGE_METERS = 6
 const EGO_HISTORY_MS = 1_800
 const MAX_EGO_HISTORY_POINTS = 1_200
@@ -26,6 +28,27 @@ function rangeToRGBA(rangeNorm, alpha = 1) {
     b = Math.round(mid[2] + (far[2] - mid[2]) * u)
   }
   return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`
+}
+
+export function occupancyGridCellToRGBA(cell) {
+  if (cell === MAP_CELL_UNKNOWN) {
+    return { r: 206, g: 208, b: 205, a: 255 }
+  } else if (cell <= MAP_CELL_FREE_THRESHOLD) {
+    return { r: 246, g: 247, b: 242, a: 255 }
+  } else if (cell >= MAP_CELL_OCCUPIED_THRESHOLD) {
+    const t = Math.min(100, cell) / 100
+    return {
+      r: Math.round(246 - t * 230),
+      g: Math.round(247 - t * 230),
+      b: Math.round(242 - t * 224),
+      a: 255,
+    }
+  } else {
+    // Cells with probability between the free and occupied thresholds are
+    // uncertain; render them as unknown (gray) so the minimap matches the
+    // thresholded saved PGM rather than showing noisy Cartographer probabilities.
+    return { r: 206, g: 208, b: 205, a: 255 }
+  }
 }
 
 export function createRobotMapRenderer({
@@ -54,6 +77,10 @@ export function createRobotMapRenderer({
   let lastMapCanvasWidth = 0
   let lastMapCanvasHeight = 0
   let appMapOriginCache = null
+  let previousGrid = null
+  let cellDeltaFlashes = []
+  let lastDeltaCount = 0
+  let lastDeltaShownAt = 0
 
   const ZOOM_MIN = 0.5
   const ZOOM_MAX = 4
@@ -164,6 +191,7 @@ export function createRobotMapRenderer({
       oy: mapY - sy * appPose.x - cy * appPose.y,
       cy,
       sy,
+      yaw: oyaw,
     }
   }
 
@@ -173,13 +201,16 @@ export function createRobotMapRenderer({
     const x = toFiniteNumber(pose.x)
     const y = toFiniteNumber(pose.y)
     if (!Number.isFinite(x) || !Number.isFinite(y)) { return null }
-    const { ox, oy, cy, sy } = appMapOriginCache
-    const theta = toFiniteNumber(pose.theta ?? pose.yaw)
+    const { ox, oy, cy, sy, yaw: originYaw } = appMapOriginCache
+    const appTheta = toFiniteNumber(pose.theta ?? pose.yaw)
+    const mapTheta = Number.isFinite(originYaw) && Number.isFinite(appTheta)
+      ? Math.atan2(Math.sin(appTheta + originYaw), Math.cos(appTheta + originYaw))
+      : appTheta
     return {
       x: ox + cy * x - sy * y,
       y: oy + sy * x + cy * y,
-      theta,
-      yaw: theta,
+      theta: mapTheta,
+      yaw: mapTheta,
       frame: 'map',
     }
   }
@@ -209,6 +240,9 @@ export function createRobotMapRenderer({
       mapGrid = null
       mapGridMeta = null
       cachedGridCanvas = null
+      previousGrid = null
+      cellDeltaFlashes = []
+      lastDeltaCount = 0
       return
     }
 
@@ -226,8 +260,37 @@ export function createRobotMapRenderer({
         originX: mapPayload.origin.x,
         originY: mapPayload.origin.y,
         cells,
+        occupiedCount: typeof mapPayload.occupiedCount === 'number' ? mapPayload.occupiedCount : 0,
       }
       mapGridMeta = `map ${mapPayload.width}x${mapPayload.height} @ ${mapPayload.resolution}m/px`
+
+      if (previousGrid && previousGrid.width === mapGrid.width && previousGrid.height === mapGrid.height) {
+        const prev = previousGrid.cells
+        const curr = cells
+        const now = Date.now()
+        let newlyOccupied = 0
+        const newFlashes = []
+        for (let row = 0; row < mapGrid.height && newlyOccupied < 4000; row++) {
+          for (let col = 0; col < mapGrid.width && newlyOccupied < 4000; col++) {
+            const idx = row * mapGrid.width + col
+            if (curr[idx] >= 50 && prev[idx] < 50) {
+              newFlashes.push({ col, row, ts: now })
+              newlyOccupied++
+            }
+          }
+        }
+        if (newlyOccupied > 0) {
+          cellDeltaFlashes = cellDeltaFlashes.concat(newFlashes)
+          lastDeltaCount = newlyOccupied
+          lastDeltaShownAt = now
+        }
+      }
+      previousGrid = {
+        width: mapGrid.width,
+        height: mapGrid.height,
+        cells: new Int8Array(cells),
+      }
+
       cacheOccupancyGrid()
     } catch {
       mapGrid = null
@@ -253,17 +316,8 @@ export function createRobotMapRenderer({
       for (let col = 0; col < gridW; col++) {
         const cell = cells[row * gridW + col]
         const idx = ((gridH - 1 - row) * gridW + col) * 4
-        if (cell === MAP_CELL_UNKNOWN) {
-          data[idx] = 206; data[idx + 1] = 208; data[idx + 2] = 205; data[idx + 3] = 255
-        } else if (cell === MAP_CELL_FREE) {
-          data[idx] = 246; data[idx + 1] = 247; data[idx + 2] = 242; data[idx + 3] = 255
-        } else {
-          const t = Math.min(100, Math.max(0, cell)) / 100
-          data[idx] = Math.round(246 - t * 230)
-          data[idx + 1] = Math.round(247 - t * 230)
-          data[idx + 2] = Math.round(242 - t * 224)
-          data[idx + 3] = 255
-        }
+        const { r, g, b, a } = occupancyGridCellToRGBA(cell)
+        data[idx] = r; data[idx + 1] = g; data[idx + 2] = b; data[idx + 3] = a
       }
     }
     ctx.putImageData(imageData, 0, 0)
@@ -688,6 +742,70 @@ export function createRobotMapRenderer({
     // Layer 3: Occupancy grid as primary map background (cached offscreen canvas)
     renderOccupancyGrid(context, width, height, view)
 
+    // Layer 3.5: Diff overlay — highlight newly occupied cells (red flash, 1s fade)
+    if (mapGrid && cellDeltaFlashes.length > 0) {
+      const nowPrune = Date.now()
+      cellDeltaFlashes = cellDeltaFlashes.filter((f) => nowPrune - f.ts < 1000)
+      if (cellDeltaFlashes.length > 0) {
+        const { resolution, originX, originY } = mapGrid
+        const halfRangeX = view.rangeMeters
+        const halfRangeY = view.rangeYMeters || halfRangeX
+        const xMin = view.centerX - halfRangeX
+        const yMax = view.centerY + halfRangeY
+        const scaleX = width / (halfRangeX * 2)
+        const scaleY = height / (halfRangeY * 2)
+        context.save()
+        context.imageSmoothingEnabled = false
+        for (const flash of cellDeltaFlashes) {
+          const age = (nowPrune - flash.ts) / 1000
+          const alpha = (1 - age) * 0.85
+          const cx = originX + (flash.col + 0.5) * resolution
+          const cy = originY + (flash.row + 0.5) * resolution
+          const px = (cx - xMin) * scaleX
+          const py = (yMax - cy) * scaleY
+          if (px >= 0 && px < width && py >= 0 && py < height) {
+            const cellPixelW = Math.max(1, resolution * scaleX)
+            const cellPixelH = Math.max(1, resolution * scaleY)
+            context.fillStyle = `rgba(220, 50, 50, ${alpha.toFixed(3)})`
+            context.fillRect(px - cellPixelW / 2, py - cellPixelH / 2, cellPixelW, cellPixelH)
+          }
+        }
+        context.restore()
+      }
+
+      // Green "Δ +N cells" badge
+      if (lastDeltaShownAt > nowPrune - 1500 && lastDeltaCount > 0) {
+        const badgeAge = (nowPrune - lastDeltaShownAt) / 1500
+        const badgeAlpha = Math.max(0, 1 - badgeAge * 1.2).toFixed(2)
+        context.save()
+        context.font = 'bold 11px sans-serif'
+        context.textAlign = 'left'
+        context.textBaseline = 'top'
+        const badgeText = `Δ +${lastDeltaCount} cells`
+        const textMetrics = context.measureText(badgeText)
+        const badgeW = textMetrics.width + 12
+        const badgeH = 20
+        const badgeX = 6
+        const badgeY = 6
+        context.fillStyle = `rgba(30, 130, 60, ${badgeAlpha})`
+        context.beginPath()
+        context.moveTo(badgeX + 4, badgeY)
+        context.lineTo(badgeX + badgeW - 4, badgeY)
+        context.arcTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + 4, 4)
+        context.lineTo(badgeX + badgeW, badgeY + badgeH - 4)
+        context.arcTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - 4, badgeY + badgeH, 4)
+        context.lineTo(badgeX + 4, badgeY + badgeH)
+        context.arcTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - 4, 4)
+        context.lineTo(badgeX, badgeY + 4)
+        context.arcTo(badgeX, badgeY, badgeX + 4, badgeY, 4)
+        context.closePath()
+        context.fill()
+        context.fillStyle = `rgba(255, 255, 255, ${Math.min(1, badgeAlpha * 1.1).toFixed(2)})`
+        context.fillText(badgeText, badgeX + 6, badgeY + 3)
+        context.restore()
+      }
+    }
+
     if (!robotPose) {
       if (points.length) {
         drawCenteredLidarScan(context, points, {
@@ -926,6 +1044,70 @@ export function createRobotMapRenderer({
     setZoom,
     streamPath: () => getRuntimeConfig?.().robotRuntime?.stateStreamPath || defaultRobotRuntime?.stateStreamPath,
   }
+}
+
+// --- Map status formatter (exported for testing and use by app.js) ---
+
+export function formatMapStatusPayload(mapPayload, healthPayload) {
+  const result = {
+    mode: 'no-map',
+    modeLabel: 'No map',
+    fresh: false,
+    lastUpdateAgeSec: null,
+    freshnessLabel: '',
+    occupiedCount: 0,
+    freeCount: 0,
+    bboxLabel: '',
+  }
+
+  if (!mapPayload || mapPayload.ok !== true) {
+    result.modeLabel = mapPayload?.status === 'no-map' ? 'No map' : 'Map unavailable'
+    return result
+  }
+
+  const mapMode = (
+    healthPayload?.map?.mode
+    || (healthPayload?.body?.runtime?.map?.mode)
+    || 'unknown'
+  )
+  result.mode = mapMode
+  result.modeLabel = mapMode === 'mapping' ? 'Mapping' : mapMode === 'localization' ? 'Localizing' : mapMode
+
+  const ageSec = mapPayload.receivedAtAgeSec
+  if (typeof ageSec === 'number' && Number.isFinite(ageSec)) {
+    result.lastUpdateAgeSec = ageSec
+    result.fresh = ageSec <= 5  // fresh if last update within 5 seconds
+    result.freshnessLabel = ageSec < 1
+      ? `Last update <1s ago`
+      : ageSec < 10
+        ? `Last update ${ageSec.toFixed(1)}s ago`
+        : `Last update ${Math.round(ageSec)}s ago`
+  }
+
+  result.occupiedCount = typeof mapPayload.occupiedCount === 'number' ? mapPayload.occupiedCount : 0
+  result.freeCount = typeof mapPayload.freeCount === 'number' ? mapPayload.freeCount : 0
+  const unknownCount = typeof mapPayload.unknownCount === 'number' ? mapPayload.unknownCount : 0
+  if (result.occupiedCount > 0 || result.freeCount > 0) {
+    result.cellCountsLabel = `${result.occupiedCount.toLocaleString()} occupied / ${result.freeCount.toLocaleString()} free`
+    if (unknownCount > 0) {
+      result.cellCountsLabel += ` (${unknownCount.toLocaleString()} unknown)`
+    }
+  }
+
+  const bbox = mapPayload.bbox
+  if (bbox && typeof bbox === 'object') {
+    const w = typeof bbox.maxX === 'number' && typeof bbox.minX === 'number'
+      ? Math.abs(bbox.maxX - bbox.minX)
+      : 0
+    const h = typeof bbox.maxY === 'number' && typeof bbox.minY === 'number'
+      ? Math.abs(bbox.maxY - bbox.minY)
+      : 0
+    if (w > 0 && h > 0) {
+      result.bboxLabel = `Bounds ${w.toFixed(1)}×${h.toFixed(1)}m explored`
+    }
+  }
+
+  return result
 }
 
 export function getRenderableRobotMapWaypoints(waypoints) {

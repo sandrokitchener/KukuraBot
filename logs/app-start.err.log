@@ -1,0 +1,20 @@
+Missing Python dependency: onnx_asr. Install with: pip install "onnx-asr[cpu,hub]"
+Speech sidecar unavailable; continuing without managed speech sidecar. Speech sidecar exited early with code 1.
+  [blocked] Nav2 action server: Nav2 NavigateToPose action server is not running in the ROS graph for action 'navigate_to_pose'
+  [blocked] /odom odom samples: No publishers on /odom
+  [blocked] Nav2 lifecycle nodes: Nav2 lifecycle nodes are not active: controller_server, planner_server, bt_navigator, behavior_server
+  [blocked] /scan_nav2 filtered scan: No LaserScan publishers visible on /scan_nav2
+  [blocked] Nav2 waypoint readiness: Nav2 NavigateToPose action server is not running in the ROS graph for action 'navigate_to_pose'; No publishers on /odom; Nav2 lifecycle nodes are not active: controller_server, planner_server, bt_navigator, behavior_server; No LaserScan publishers visible on /scan_nav2
+  [blocked] Nav2 action server: NavigateToPose action server is still being discovered (lifecycle/odom/scan healthy; waiting for DDS discovery).
+  [blocked] Nav2 waypoint readiness: Nav2 NavigateToPose action server is not running in the ROS graph for action 'navigate_to_pose' (discovering; lifecycle/odom/scan/pose healthy)
+  [blocked] odom->base TF: /odom publishes samples, but odom->base_link/base_footprint TF is unavailable.
+  [blocked] Nav2 waypoint readiness: /odom publishes samples, but odom->base_link/base_footprint TF is unavailable.
+DOGZILLA Nav2 action server did not appear after discovery wait; will restart navigation.
+  [blocked] Nav2 lifecycle nodes: Nav2 lifecycle nodes are not active: planner_server
+  [blocked] Nav2 waypoint readiness: Nav2 lifecycle nodes are not active: planner_server
+  [blocked] Nav2 lifecycle nodes: Nav2 lifecycle nodes are not active: behavior_server
+  [blocked] Nav2 waypoint readiness: Nav2 lifecycle nodes are not active: behavior_server
+  [blocked] Nav2 lifecycle nodes: Nav2 lifecycle nodes are not active: planner_server, bt_navigator, behavior_server
+  [blocked] Nav2 waypoint readiness: Nav2 lifecycle nodes are not active: planner_server, bt_navigator, behavior_server
+  [blocked] Nav2 lifecycle nodes: Nav2 lifecycle nodes are not active: controller_server, planner_server, bt_navigator, behavior_server
+  [blocked] Nav2 waypoint readiness: Nav2 lifecycle nodes are not active: controller_server, planner_server, bt_navigator, behavior_server

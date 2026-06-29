@@ -41,8 +41,10 @@
 
 .operator-safe-next-row {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 8px;
+  min-width: 0;
   padding-top: 6px;
   border-top: 1px solid var(--line);
 }
@@ -56,14 +58,20 @@
 }
 
 .operator-safe-next-action {
+  min-width: 0;
   font-size: 0.85rem;
   color: var(--accent);
+  overflow-wrap: anywhere;
 }
 
 .operator-safe-next-blocker {
+  flex: 1 1 100%;
+  min-width: 0;
   font-size: 0.78rem;
   color: var(--warning);
   font-style: italic;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .persistent-emergency-stop {

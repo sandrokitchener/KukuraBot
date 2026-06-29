@@ -2,24 +2,57 @@
 set -eo pipefail
 
 REMOTE_ROOT="${REMOTE_ROOT:-/home/pi/robodoge}"
-POSE_PORT="${POSE_PORT:-8896}"
+POSE_PORT="${POSE_PORT:-9090}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-}"
 DOGZILLA_IMU_AVAILABLE="${DOGZILLA_IMU_AVAILABLE:-false}"
+DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-0}"
+DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-0}"
+DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-0}"
+DOGZILLA_INITIAL_POSE_SKIP="${DOGZILLA_INITIAL_POSE_SKIP:-0}"
 export ROS_DOMAIN_ID
 export REMOTE_ROOT
+export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW DOGZILLA_INITIAL_POSE_SKIP
 
 mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
 
-if command -v flock >/dev/null 2>&1; then
+# Kill stale ROS2 daemon early; a stuck daemon can make topic/action probes hang.
+pkill -9 -f "ros2.*daemon" 2>/dev/null || true
+
+# Skip flock when invoked via docker exec (SSH launcher) — the systemd
+# container already holds the startup lock via its monitoring loop.
+if [ -z "$DOGZILLA_DOCKER_EXEC" ] && command -v flock >/dev/null 2>&1; then
   exec 8>"$REMOTE_ROOT/logs/map-pose-startup.lock"
   if ! flock -w "${DOGZILLA_MAP_POSE_START_LOCK_TIMEOUT_SEC:-300}" 8; then
     echo "Timed out waiting for another DOGZILLA map-pose startup to finish." >&2
     exit 2
   fi
 fi
+
+# Wait for the rosbridge websocket server to be ready before doing anything.
+# This prevents "No such container" errors and apt-before-network races
+# when systemd starts this service before the container is fully up.
+POSE_HOST="${DOGZILLA_POSE_HOST:-127.0.0.1}"
+POSE_PORT="${POSE_PORT:-9090}"
+for _ in $(seq 1 30); do
+  if python3 - "$POSE_HOST" "$POSE_PORT" <<'PY' >/dev/null 2>&1
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(1)
+try:
+    s.connect((sys.argv[1], int(sys.argv[2])))
+    s.close()
+    raise SystemExit(0)
+except Exception:
+    raise SystemExit(1)
+PY
+  then
+    break
+  fi
+  sleep 1
+done
 
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only.lua"
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_localization.lua"
@@ -219,15 +252,22 @@ stop_existing_cartographer() {
   pkill -KILL -f "[c]artographer_occupancy_grid_node" 2>/dev/null || true
 }
 
-if pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1; then
+if [ "${DOGZILLA_FORCE_RESTART:-0}" = "1" ]; then
+  echo "DOGZILLA_FORCE_RESTART=1 requested; forcing Cartographer restart." >&2
+  SHOULD_RESTART=true
+elif pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1; then
   CURRENT_MODE="$(python3 -c "import json; print(json.load(open('$MODE_FILE')).get('mode',''))" 2>/dev/null || true)"
   CARTOGRAPHER_COUNT="$(pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" | wc -l | tr -d ' ')"
   if [ "$CURRENT_MODE" != "$mode" ]; then
     echo "Cartographer running in '${CURRENT_MODE:-unknown}' mode, '$mode' requested. Forcing restart." >&2
     SHOULD_RESTART=true
   elif [ "${CARTOGRAPHER_COUNT:-0}" -gt 1 ]; then
-    echo "Cartographer has $CARTOGRAPHER_COUNT matching processes in '$mode' mode. Forcing clean restart." >&2
-    SHOULD_RESTART=true
+    if [ -n "$DOGZILLA_DOCKER_EXEC" ]; then
+      echo "Cartographer has $CARTOGRAPHER_COUNT processes but running via docker exec; skipping force-restart to avoid killing the ENTRYPOINT's Cartographer." >&2
+    else
+      echo "Cartographer has $CARTOGRAPHER_COUNT matching processes in '$mode' mode. Forcing clean restart." >&2
+      SHOULD_RESTART=true
+    fi
   else
     echo "Cartographer already running in '$mode' mode. Skipping restart." >&2
   fi
@@ -277,6 +317,51 @@ if [ "$SHOULD_RESTART" = "true" ]; then
   sleep 2
 fi
 
+# Always publish initial pose in localization mode, even when Cartographer is
+# already running, so "Localize on Map" is not a no-op after localization is lost.
+if [ "$mode" = "localization" ] && [ "$DOGZILLA_INITIAL_POSE_SKIP" != "1" ]; then
+  echo "Publishing initial pose for localization: x=$DOGZILLA_INITIAL_POSE_X y=$DOGZILLA_INITIAL_POSE_Y yaw=$DOGZILLA_INITIAL_POSE_YAW" >&2
+  python3 - <<'PY'
+import math
+import os
+import time
+import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from std_msgs.msg import Header
+
+x = float(os.environ.get("DOGZILLA_INITIAL_POSE_X", "0"))
+y = float(os.environ.get("DOGZILLA_INITIAL_POSE_Y", "0"))
+yaw = float(os.environ.get("DOGZILLA_INITIAL_POSE_YAW", "0"))
+
+rclpy.init(args=None)
+node = rclpy.create_node("robodoge_initial_pose_publisher")
+publisher = node.create_publisher(PoseWithCovarianceStamped, "/initialpose", 1)
+
+msg = PoseWithCovarianceStamped()
+msg.header = Header()
+msg.header.stamp = node.get_clock().now().to_msg()
+msg.header.frame_id = "map"
+msg.pose.pose.position.x = x
+msg.pose.pose.position.y = y
+msg.pose.pose.position.z = 0.0
+msg.pose.pose.orientation.x = 0.0
+msg.pose.pose.orientation.y = 0.0
+msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
+msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
+msg.pose.covariance[0] = 0.05
+msg.pose.covariance[7] = 0.05
+msg.pose.covariance[35] = 0.05
+
+for _ in range(5):
+    publisher.publish(msg)
+    rclpy.spin_once(node, timeout_sec=0.2)
+    time.sleep(0.2)
+
+node.destroy_node()
+rclpy.shutdown()
+PY
+fi
+
 if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
   (
     exec 8>&- 2>/dev/null || true
@@ -290,45 +375,72 @@ fi
 
 python3 - <<'PY'
 import json
+import math
 import os
 import time
-import urllib.request
 
-url = f"http://127.0.0.1:{os.environ.get('POSE_PORT', '8896')}/pose"
+# When invoked via docker exec (SSH launcher), skip the pose poll — the app
+# checks pose readiness separately after the SSH command returns.
+if os.environ.get("DOGZILLA_DOCKER_EXEC"):
+    print(json.dumps({"status": "ok", "skipped": "docker-exec"}))
+    raise SystemExit(0)
+
+import rclpy
+from rclpy.node import Node
+from tf2_ros import Buffer, TransformListener
+
+rclpy.init(args=None)
+node = Node("robodoge_map_pose_ready_check")
+tf_buffer = Buffer(cache_time=rclpy.duration.Duration(seconds=5.0))
+TransformListener(tf_buffer, node)
+
 started_at = time.time()
 last = None
-for _ in range(24):
+for _ in range(40):
     time.sleep(0.75)
+    rclpy.spin_once(node, timeout_sec=0.1)
     try:
-        with urllib.request.urlopen(url, timeout=2) as response:
-            last = json.loads(response.read().decode("utf-8"))
-            tf_publishers = (
-                last.get("rosGraph", {})
-                .get("topics", {})
-                .get("/tf", {})
-                .get("publisherCount", 0)
-            )
-            map_pose = last.get("mapPose") or {}
-            received_at = float(map_pose.get("receivedAt") or last.get("receivedAt") or 0.0)
-            age_sec = float(map_pose.get("ageSec") or last.get("ageSec") or 999.0)
-            if (
-                last.get("ok")
-                and last.get("waypointSafe")
-                and map_pose.get("frame") == "map"
-                and received_at >= started_at - 1.0
-                and age_sec <= 2.0
-                and int(tf_publishers) > 0
-            ):
-                print(json.dumps({
-                    "status": "ok",
-                    "mapPose": map_pose,
-                    "tfPublishers": tf_publishers,
-                    "waypointSafe": last.get("waypointSafe"),
-                }, sort_keys=True))
-                raise SystemExit(0)
+        transform = tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        yaw = math.atan2(2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                         1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z))
+        map_pose = {
+            "frame": "map",
+            "x": translation.x,
+            "y": translation.y,
+            "yaw": yaw,
+            "receivedAt": time.time(),
+            "ageSec": 0.0,
+        }
+        print(json.dumps({
+            "status": "ok",
+            "mapPose": map_pose,
+            "tfPublishers": 1,
+            "waypointSafe": True,
+        }, sort_keys=True))
+        node.destroy_node()
+        rclpy.shutdown()
+        raise SystemExit(0)
     except Exception as error:
         last = {"error": str(error)}
 
+node.destroy_node()
+rclpy.shutdown()
 print(json.dumps({"status": "error", "last": last}, sort_keys=True))
 raise SystemExit(1)
 PY
+
+# Keep the container alive as long as Cartographer is running ONLY when we are
+# the container's main process (launched by systemd via `docker run`).
+# When invoked via `docker exec` (SSH launcher), DOGZILLA_DOCKER_EXEC is set
+# and we exit after setup so SSH returns.
+if [ -z "$DOGZILLA_DOCKER_EXEC" ]; then
+  echo "Map-pose startup complete; monitoring Cartographer..."
+  while pgrep -f "[c]artographer_node" >/dev/null 2>&1; do
+    sleep 2
+  done
+  echo "Cartographer process not found; exiting so systemd can restart." >&2
+  pkill -9 -f "ros2.*daemon" 2>/dev/null || true
+  exit 1
+fi

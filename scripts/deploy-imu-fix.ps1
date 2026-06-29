@@ -44,7 +44,7 @@ if (-not $NoRestart) {
   Write-Host "Bridge restarted. The map-pose service will pick up changes on next wake cycle." -ForegroundColor Green
 
   Write-Host "Verifying processes..." -ForegroundColor Yellow
-  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $alias -RemoteCommand "docker exec robodoge-lidar-bridge pgrep -a python3 | grep -E 'imu_publisher|cartographer' || echo '(container may need a wake cycle)'"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $alias -RemoteCommand "docker exec robodoge-map-pose pgrep -a python3 | grep -E 'imu_publisher|cartographer' || echo '(container may need a wake cycle)'"
 } else {
   Write-Host "Services NOT restarted (use -NoRestart). Restart manually or trigger a wake cycle." -ForegroundColor Magenta
 }
@@ -52,4 +52,4 @@ if (-not $NoRestart) {
 Write-Host "=== Deployment complete ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next: After next wake cycle, check logs via:" -ForegroundColor White
-Write-Host "  ssh -F $configPath $alias 'docker exec robodoge-lidar-bridge tail -f ~/robodoge/logs/imu-publisher.log'" -ForegroundColor Gray
+Write-Host "  ssh -F $configPath $alias 'docker exec robodoge-map-pose tail -f ~/robodoge/logs/imu-publisher.log'" -ForegroundColor Gray

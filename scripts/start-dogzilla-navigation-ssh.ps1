@@ -7,9 +7,9 @@ param(
   [string]$Alias = "dogzilla",
   [string]$KeyPath = "$HOME\.ssh\robodoge_pi_ed25519",
   [string]$RemoteRoot = "/home/pi/robodoge",
-  [string]$ContainerName = "robodoge-lidar-bridge",
+  [string]$ContainerName = "robodoge-rosbridge",
   [int]$RosDomainId = 16,
-  [int]$PosePort = 8896,
+  [int]$PosePort = 9090,
   [string]$MapYaml = "",
   [switch]$NoSync,
   [switch]$NoHostKeyScan,
@@ -242,11 +242,61 @@ if ($Nav2ScanFilterMaskEndDeg -gt -9999) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_F
 if ($Nav2ScanFilterMaskRangeM -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M=$Nav2ScanFilterMaskRangeM" }
 if ($YawGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_YAW_GOAL_TOLERANCE=$YawGoalTolerance" }
 if ($Nav2XyGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_XY_GOAL_TOLERANCE=$Nav2XyGoalTolerance" }
-$remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$nav2Env $ContainerName bash $containerScript"
+function Wait-ContainerRunning {
+  param([string]$Name, [int]$TimeoutSec = 20)
+  for ($i = 0; $i -lt $TimeoutSec; $i += 2) {
+    $id = & ssh -F $configPath $Alias "docker ps --filter name=$Name --format='{{.ID}}' 2>/dev/null || true" 2>$null
+    if ($id) {
+      Start-Sleep -Seconds 2
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+  return $false
+}
+
+# Launch detached so Nav2, scan filter, gait adapter, and odom publisher survive
+# the SSH session closing.
+$remoteCommand = "docker exec -d -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$nav2Env $ContainerName bash $containerScript"
 $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
-  $detail = ($sshOutput | Out-String).Trim()
-  $detailLines = $detail -split "`n" | Select-Object -First 30 | ForEach-Object { "    $_" }
-  $suffix = if ($detailLines.Count -gt 0) { "`n`nSSH output:`n$($detailLines -join "`n")" } else { "" }
-  throw "DOGZILLA Nav2 waypoint navigation failed to start (exit=$LASTEXITCODE).$suffix"
+  Write-Output "Container $ContainerName not available; attempting to start..."
+  & ssh -F $configPath $Alias "docker start $ContainerName 2>/dev/null || docker run -d --name $ContainerName --privileged --network host robodoge/ros-humble-cartographer:1.0 bash -lc 'echo started' 2>/dev/null || true"
+  if (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 20) {
+    Write-Output "Container $ContainerName started; retrying Nav2 launch."
+    $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+    if ($LASTEXITCODE -ne 0) {
+      $detail = ($sshOutput | Out-String).Trim()
+      $detailLines = $detail -split "`n" | Select-Object -First 30 | ForEach-Object { "    $_" }
+      $suffix = if ($detailLines.Count -gt 0) { "`n`nSSH output:`n$($detailLines -join "`n")" } else { "" }
+      throw "DOGZILLA Nav2 waypoint navigation failed to launch (exit=$LASTEXITCODE).$suffix"
+    }
+  } else {
+    throw "DOGZILLA Nav2 waypoint navigation failed: container '$ContainerName' could not be started. Ensure rosbridge is running (scripts/start-dogzilla-rosbridge-ssh.ps1)."
+  }
 }
+
+Write-Output "Launched detached navigation container script; polling for Nav2 readiness."
+$scanTopic = if ($Nav2ScanFilterEnabled -eq "1" -or ($null -ne $avoidanceConfig -and $avoidanceConfig.nav2ScanFilterEnabled -eq $true)) { "/scan_nav2" } else { "/scan" }
+$waitScriptLocal = Join-Path $repoRoot "sidecars/dogzilla_navigation/wait-nav2-ready.sh"
+if (!(Test-Path -LiteralPath $waitScriptLocal)) {
+  throw "wait-nav2-ready.sh not found at $waitScriptLocal"
+}
+$waitScriptRemote = "/tmp/wait-nav2-ready.sh"
+$waitScriptContainer = "/tmp/wait-nav2-ready.sh"
+& scp -F $configPath $waitScriptLocal "${Alias}:$waitScriptRemote"
+if ($LASTEXITCODE -ne 0) { throw "scp failed for wait-nav2-ready.sh" }
+Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "docker cp $waitScriptRemote $ContainerName`:$waitScriptContainer"
+$probeCommand = "docker exec -e ROS_DOMAIN_ID=$RosDomainId $ContainerName bash $waitScriptContainer $RosDomainId $RemoteRoot $scanTopic"
+$probeOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $probeCommand
+$navExit = $LASTEXITCODE
+if ($navExit -ne 0) {
+  $logDetail = @()
+  foreach ($logFile in @("$RemoteRoot/logs/scan-filter-supervisor.log", "$RemoteRoot/logs/tf-odom-publisher.log", "$RemoteRoot/logs/cmd-vel-gait-adapter.log")) {
+    $logDetail += Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "docker exec $ContainerName tail -40 $logFile 2>/dev/null || true"
+  }
+  $detail = ($probeOutput + $logDetail | Out-String).Trim()
+  $detailLines = $detail -split "`n" | Select-Object -First 60 | ForEach-Object { "    $_" }
+  throw "DOGZILLA Nav2 waypoint navigation did not become ready within 120s.`n`nDetails:`n$($detailLines -join "`n")"
+}
+Write-Output "DOGZILLA Nav2 waypoint navigation is ready (action server, odom, and $scanTopic are live)."

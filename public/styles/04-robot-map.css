@@ -17,7 +17,7 @@
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 0;
+  min-height: 320px;
   max-width: none;
   align-self: center;
   justify-self: center;
@@ -131,10 +131,11 @@
 }
 
 .robot-map-actions {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: end;
-  gap: 8px;
+  gap: 6px 8px;
   min-width: 0;
 }
 
@@ -142,6 +143,10 @@
   border: 1px solid rgba(63, 53, 43, 0.14);
   border-radius: 6px;
   background: rgba(255, 250, 244, 0.72);
+}
+
+.map-workflow-panel[open] .map-workflow-head {
+  border-bottom: 1px solid rgba(63, 53, 43, 0.1);
 }
 
 .map-workflow-head {
@@ -152,33 +157,22 @@
   padding: 7px 10px;
   cursor: pointer;
   list-style: none;
+  user-select: none;
 }
 
 .map-workflow-head::-webkit-details-marker {
   display: none;
 }
 
-.map-workflow-title::before {
-  content: '+';
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin-right: 6px;
-  border: 1px solid rgba(63, 53, 43, 0.22);
-  border-radius: 4px;
+.map-workflow-head::after {
+  content: '▸';
   color: var(--ink-soft);
-  font-size: 0.78rem;
-  line-height: 1;
+  font-size: 0.85rem;
+  transition: transform 0.15s ease;
 }
 
-.map-workflow-panel[open] .map-workflow-title::before {
-  content: '-';
-}
-
-.map-workflow-panel[open] .map-workflow-head {
-  border-bottom: 1px solid rgba(63, 53, 43, 0.1);
+.map-workflow-panel[open] > .map-workflow-head::after {
+  transform: rotate(90deg);
 }
 
 .map-workflow-title {
@@ -211,12 +205,16 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
+}
+
+.map-workflow-panel[open] .map-workflow-steps {
   max-height: min(32vh, 260px);
-  overflow: auto;
+  overflow-y: auto;
 }
 
 .map-workflow-step {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 30px;
@@ -287,16 +285,137 @@
   background: #d0f0cc;
 }
 
+.map-step-hint {
+  flex-basis: 100%;
+  margin-left: 28px;
+  color: #9a958f;
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.map-repair-button {
+  border-style: dashed;
+  border-color: rgba(63, 53, 43, 0.32);
+  background: rgba(255, 250, 244, 0.55);
+}
+
+.map-new-space-section {
+  border-top: 1px dashed rgba(63, 53, 43, 0.18);
+  margin-top: 4px;
+}
+
+.map-new-space-head {
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  user-select: none;
+  list-style: none;
+}
+
+.map-new-space-head::-webkit-details-marker {
+  display: none;
+}
+
+.map-new-space-title {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.map-new-space-hint {
+  color: #9a958f;
+  font-size: 0.7rem;
+}
+
+.map-new-space-body {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-new-space-note {
+  color: #9a958f;
+  font-size: 0.7rem;
+  margin: 0;
+}
+
 .robot-map-meta-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 8px;
+  min-width: 0;
   min-height: 20px;
 }
 
 .robot-map-grid-meta {
+  min-width: 0;
   font-size: 0.7rem;
   color: #7a736b;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.map-mode-chip {
+  max-width: 100%;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-mode-chip[data-mode="mapping"] {
+  color: #1a5c32;
+  background: #d4f5d9;
+}
+.map-mode-chip[data-mode="mapping"][data-fresh="true"] {
+  animation: map-live-pulse 1.5s ease-in-out infinite;
+}
+.map-mode-chip[data-mode="localization"] {
+  color: #7a5d00;
+  background: #fff0c4;
+}
+.map-mode-chip[data-mode="unknown"],
+.map-mode-chip[data-mode="no-map"] {
+  color: #6a6a6a;
+  background: #e8e8e8;
+}
+
+@keyframes map-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.map-freshness {
+  min-width: 0;
+  font-size: 0.68rem;
+  color: #7a736b;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.map-cell-counts {
+  min-width: 0;
+  font-size: 0.68rem;
+  color: #5a5a55;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.map-bbox {
+  min-width: 0;
+  font-size: 0.68rem;
+  color: #7a736b;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .camera-refresh-button {
@@ -311,6 +430,33 @@
 
 .camera-recover-button {
   min-width: 104px;
+}
+
+.camera-yolo-toggle {
+  min-width: 80px;
+  font-weight: 600;
+}
+
+.camera-yolo-toggle[data-yolo-enabled="true"] {
+  background: #e8f5e9;
+  border-color: rgba(46, 125, 50, 0.4);
+  color: #1b5e20;
+}
+
+.camera-yolo-toggle[data-yolo-enabled="false"] {
+  background: #fffaf4;
+  border-color: rgba(63, 53, 43, 0.28);
+  color: var(--ink);
+}
+
+.camera-yolo-toggle:hover:not(:disabled) {
+  border-color: rgba(255, 123, 86, 0.72);
+  background: #fff0e5;
+}
+
+.camera-yolo-toggle[data-yolo-enabled="true"]:hover:not(:disabled) {
+  border-color: rgba(46, 125, 50, 0.6);
+  background: #c8e6c9;
 }
 
 .camera-refresh-button:hover:not(:disabled),
@@ -697,10 +843,11 @@
 
 .robot-nav-badge {
   position: absolute;
-  left: 6px;
+  right: 6px;
   top: 6px;
   z-index: 6;
   display: none;
+  max-width: calc(100% - 12px);
   padding: 3px 8px;
   border-radius: 4px;
   background: rgba(22, 22, 24, 0.82);
@@ -709,7 +856,8 @@
   font-weight: 700;
   line-height: 1.2;
   pointer-events: none;
-  white-space: nowrap;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .robot-nav-badge:not(:empty) {
@@ -925,11 +1073,35 @@
   color: #007b84;
 }
 
-/* Map view toggle */
-/* Hide SLAM-only controls until mapping mode is entered */
-.robot-map-panel:not(.is-slam-mode) .show-on-slam,
-.robot-map-head:not(.is-slam-mode) .show-on-slam {
-  display: none;
+/* SLAM mode indicator chip */
+.slam-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #d4edda;
+  border: 1px solid #84c98e;
+  color: #155724;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.slam-mode-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #28a745;
+  animation: slam-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes slam-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .map-view-toggle-row {

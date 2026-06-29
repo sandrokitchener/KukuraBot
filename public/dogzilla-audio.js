@@ -64,6 +64,11 @@ export function createDogzillaAudioController({
       throw new Error('DOGZILLA Pi audio cues are not enabled.')
     }
 
+    const volume = getVolume()
+    if (volume <= 0) {
+      return { ok: true, cue, muted: true, volume: 0 }
+    }
+
     const response = await apiFetch('/api/dogzilla/audio/cue', {
       method: 'POST',
       headers: {
@@ -71,7 +76,7 @@ export function createDogzillaAudioController({
       },
       body: JSON.stringify({
         cue,
-        volume: getVolume(),
+        volume,
       }),
     })
     const payload = await response.json()

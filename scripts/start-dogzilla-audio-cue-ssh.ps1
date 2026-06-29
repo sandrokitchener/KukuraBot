@@ -10,6 +10,7 @@ param(
   [int]$Port = 8895,
   [string]$Player = "aplay",
   [string]$AplayDevice = "plughw:CARD=Device,DEV=0",
+  [string]$DefaultVolume = "",
   [switch]$Background,
   [switch]$NoSync,
   [switch]$NoHostKeyScan
@@ -55,7 +56,8 @@ if ($LASTEXITCODE -ne 0) {
   throw "Audio player '$Player' not found on Pi."
 }
 
-$serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_audio_cue/server.py --host 0.0.0.0 --port $Port --sounds-dir public/sounds --player $Player --aplay-device $AplayDevice"
+$volumeArg = if ($DefaultVolume -ne "") { " --default-volume $DefaultVolume" } else { "" }
+$serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_audio_cue/server.py --host 0.0.0.0 --port $Port --sounds-dir public/sounds --player $Player$volumeArg --aplay-device $AplayDevice"
 $audioSetupCommand = "amixer -c 2 set Speaker 100% unmute 2>/dev/null || true; pactl set-sink-mute @DEFAULT_SINK@ 0 2>/dev/null || true; pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true"
 
 if ($Background) {

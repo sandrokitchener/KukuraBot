@@ -99,6 +99,7 @@ export function waypointGotoPreview(overrides = {}) {
 export function dogzillaMapPoseBody(overrides = {}) {
   return {
     ok: true,
+    checked: true,
     waypointSafe: true,
     pose: {
       frame: 'map',

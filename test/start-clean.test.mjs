@@ -7,7 +7,7 @@ test('npm start resets local runtime before running app startup', async () => {
   const startClean = await readFile('scripts/start-clean.mjs', 'utf-8')
 
   assert.equal(packageJson.scripts.start, 'node scripts/start-clean.mjs')
-  assert.match(startClean, /ROBO_DOGE_LOCAL_PORTS = \[3037, 8891, 8892, 8893, 8894, 8895, 8896, 5037\]/)
+  assert.match(startClean, /ROBO_DOGE_LOCAL_PORTS = \[3037, 8891, 8892, 8893, 8894, 8895, 5037\]/)
   assert.match(startClean, /adb kill-server/)
   assert.match(startClean, /await import\('\.\.\/run\.mjs'\)/)
 })

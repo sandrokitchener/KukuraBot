@@ -10,11 +10,14 @@ param(
   [int]$DirectPort = 8893,
   [int]$VisionPort = 8894,
   [int]$AudioPort = 8895,
-  [int]$LidarPort = 8896,
+  [int]$LidarPort = 9090,
+[string]$RobotSerialPort = "/dev/ttyAMA0",
   [string]$SerialPort = "/dev/ttyAMA1",
   [int]$RosDomainId = 16,
-  [string]$DockerImage = "yahboomtechnology/ros-humble:3.6",
+  [string]$DockerImage = "robodoge/ros-humble-cartographer:1.0",
+  [string]$BaseDockerImage = "yahboomtechnology/ros-humble:3.6",
   [string]$AplayDevice = "plughw:CARD=Device,DEV=0",
+  [switch]$BuildImage,
   [switch]$NoHostKeyScan
 )
 
@@ -43,7 +46,7 @@ $sidecars = @(
   "dogzilla_lib_bridge",
   "dogzilla_audio_cue",
   "dogzilla_yolo_vision",
-  "dogzilla_lidar_bridge",
+  "dogzilla_rosbridge",
   "dogzilla_map_pose"
 )
 
@@ -57,6 +60,24 @@ foreach ($sidecar in $sidecars) {
 }
 
 Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot $RemoteRoot
+
+if ($BuildImage) {
+  Write-Host "Building DOGZILLA Cartographer/Nav2 Docker image on ${Alias}."
+  $buildScript = Join-Path $PSScriptRoot "build-dogzilla-docker-image-ssh.ps1"
+  & $buildScript `
+    -Alias $Alias `
+    -User $User `
+    -PiIp $PiIp `
+    -SshPort $SshPort `
+    -KeyPath $KeyPath `
+    -RemoteRoot $RemoteRoot `
+    -DockerImage $DockerImage `
+    -BaseDockerImage $BaseDockerImage `
+    -NoHostKeyScan:$NoHostKeyScan
+  if ($LASTEXITCODE -ne 0) {
+    throw "DOCKER_BUILD_FAILED: Failed to build $DockerImage on $Alias"
+  }
+}
 
 Write-Host "Copying public\sounds\*.wav -> ${Alias}:$RemoteRoot/public/sounds/"
 & scp -F $configPath (Join-Path $repoRoot "public\sounds\*.wav") "${Alias}:$RemoteRoot/public/sounds/"
@@ -81,15 +102,21 @@ APLAY_DEVICE='__APLAY_DEVICE__'
 sudo mkdir -p /etc/robodoge /etc/systemd/system "$REMOTE_ROOT/logs"
 sudo chown -R "$USER_NAME:$USER_NAME" "$REMOTE_ROOT/logs" "$REMOTE_ROOT/maps" "$REMOTE_ROOT/public" "$REMOTE_ROOT/sidecars" "$REMOTE_ROOT/models" 2>/dev/null || true
 
+if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${DOCKER_IMAGE}$"; then
+  echo "Building DOGZILLA Cartographer/Nav2 image ${DOCKER_IMAGE} ..."
+  docker build -t "${DOCKER_IMAGE}" -f "$REMOTE_ROOT/sidecars/dogzilla_map_pose/Dockerfile" "$REMOTE_ROOT/sidecars/dogzilla_map_pose/"
+fi
+
 sudo tee /etc/robodoge/dogzilla.env >/dev/null <<ENV
 REMOTE_ROOT=$REMOTE_ROOT
 PYTHONUNBUFFERED=1
 ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE
 DOGZILLA_EXPECTED_ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE
-DOGZILLA_SERIAL_PORT=/dev/ttyAMA0
+DOGZILLA_ROBOT_SERIAL_PORT=__ROBOT_SERIAL_PORT__
+DOGZILLA_SERIAL_PORT=__SERIAL_PORT__
 DOGZILLA_DIRECT_DRY_RUN=0
-DOGZILLA_MAP_POSE_URL=http://127.0.0.1:$LIDAR_PORT/pose
-DOGZILLA_MAP_SCAN_URL=http://127.0.0.1:$LIDAR_PORT/scan
+DOGZILLA_ROSBRIDGE_PORT=9090
+DOGZILLA_MAP_TOPIC=/map_cartographer
 ENV
 
 sudo tee /etc/systemd/system/robodoge-direct-bridge.service >/dev/null <<SERVICE
@@ -158,9 +185,9 @@ StandardError=append:$REMOTE_ROOT/logs/yolo-vision.log
 WantedBy=multi-user.target
 SERVICE
 
-sudo tee /etc/systemd/system/robodoge-lidar-bridge.service >/dev/null <<SERVICE
+sudo tee /etc/systemd/system/robodoge-rosbridge.service >/dev/null <<SERVICE
 [Unit]
-Description=Robo-Doge DOGZILLA LiDAR Bridge
+Description=Robo-Doge DOGZILLA Rosbridge
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 
@@ -168,13 +195,14 @@ Wants=network-online.target docker.service
 Type=simple
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
-ExecStartPre=-/usr/bin/docker rm -f robodoge-lidar-bridge
-ExecStart=/usr/bin/docker run --rm --name robodoge-lidar-bridge --privileged --network host -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && python3 sidecars/dogzilla_lidar_bridge/server.py --host 0.0.0.0 --port '"$LIDAR_PORT"' --driver oradar --serial-port '"$SERIAL_PORT"' --baudrate 230400 --topic /scan --no-scan-odom'
-ExecStop=-/usr/bin/docker rm -f robodoge-lidar-bridge
+TimeoutStartSec=180
+ExecStartPre=-/usr/bin/docker rm -f robodoge-rosbridge
+ExecStart=/usr/bin/docker run --rm --name robodoge-rosbridge --privileged --network host -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_SERIAL_PORT=$SERIAL_PORT -e DOGZILLA_LIDAR_BAUDRATE=230400 -e DOGZILLA_LIDAR_TOPIC=/scan -e DOGZILLA_ROSBRIDGE_PORT=9090 -e DOGZILLA_MAP_TOPIC=/map_cartographer -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh'
+ExecStop=-/usr/bin/docker rm -f robodoge-rosbridge
 Restart=always
 RestartSec=5
-StandardOutput=append:$REMOTE_ROOT/logs/lidar-bridge-systemd.log
-StandardError=append:$REMOTE_ROOT/logs/lidar-bridge-systemd.log
+StandardOutput=append:$REMOTE_ROOT/logs/rosbridge-systemd.log
+StandardError=append:$REMOTE_ROOT/logs/rosbridge-systemd.log
 
 [Install]
 WantedBy=multi-user.target
@@ -183,18 +211,17 @@ SERVICE
 sudo tee /etc/systemd/system/robodoge-map-pose.service >/dev/null <<SERVICE
 [Unit]
 Description=Robo-Doge DOGZILLA Cartographer Map Pose
-After=robodoge-lidar-bridge.service
-Requires=robodoge-lidar-bridge.service
-PartOf=robodoge-lidar-bridge.service
+After=robodoge-rosbridge.service
+Wants=robodoge-rosbridge.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
-ExecStart=/usr/bin/docker exec -e REMOTE_ROOT=$REMOTE_ROOT -e POSE_PORT=$LIDAR_PORT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_MAP_POSE_MODE=auto robodoge-lidar-bridge bash $REMOTE_ROOT/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh
-ExecStop=/usr/bin/docker exec robodoge-lidar-bridge bash -lc 'pkill -f "[c]artographer_node.*robodoge_dogzilla_laser_only" 2>/dev/null || true; pkill -f "[s]tatic_transform_publisher.*base_link laser_frame" 2>/dev/null || true'
-TimeoutStartSec=90
+ExecStartPre=-/usr/bin/docker rm -f robodoge-map-pose
+ExecStart=/usr/bin/docker run --rm --name robodoge-map-pose --privileged --network host -e REMOTE_ROOT=$REMOTE_ROOT -e POSE_PORT=$LIDAR_PORT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_MAP_POSE_MODE=auto -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_map_pose/start-map-pose-in-container.sh'
+ExecStop=-/usr/bin/docker rm -f robodoge-map-pose
+TimeoutStartSec=180
 StandardOutput=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 
@@ -203,24 +230,30 @@ WantedBy=multi-user.target
 SERVICE
 
 sudo systemctl daemon-reload
-sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-lidar-bridge.service robodoge-map-pose.service
+# Retire the old HTTP lidar bridge service so it does not steal port 9090.
+sudo systemctl stop robodoge-lidar-bridge.service 2>/dev/null || true
+sudo systemctl disable robodoge-lidar-bridge.service 2>/dev/null || true
+sudo docker rm -f robodoge-lidar-bridge 2>/dev/null || true
+sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service
 sudo systemctl restart robodoge-audio-cue.service || true
 sudo systemctl restart robodoge-yolo-vision.service || true
-sudo systemctl restart robodoge-lidar-bridge.service || true
+sudo systemctl restart robodoge-rosbridge.service || true
 sudo systemctl restart robodoge-direct-bridge.service || true
 sleep 4
 sudo systemctl restart robodoge-map-pose.service || true
 
-systemctl --no-pager --full status robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-lidar-bridge.service robodoge-map-pose.service || true
+systemctl --no-pager --full status robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service || true
 '@
 
 $remoteScript = $remoteScript.
+  Replace("`r`n", "`n").
   Replace('__REMOTE_ROOT__', $RemoteRoot).
   Replace('__USER_NAME__', $User).
   Replace('__DIRECT_PORT__', [string]$DirectPort).
   Replace('__VISION_PORT__', [string]$VisionPort).
   Replace('__AUDIO_PORT__', [string]$AudioPort).
   Replace('__LIDAR_PORT__', [string]$LidarPort).
+ Replace('__ROBOT_SERIAL_PORT__', $RobotSerialPort).
   Replace('__SERIAL_PORT__', $SerialPort).
   Replace('__ROS_DOMAIN_ID__', [string]$RosDomainId).
   Replace('__DOCKER_IMAGE__', $DockerImage).

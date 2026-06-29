@@ -131,6 +131,45 @@ class DogzillaAudioCueTests(unittest.TestCase):
         self.assertTrue(thinking_process.terminated)
         popen.assert_not_called()
 
+    def test_cue_without_volume_uses_stored_volume(self):
+        state = server.AudioState(Path("public/sounds"), "aplay", "", volume=0.2)
+        bark_process = FakeProcess()
+        scaled_file = Path("public/sounds/robodoge-audio-scaled.wav")
+
+        with (
+            patch.object(server, "resolve_player", return_value="/usr/bin/aplay"),
+            patch.object(Path, "exists", return_value=True),
+            patch.object(server.random, "choice", return_value="robot-bark-normal-103.wav"),
+            patch.object(server, "prepare_playback_file", return_value=scaled_file),
+            patch.object(server.subprocess, "Popen", return_value=bark_process) as popen,
+            patch.object(server.time, "sleep", return_value=None),
+        ):
+            result = server.play_cue(state, "bark")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["volume"], 0.2)
+        self.assertEqual(state.volume, 0.2)
+        self.assertIn("robodoge-audio-scaled.wav", str(popen.call_args.args[0][-1]))
+
+    def test_cue_updates_stored_volume(self):
+        state = server.AudioState(Path("public/sounds"), "aplay", "")
+        bark_process = FakeProcess()
+
+        with (
+            patch.object(server, "resolve_player", return_value="/usr/bin/aplay"),
+            patch.object(Path, "exists", return_value=True),
+            patch.object(server.random, "choice", return_value="robot-bark-normal-103.wav"),
+            patch.object(server.subprocess, "Popen", return_value=bark_process),
+            patch.object(server.time, "sleep", return_value=None),
+        ):
+            server.play_cue(state, "bark", 0.35)
+
+        self.assertEqual(state.volume, 0.35)
+
+    def test_default_volume_is_normalized(self):
+        state = server.AudioState(Path("public/sounds"), "aplay", "", volume=50)
+        self.assertEqual(state.volume, 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

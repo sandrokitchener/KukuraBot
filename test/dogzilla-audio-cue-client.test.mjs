@@ -6,6 +6,7 @@ import test from 'node:test'
 import {
   getDogzillaAudioCueHealth,
   sendDogzillaAudioCue,
+  setDogzillaAudioCueVolume,
 } from '../lib/dogzilla-audio-cue-client.mjs'
 import { withMockedFetch } from '../test-support/http-fixtures.mjs'
 
@@ -175,6 +176,45 @@ test('getDogzillaAudioCueHealth reports fetch failure connection details', async
       assert.equal(result.error, 'fetch failed (ECONNREFUSED 10.0.4.32:8895)')
     },
   )
+})
+
+test('setDogzillaAudioCueVolume posts normalized volume to Pi bridge', async () => {
+  let requestBody = null
+  const result = await setDogzillaAudioCueVolume(25, {
+    config: {
+      audio: {
+        enabled: true,
+        volumeUrl: 'http://10.0.4.32:8895/volume',
+      },
+    },
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body)
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, volume: requestBody.volume }
+        },
+      }
+    },
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.volume, 0.25)
+  assert.deepEqual(requestBody, { volume: 0.25 })
+})
+
+test('setDogzillaAudioCueVolume is disabled when no volumeUrl is configured', async () => {
+  const result = await setDogzillaAudioCueVolume(0.5, {
+    config: {
+      audio: {
+        enabled: true,
+      },
+    },
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 'disabled')
 })
 
 async function readJsonBody(request) {

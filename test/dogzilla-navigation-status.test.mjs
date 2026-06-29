@@ -206,7 +206,7 @@ describe('deriveNavigationStatus', () => {
     assert.equal(result.severity, 'green')
   })
 
-  it('handles arrived state auto-detection from pose track (no movement after 10s)', () => {
+  it('reports stuck when dispatch active but no pose movement (not falsely arrived)', () => {
     const t = now()
     const result = deriveNavigationStatus({
       dispatchState: { status: 'navigating', waypointName: 'charger', dispatchedAt: t - 20000 },
@@ -217,7 +217,8 @@ describe('deriveNavigationStatus', () => {
         pose(2.01, 1.01, t - 500),
       ],
     })
-    assert.equal(result.status, 'arrived')
+    assert.equal(result.status, 'stuck')
+    assert.match(result.text, /No movement/)
     assert.equal(result.targetWaypoint, 'charger')
   })
 

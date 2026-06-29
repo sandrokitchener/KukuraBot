@@ -6,6 +6,7 @@ import { createDogzillaAudioController } from './dogzilla-audio.js'
 import { createManualControlController } from './manual-control.js'
 import {
   createRobotMapRenderer,
+  formatMapStatusPayload,
   formatWaypointReadinessSummary,
 } from './robot-map.js'
 import {
@@ -97,6 +98,10 @@ const robotMapElement = document.querySelector('#robot-map')
 const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
 const robotMapGridMeta = document.querySelector('#robot-map-grid-meta')
+const robotMapModeChip = document.querySelector('#robot-map-mode-chip')
+const robotMapFreshness = document.querySelector('#robot-map-freshness')
+const robotMapCellCounts = document.querySelector('#robot-map-cell-counts')
+const robotMapBbox = document.querySelector('#robot-map-bbox')
 const robotPoseReadout = document.querySelector('#robot-pose-readout')
 const robotNavBadge = document.querySelector('#robot-nav-badge')
 const robotMapPanel = document.querySelector('.robot-map-panel')
@@ -106,6 +111,7 @@ const robotCameraChip = document.querySelector('#robot-camera-chip')
 const robotCameraMeta = document.querySelector('#robot-camera-meta')
 const robotCameraRefreshButton = document.querySelector('#robot-camera-refresh-button')
 const robotCameraRecoverButton = document.querySelector('#robot-camera-recover-button')
+const robotCameraYoloToggle = document.querySelector('#robot-camera-yolo-toggle')
 const robotCameraSnapshotButton = document.querySelector('#robot-camera-snapshot-button')
 const robotCameraSnapshotNote = document.querySelector('#robot-camera-snapshot-note')
 const reconGalleryToggle = document.querySelector('#recon-gallery-toggle')
@@ -440,6 +446,7 @@ dogzillaAudioVolumeInput?.addEventListener('input', dogzillaAudio.handleVolumeIn
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
 robotCameraRefreshButton.addEventListener('click', handleDogzillaCameraRefresh)
 robotCameraRecoverButton.addEventListener('click', handleDogzillaCameraRecover)
+robotCameraYoloToggle?.addEventListener('click', handleDogzillaYoloToggle)
 reconGalleryToggle.addEventListener('click', handleReconGalleryToggle)
 reconGalleryClose.addEventListener('click', closeReconGallery)
 reconSnapshotList.addEventListener('click', handleReconSnapshotListClick)
@@ -1233,9 +1240,11 @@ function startRobotMapPolling() {
     window.clearInterval(robotMapTimerId)
     robotMapTimerId = null
   }
+  window._mapPollIntervalMs = 3000
 
   robotMap.setMapData(null)
   document.querySelector('.robot-map-head')?.classList.remove('has-map')
+  renderMapStatus(null, null)
 
   if (!isRealRobotTargetActive()) {
     return
@@ -1249,17 +1258,26 @@ function startRobotMapPolling() {
 
 async function refreshDogzillaMap() {
   const mapPath = '/api/dogzilla/map'
+  const healthPath = '/api/dogzilla/lidar/health'
 
   try {
-    const response = await apiFetch(mapPath)
-    const payload = await response.json()
+    const [mapResponse, healthResponse] = await Promise.all([
+      apiFetch(mapPath),
+      apiFetch('/api/dogzilla/lidar/health'),
+    ])
+    const [payload, healthPayload] = await Promise.all([
+      mapResponse.json(),
+      healthResponse.ok ? healthResponse.json() : Promise.resolve(null),
+    ]).catch(() => [null, null])
 
-    if (!response.ok || payload.ok !== true) {
+    if (!mapResponse.ok || payload?.ok !== true) {
       robotMap.setMapData(null)
       document.querySelector('.robot-map-head')?.classList.remove('has-map')
       if (robotMapGridMeta) {
         robotMapGridMeta.textContent = payload?.status === 'no-map' ? 'No map' : 'Map unavailable'
       }
+      renderMapStatus(null, healthPayload)
+      adaptMapPollInterval(healthPayload)
       return
     }
 
@@ -1268,13 +1286,71 @@ async function refreshDogzillaMap() {
       robotMapGridMeta.textContent = robotMap.getMapGridMeta() || `Map ${payload.width}x${payload.height}`
     }
     document.querySelector('.robot-map-head')?.classList.add('has-map')
+    renderMapStatus(payload, healthPayload)
+    adaptMapPollInterval(healthPayload)
   } catch {
     robotMap.setMapData(null)
     document.querySelector('.robot-map-head')?.classList.remove('has-map')
     if (robotMapGridMeta) {
       robotMapGridMeta.textContent = 'Map unavailable'
     }
+    renderMapStatus(null, null)
+    adaptMapPollInterval(null)
   }
+}
+
+function renderMapStatus(mapPayload, healthPayload) {
+  const status = formatMapStatusPayload(mapPayload, healthPayload)
+
+  if (robotMapModeChip) {
+    robotMapModeChip.textContent = status.modeLabel
+    robotMapModeChip.dataset.mode = status.mode
+    if (status.fresh && status.mode === 'mapping') {
+      robotMapModeChip.dataset.fresh = 'true'
+    } else {
+      delete robotMapModeChip.dataset.fresh
+    }
+    robotMapModeChip.hidden = false
+  }
+
+  if (robotMapFreshness) {
+    if (status.freshnessLabel) {
+      robotMapFreshness.textContent = status.freshnessLabel
+      robotMapFreshness.hidden = false
+    } else {
+      robotMapFreshness.hidden = true
+    }
+  }
+
+  if (robotMapCellCounts) {
+    if (status.cellCountsLabel) {
+      robotMapCellCounts.textContent = `Cells: ${status.cellCountsLabel}`
+      robotMapCellCounts.hidden = false
+    } else {
+      robotMapCellCounts.hidden = true
+    }
+  }
+
+  if (robotMapBbox) {
+    if (status.bboxLabel) {
+      robotMapBbox.textContent = status.bboxLabel
+      robotMapBbox.hidden = false
+    } else {
+      robotMapBbox.hidden = true
+    }
+  }
+}
+
+function adaptMapPollInterval(healthPayload) {
+  const mode = healthPayload?.map?.mode || healthPayload?.body?.runtime?.map?.mode
+  const mapPollMs = mode === 'mapping' ? 1500 : 3000
+  if (!robotMapTimerId) return
+  if (window._mapPollIntervalMs === mapPollMs) return
+  window._mapPollIntervalMs = mapPollMs
+  window.clearInterval(robotMapTimerId)
+  robotMapTimerId = window.setInterval(() => {
+    void refreshDogzillaMap()
+  }, mapPollMs)
 }
 
 async function refreshDogzillaLidarScan() {
@@ -1768,21 +1844,42 @@ async function handleDogzillaConnectionAction(event) {
       renderServiceProbe(payload)
     }
 
-    // Show capture/save buttons when mapping starts, hide when map is saved
-    const mapHead = document.querySelector('.robot-map-head')
-    const mapPanel = document.querySelector('.robot-map-panel')
-    for (const panel of [mapHead, mapPanel]) {
-      if (!panel) {
-        continue
-      }
-      if (action === 'start-map-pose-mapping') {
-        panel.classList.add('is-slam-mode')
-      } else if (action === 'save-map-pose') {
-        panel.classList.remove('is-slam-mode')
-      }
+    // Update SLAM mode indicators
+    const slamChip = document.getElementById('slam-mode-chip')
+    const newMapBtn = document.getElementById('new-map-button')
+    const saveMapBtn = document.getElementById('save-map-button')
+    if (action === 'start-map-pose-mapping') {
+      if (slamChip) slamChip.hidden = false
+      if (newMapBtn) newMapBtn.disabled = true
+      if (saveMapBtn) saveMapBtn.disabled = false
+    } else if (action === 'save-map-pose' || action === 'start-map-pose') {
+      if (slamChip) slamChip.hidden = true
+      if (newMapBtn) newMapBtn.disabled = false
+      if (saveMapBtn) saveMapBtn.disabled = true
     }
     if (action === 'start-map-pose' || action === 'start-map-pose-mapping' || action === 'save-map-pose') {
       setMapWorkflowStatus(`${formatConnectionAction(action)}: ${payload.status}.`, payload.status === 'ok' ? 'success' : '')
+    }
+
+    // After saving a new map, automatically restart localization against it.
+    if (action === 'save-map-pose' && payload.status === 'ok') {
+      setMapWorkflowStatus('Map saved. Restarting localization...', 'success')
+      const localizeResponse = await apiFetch('/api/dogzilla/connection/action', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'start-map-pose' }),
+      })
+      const localizePayload = await localizeResponse.json()
+      if (!localizeResponse.ok || localizePayload.status === 'error') {
+        throw new Error(localizePayload.error || localizePayload.stderr || 'DOGZILLA localization failed after save.')
+      }
+      connectionStatus.textContent = `${formatConnectionAction('start-map-pose')}: ${localizePayload.status}.`
+      connectionOutput.textContent = formatDogzillaActionOutput(localizePayload)
+      setStatus(`DOGZILLA ${formatConnectionAction('start-map-pose')} ${localizePayload.status}.`)
+      if (slamChip) slamChip.hidden = true
+      if (newMapBtn) newMapBtn.disabled = false
+      if (saveMapBtn) saveMapBtn.disabled = true
+      setMapWorkflowStatus(`${formatConnectionAction('start-map-pose')}: ${localizePayload.status}.`, 'success')
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
@@ -2093,15 +2190,15 @@ function formatConnectionAction(action) {
     case 'start-lidar':
       return 'lidar bridge restart'
     case 'start-map-pose':
-      return 'map localization restart'
+      return 'localize on map'
     case 'start-navigation':
       return 'waypoint navigator start'
     case 'start-map-pose-mapping':
-      return 'SLAM mapping mode start'
+      return 'new map'
     case 'capture-map-origin':
-      return 'charger origin calibration'
+      return 'mark origin'
     case 'save-map-pose':
-      return 'SLAM map save'
+      return 'save map'
     case 'stop-vendor-app':
       return 'vendor DOGZILLA app stop'
     case 'stop-bridges':
@@ -2450,9 +2547,9 @@ function renderNavigationChainHealth(readinessPayload) {
         let actions = ''
         if (c.status !== 'ok') {
           if (c.id === 'localization') {
-            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-map-pose">Restart map localization</button></div>'
+            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-map-pose">Localize on Map</button></div>'
           } else if (c.id === 'action') {
-            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-navigation">Start Nav</button></div>'
+            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-navigation">Restart Nav</button></div>'
           }
         }
         return `
@@ -2748,8 +2845,18 @@ function toFiniteNumber(value) {
 
 function applyDogzillaCameraConfig() {
   const camera = runtimeConfig.dogzilla?.camera
+  const vision = runtimeConfig.dogzilla?.vision
   const streamUrl = camera?.proxyStreamPath ? toApiUrl(camera.proxyStreamPath) : camera?.streamUrl || ''
   const upstreamStreamUrl = camera?.streamUrl || ''
+  const yoloEnabled = vision?.enabled !== false
+
+  if (robotCameraYoloToggle) {
+    robotCameraYoloToggle.dataset.yoloEnabled = String(yoloEnabled)
+    robotCameraYoloToggle.textContent = yoloEnabled ? 'YOLO: On' : 'YOLO: Off'
+    robotCameraYoloToggle.title = yoloEnabled
+      ? 'Click to disable YOLO object detection (saves Pi CPU)'
+      : 'Click to enable YOLO object detection (uses more Pi CPU)'
+  }
 
   if (!streamUrl) {
     clearDogzillaCameraTimers()
@@ -2870,10 +2977,64 @@ async function handleDogzillaCameraRecover() {
     startDogzillaCameraViewer({ forceRefresh: true })
   } catch (error) {
     robotCameraChip.textContent = 'Restart failed'
-    robotCameraMeta.textContent = formatError(error)
+     robotCameraMeta.textContent = formatError(error)
     setStatus(formatError(error), 'error')
     robotCameraRefreshButton.disabled = false
   } finally {
+    robotCameraRecoverButton.disabled = false
+  }
+}
+
+async function handleDogzillaYoloToggle() {
+  if (!robotCameraYoloToggle) return
+
+  robotCameraYoloToggle.disabled = true
+  robotCameraRefreshButton.disabled = true
+  robotCameraRecoverButton.disabled = true
+  robotCameraChip.textContent = 'Toggling'
+
+  const isCurrentlyOn = robotCameraYoloToggle.dataset.yoloEnabled === 'true'
+  robotCameraMeta.textContent = isCurrentlyOn
+    ? 'Disabling YOLO object detection...'
+    : 'Enabling YOLO object detection...'
+
+  try {
+    const response = await apiFetch('/api/dogzilla/vision/toggle', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: !isCurrentlyOn }),
+    })
+    const payload = await response.json()
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || 'Could not toggle YOLO vision.')
+    }
+
+    robotCameraYoloToggle.dataset.yoloEnabled = String(payload.enabled)
+    robotCameraYoloToggle.textContent = payload.enabled ? 'YOLO: On' : 'YOLO: Off'
+    robotCameraYoloToggle.title = payload.enabled
+      ? 'Click to disable YOLO object detection (saves Pi CPU)'
+      : 'Click to enable YOLO object detection (uses more Pi CPU)'
+
+    if (payload.camera) {
+      runtimeConfig.dogzilla = runtimeConfig.dogzilla || {}
+      runtimeConfig.dogzilla.camera = payload.camera
+      runtimeConfig.dogzilla.vision = payload.vision
+      applyDogzillaCameraConfig()
+      startDogzillaCameraViewer({ forceRefresh: true })
+    }
+
+    robotCameraChip.textContent = payload.enabled ? 'YOLO On' : 'YOLO Off'
+    robotCameraMeta.textContent = payload.message || (payload.enabled
+      ? 'YOLO object detection enabled. Camera stream will show detections.'
+      : 'YOLO disabled. Using raw camera feed.')
+    setStatus(payload.message || `YOLO vision ${payload.enabled ? 'enabled' : 'disabled'}.`)
+  } catch (error) {
+    robotCameraChip.textContent = 'Toggle failed'
+    robotCameraMeta.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+  } finally {
+    robotCameraYoloToggle.disabled = false
+    robotCameraRefreshButton.disabled = false
     robotCameraRecoverButton.disabled = false
   }
 }
@@ -3802,6 +3963,10 @@ async function playRobotConfirmCue() {
     return null
   }
 
+  if (dogzillaAudio.getVolume() <= 0) {
+    return null
+  }
+
   return commandCuePlayer.play()
 }
 
@@ -3812,6 +3977,10 @@ async function playRobotThinkingCue() {
   }
 
   if (dogzillaAudio.shouldSuppressLocalAudio()) {
+    return null
+  }
+
+  if (dogzillaAudio.getVolume() <= 0) {
     return null
   }
 

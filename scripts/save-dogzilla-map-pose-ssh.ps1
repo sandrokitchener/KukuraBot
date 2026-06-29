@@ -7,7 +7,7 @@ param(
   [string]$Alias = "dogzilla",
   [string]$KeyPath = "$HOME\.ssh\robodoge_pi_ed25519",
   [string]$RemoteRoot = "/home/pi/robodoge",
-  [string]$ContainerName = "robodoge-lidar-bridge",
+  [string]$ContainerName = "robodoge-map-pose",
   [int]$RosDomainId = 16,
   [string]$MapPath = "",
   [switch]$NoSync,

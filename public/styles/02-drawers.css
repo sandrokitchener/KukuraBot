@@ -611,8 +611,10 @@
 /* Navigation chain health indicator */
 .robot-nav-chain-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
+  min-width: 0;
   margin-top: 6px;
 }
 
@@ -659,8 +661,12 @@
 }
 
 .robot-nav-chain-summary {
+  flex: 1 1 160px;
+  min-width: 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .robot-nav-chain-detail {
@@ -680,7 +686,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 6px;
+  min-width: 0;
+  margin-bottom: 8px;
 }
 
 .robot-nav-chain-detail-row:last-child {
@@ -711,6 +718,7 @@
 
 .robot-nav-chain-detail-content {
   flex: 1;
+  min-width: 0;
 }
 
 .robot-nav-chain-detail-content strong {
@@ -722,12 +730,15 @@
   margin: 0;
   color: var(--ink-soft);
   font-size: 0.8rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .robot-nav-chain-detail-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .robot-nav-chain-detail-actions button {

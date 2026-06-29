@@ -45,7 +45,7 @@ const SAFE_NEXT_ACTION_PRIORITY = [
       const pose = snapshot?.poseState
       return pose?.status === 'error' || pose?.waypointSafe === false
     },
-    action: 'Restart map localization',
+    action: 'Localize on Map',
     blocker: (snapshot) => snapshot?.poseState?.error || 'Pose not available or not waypoint-safe',
   },
   {
@@ -53,7 +53,7 @@ const SAFE_NEXT_ACTION_PRIORITY = [
       const nav2 = snapshot?.nav2Stability
       return nav2?.state === 'disconnected' || nav2?.state === 'blocked'
     },
-    action: 'Start Nav',
+    action: 'Restart Nav',
     blocker: (snapshot) => snapshot?.nav2Stability?.currentBlocker || 'Nav2 not ready',
   },
   {

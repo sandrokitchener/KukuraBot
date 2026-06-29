@@ -9,14 +9,15 @@ import {
   loadDogzillaMapOrigin,
   mapPoseToAppPose,
 } from '../lib/dogzilla-map-frame.mjs'
-import { normalizeDogzillaMapMetadata } from '../lib/dogzilla-map-metadata.mjs'
+import {
+  getDogzillaRobotPose,
+  startDogzillaLidarClient,
+} from '../lib/dogzilla-lidar-client.mjs'
 
 const SCRIPT_FILE = fileURLToPath(import.meta.url)
 const ROOT_DIR = path.resolve(path.dirname(SCRIPT_FILE), '..')
 const DEFAULT_WAYPOINT_FILE = path.join(ROOT_DIR, 'config', 'robot-waypoints.json')
 const DEFAULT_CAPTURE_DIR = path.join(ROOT_DIR, 'output', 'app-cache', 'waypoint-captures')
-const DEFAULT_POSE_URL = process.env.DOGZILLA_POSE_URL || 'http://10.0.4.32:8896/pose'
-const DEFAULT_BRIDGE_HEALTH_URL = process.env.DOGZILLA_BRIDGE_HEALTH_URL || 'http://10.0.4.32:8893/healthz'
 
 export function normalizeWaypointName(value) {
   return String(value || '')
@@ -29,7 +30,6 @@ export function poseToWaypoint(pose, {
   physicalSpot = '',
   arrivalToleranceMeters = 0.25,
   mapOrigin = null,
-  mapMetadata = null,
 } = {}) {
   const body = pose?.pose && typeof pose.pose === 'object' ? pose.pose : pose
   const rawFrame = String(body?.frameId || body?.frame_id || body?.frame || '').trim()
@@ -38,7 +38,6 @@ export function poseToWaypoint(pose, {
   const rawY = Number(body?.y)
   const rawYaw = Number(body?.theta ?? body?.yaw)
   const capturedAt = new Date().toISOString()
-  const map = rawFrame === 'map' ? normalizeDogzillaMapMetadata(mapMetadata) : null
 
   if (!rawFrame || !Number.isFinite(rawX) || !Number.isFinite(rawY) || !Number.isFinite(rawYaw)) {
     throw new Error('pose payload missing finite frame/x/y/yaw')
@@ -50,10 +49,7 @@ export function poseToWaypoint(pose, {
   let yaw = rawYaw
   let capturedMapPose = null
   const mapOriginSnapshot = rawFrame === 'map' && mapOrigin
-    ? buildDogzillaMapOriginSnapshot({
-      ...mapOrigin,
-      ...(map && !mapOrigin.map ? { map } : {}),
-    })
+    ? buildDogzillaMapOriginSnapshot(mapOrigin)
     : null
 
   if (rawFrame === 'map' && mapOrigin) {
@@ -75,30 +71,14 @@ export function poseToWaypoint(pose, {
     yaw,
     arrivalToleranceMeters,
     physicalSpot,
-    verified: rawFrame === 'map' && !!map?.fingerprint,
+    verified: rawFrame === 'map',
     capturedAt,
-    capturedFrom: source || 'dogzilla pose bridge',
-    ...(map?.id ? { mapId: map.id } : {}),
-    ...(map?.fingerprint ? { mapFingerprint: map.fingerprint } : {}),
-    ...(map ? {
-      map: {
-        id: map.id,
-        fingerprint: map.fingerprint,
-        savedAt: map.savedAt,
-        yaml: map.yaml,
-        pgm: map.pgm,
-        pbstream: map.pbstream,
-        resolution: map.resolution,
-        origin: map.origin,
-        bounds: map.bounds,
-      },
-    } : {}),
+    capturedFrom: source || 'dogzilla rosbridge',
     ...(mapOriginSnapshot ? { mapOrigin: mapOriginSnapshot } : {}),
     ...(capturedMapPose ? { capturedMapPose } : {}),
     notes: [
-      `Captured from ${source || 'dogzilla pose bridge'} at ${capturedAt}.`,
+      `Captured from ${source || 'dogzilla rosbridge'} at ${capturedAt}.`,
       ...(capturedMapPose ? [`Captured map pose: x=${capturedMapPose.x}, y=${capturedMapPose.y}, yaw=${capturedMapPose.yaw}.`] : []),
-      ...(map ? [`Captured map identity: id=${map.id || 'unknown'}, fingerprint=${map.fingerprint || 'unknown'}.`] : []),
       ...(frame === APP_MAP_FRAME ? [`Stored in ${APP_MAP_FRAME} frame; stable across Cartographer origin shifts.`] : []),
       'Use with command JSON: {"command":"move","waypoint":"<name>"}',
     ],
@@ -120,36 +100,30 @@ export function upsertWaypoint(config, waypointName, waypoint) {
 
 export async function captureWaypoint({
   name,
-  poseUrl = DEFAULT_POSE_URL,
   waypointFile = DEFAULT_WAYPOINT_FILE,
   captureDir = DEFAULT_CAPTURE_DIR,
   originFile = DEFAULT_MAP_ORIGIN_FILE,
-  bridgeHealthUrl = DEFAULT_BRIDGE_HEALTH_URL,
   physicalSpot = '',
   arrivalToleranceMeters = 0.25,
   allowOdom = false,
-  allowMissingMapIdentity = false,
+  poseTimeoutMs = 10_000,
 } = {}) {
   const waypointName = normalizeWaypointName(name)
   if (!waypointName) {
     throw new Error('waypoint name is required')
   }
 
-  const response = await fetch(poseUrl)
-  const posePayload = await response.json()
-  if (!response.ok || posePayload.ok === false) {
-    throw new Error(posePayload.error || posePayload.message || `pose request failed: ${response.status}`)
+  await startDogzillaLidarClient()
+  const posePayload = await waitForMapPose(poseTimeoutMs)
+  if (!posePayload.ok) {
+    throw new Error(posePayload.error || 'pose not available')
   }
 
   const mapOrigin = await loadDogzillaMapOrigin(originFile)
-  const mapMetadata = await loadActiveMapMetadata(bridgeHealthUrl)
-  const waypoint = poseToWaypoint(posePayload, { physicalSpot, arrivalToleranceMeters, mapOrigin, mapMetadata })
+  const waypoint = poseToWaypoint(posePayload, { physicalSpot, arrivalToleranceMeters, mapOrigin })
   const effectiveFrame = waypoint.capturedMapPose?.frame || waypoint.frame
   if (effectiveFrame !== 'map' && !allowOdom) {
     throw new Error(`refusing to save non-map pose frame "${effectiveFrame}"; rerun with --allow-odom for temporary targets`)
-  }
-  if (effectiveFrame === 'map' && !waypoint.mapFingerprint && !allowMissingMapIdentity) {
-    throw new Error('refusing to capture map waypoint without active map identity; start DOGZILLA Direct Bridge or rerun with --allow-missing-map-identity')
   }
 
   const captureFile = path.join(captureDir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${waypointName}.json`)
@@ -160,50 +134,49 @@ export async function captureWaypoint({
     waypoint,
     sourceOfTruthFile: waypointFile,
     writePolicy: 'proposal-only; config/robot-waypoints.json is not overwritten by capture',
-    mapIdentityRequired: !allowMissingMapIdentity,
   }, null, 2)}\n`, 'utf-8')
 
   return { waypointName, waypoint, waypointFile, captureFile }
 }
 
-async function loadActiveMapMetadata(bridgeHealthUrl) {
-  if (!bridgeHealthUrl) {
-    return null
-  }
+async function waitForMapPose(timeoutMs) {
+  const startedAt = Date.now()
+  do {
+    const pose = await getDogzillaRobotPose()
+    if (pose.ok && pose.waypointSafe) {
+      return pose
+    }
+    await sleep(250)
+  } while (Date.now() - startedAt < timeoutMs)
 
-  const response = await fetch(bridgeHealthUrl)
-  const body = await response.json()
-  if (!response.ok || body.ok === false) {
-    throw new Error(body.error || body.message || `bridge health failed: ${response.status}`)
-  }
+  const last = await getDogzillaRobotPose()
+  return last
+}
 
-  return body.runtime?.map || null
+function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms) })
 }
 
 function parseArgs(argv) {
   const args = {
-    poseUrl: DEFAULT_POSE_URL,
     waypointFile: DEFAULT_WAYPOINT_FILE,
     captureDir: DEFAULT_CAPTURE_DIR,
     originFile: DEFAULT_MAP_ORIGIN_FILE,
-    bridgeHealthUrl: DEFAULT_BRIDGE_HEALTH_URL,
     arrivalToleranceMeters: 0.25,
     allowOdom: false,
-    allowMissingMapIdentity: false,
+    poseTimeoutMs: 10_000,
     physicalSpot: '',
   }
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]
-    if (token === '--pose-url') args.poseUrl = argv[++index]
-    else if (token === '--file') args.waypointFile = path.resolve(argv[++index])
+    if (token === '--file') args.waypointFile = path.resolve(argv[++index])
     else if (token === '--capture-dir') args.captureDir = path.resolve(argv[++index])
     else if (token === '--origin-file') args.originFile = path.resolve(argv[++index])
-    else if (token === '--bridge-health-url') args.bridgeHealthUrl = argv[++index]
     else if (token === '--spot') args.physicalSpot = argv[++index]
     else if (token === '--tolerance') args.arrivalToleranceMeters = Number(argv[++index])
     else if (token === '--allow-odom') args.allowOdom = true
-    else if (token === '--allow-missing-map-identity') args.allowMissingMapIdentity = true
+    else if (token === '--pose-timeout') args.poseTimeoutMs = Number(argv[++index])
     else if (!args.name) args.name = token
     else throw new Error(`unknown argument: ${token}`)
   }

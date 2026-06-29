@@ -4,11 +4,11 @@ import net from 'node:net'
 import path from 'node:path'
 import { forceDogzillaDirectBridgeOnStartup } from './lib/dogzilla-direct-bridge-launcher.mjs'
 import { forceDogzillaRequiredServicesOnStartup } from './lib/dogzilla-required-services-launcher.mjs'
+import { forceDogzillaWaypointNavigationOnStartup } from './lib/dogzilla-waypoint-navigation-launcher.mjs'
 import {
-  forceDogzillaWaypointNavigationOnStartup,
-  isDogzillaWaypointNavigationReady,
-} from './lib/dogzilla-waypoint-navigation-launcher.mjs'
-import { shouldBlockDogzillaAppLaunchForNavigation } from './lib/dogzilla-startup-watchdog.mjs'
+  getDogzillaLidarHealth,
+  startDogzillaLidarClient,
+} from './lib/dogzilla-lidar-client.mjs'
 import { loadIsaacSidecarConfig } from './lib/isaacsim-config.mjs'
 import { startManagedIsaacEnvironment } from './lib/isaacsim-launcher.mjs'
 import { loadRobotRos2Config, loadRobotRuntimeConfig } from './lib/robot-runtime-config.mjs'
@@ -16,6 +16,7 @@ import {
   runExistingAppRobotStartupSequence,
   runRobotStartupSequence,
 } from './lib/robot-startup-sequence.mjs'
+import { fetchRobotBridgeState } from './lib/robot-sidecar-client.mjs'
 import { stopManagedProcessOnPort } from './lib/managed-process-cleanup.mjs'
 import { startManagedRobotEnvironment } from './lib/robot-sidecar-launcher.mjs'
 import { resolveActiveSpeechProfile } from './lib/speech-profile-config.mjs'
@@ -45,7 +46,6 @@ if (existingAppConfig && reuseExistingApp) {
   const requiredServicesStartup = ensureExistingAppDogzillaRequiredServices(existingAppConfig)
   await requiredServicesStartup
   await ensureExistingAppDogzillaDirectBridge(APP_URL, existingAppConfig)
-  await ensureExistingAppDogzillaWaypointNavigation(APP_URL, existingAppConfig)
   startupStatus.update('Running robot startup sequence')
   await runExistingAppRobotStartupSequence(APP_URL, existingAppConfig, {
     logger: console,
@@ -132,36 +132,15 @@ if (existingAppConfig && reuseExistingApp) {
       }),
     ])
 
-    startupStatus.update('Checking waypoint navigator')
-    const waypointNavigationStartup = await forceDogzillaWaypointNavigationOnStartup({
-      runtimeConfig: robotRuntimeConfig,
+    startupStatus.update('Checking DOGZILLA endpoints')
+    const endpointCheck = await verifySimplifiedDogzillaEndpoints({
+      robotRuntimeConfig,
       ros2Config: robotRos2Config,
-      logger: console,
-      replaceExisting: replaceManagedSidecars,
-    }).catch((error) => {
-      console.warn(`DOGZILLA waypoint navigator startup failed: ${error instanceof Error ? error.message : String(error)}`)
-      return null
+      directBridgeStartup,
     })
-
-    const startupGate = {
-      status: waypointNavigationStartup?.status === 'ok' || waypointNavigationStartup?.status === 'skipped'
-        ? 'ok'
-        : 'degraded',
-      waypointNavigation: waypointNavigationStartup || {
-        enabled: true,
-        status: 'error',
-        error: 'DOGZILLA waypoint navigation startup did not return a result.',
-      },
-    }
-
-    if (shouldBlockDogzillaAppLaunchForNavigation(startupGate)) {
-      const reason = waypointNavigationStartup?.error
-        || waypointNavigationStartup?.health?.error
-        || waypointNavigationStartup?.health?.body?.runtime?.nav2?.serverError
-        || 'DOGZILLA Nav2 waypoint readiness is not proven.'
+    if (!endpointCheck.ok) {
       startupStatus.stop()
-      console.error(`App launch blocked: DOGZILLA navigation is not ready. ${reason}`)
-      console.error('Set APP_DOGZILLA_STARTUP_REQUIRE_NAV=0 only for non-navigation debugging.')
+      console.error(`App launch blocked: ${endpointCheck.error}`)
       process.exit(1)
     }
 
@@ -171,12 +150,15 @@ if (existingAppConfig && reuseExistingApp) {
       ros2Config: robotRos2Config,
       logger: console,
       existingDirectBridgeHealth: pickFreshDirectBridgeHealth([
-        waypointNavigationStartup?.health,
         directBridgeStartup?.health,
       ]),
     })
 
     startupStatus.stop('Starting Questing Beast server')
+    startNav2Background({
+      runtimeConfig: robotRuntimeConfig,
+      ros2Config: robotRos2Config,
+    })
     const server = spawn(process.execPath, ['server.mjs'], {
       cwd: __dirname,
       stdio: 'inherit',
@@ -185,7 +167,6 @@ if (existingAppConfig && reuseExistingApp) {
         APP_HOST: HOST,
         APP_PORT: String(PORT),
         APP_MODEL_PROFILE: MODEL_PROFILE,
-        APP_DOGZILLA_STARTUP_WATCHDOG: '0',
         APP_DOGZILLA_STARTUP_MONITOR: process.env.APP_DOGZILLA_STARTUP_MONITOR ?? '1',
         ROBOT_RUNTIME_TARGET: robotRuntimeConfig.activeTargetId,
         KUKURA_HOST: HOST,
@@ -346,40 +327,6 @@ async function ensureExistingAppDogzillaDirectBridge(appUrl, appConfig) {
   })
 }
 
-async function ensureExistingAppDogzillaWaypointNavigation(appUrl, appConfig) {
-  if (appConfig?.robotRuntime?.activeTarget?.kind !== 'dogzilla-direct' || appConfig?.dogzilla?.lidar?.enabled !== true) {
-    return
-  }
-
-  try {
-    const healthResponse = await fetch(new URL('/api/robot/health', appUrl), {
-      signal: AbortSignal.timeout(2500),
-    })
-    const health = await safeReadJson(healthResponse)
-
-    if (healthResponse.ok && isDogzillaWaypointNavigationReady(health)) {
-      console.log(green(`DOGZILLA waypoint navigator already ready at ${health.destination}.`))
-      return
-    }
-  } catch {
-    // Fall through to startup repair.
-  }
-
-  console.log('App is already open, but DOGZILLA waypoint navigator is not ready. Starting it now.')
-  const startResult = await runExistingAppDogzillaAction(appUrl, 'start-navigation', 180_000)
-  if (startResult?.status === 'error') {
-    return
-  }
-
-  const health = await waitForExistingAppDogzillaWaypointNavigation(appUrl)
-
-  if (isDogzillaWaypointNavigationReady(health)) {
-    console.log(green(`DOGZILLA waypoint navigator ready at ${health.destination}.`))
-  } else {
-    console.warn(`DOGZILLA waypoint navigator did not become ready: ${health?.error || health?.status || 'unknown status'}`)
-  }
-}
-
 async function runExistingAppDogzillaAction(appUrl, action, timeoutMs, options = {}) {
   const response = await fetch(new URL('/api/dogzilla/connection/action', appUrl), {
     method: 'POST',
@@ -402,36 +349,6 @@ async function runExistingAppDogzillaAction(appUrl, action, timeoutMs, options =
     status: response.ok ? 'ok' : 'error',
     action,
     responseStatus: response.status,
-  }
-}
-
-async function waitForExistingAppDogzillaWaypointNavigation(appUrl, timeoutMs = 45_000) {
-  const startedAt = Date.now()
-  let lastHealth = null
-
-  do {
-    try {
-      const healthResponse = await fetch(new URL('/api/robot/health', appUrl), {
-        signal: AbortSignal.timeout(2500),
-      })
-      lastHealth = await safeReadJson(healthResponse)
-
-      if (healthResponse.ok && isDogzillaWaypointNavigationReady(lastHealth)) {
-        return lastHealth
-      }
-    } catch (error) {
-      lastHealth = {
-        status: 'error',
-        error: error instanceof Error ? error.message : String(error),
-      }
-    }
-
-    await sleep(1000)
-  } while (Date.now() - startedAt < timeoutMs)
-
-  return lastHealth || {
-    status: 'error',
-    error: `Timed out waiting ${timeoutMs}ms for DOGZILLA waypoint navigator readiness.`,
   }
 }
 
@@ -641,4 +558,70 @@ function pickFreshDirectBridgeHealth(candidates = []) {
     }
   }
   return null
+}
+
+function startNav2Background({ runtimeConfig, ros2Config }) {
+  const minBatteryPct = Number(process.env.APP_DOGZILLA_NAV2_START_MIN_BATTERY_PCT || 25)
+
+  Promise.resolve()
+    .then(async () => {
+      const state = await fetchRobotBridgeState(runtimeConfig, ros2Config).catch(() => null)
+      const battery = Number(state?.state?.battery)
+      if (Number.isFinite(battery) && Number.isFinite(minBatteryPct) && battery <= minBatteryPct) {
+        return {
+          enabled: false,
+          status: 'skipped',
+          reason: `battery ${battery}% <= ${minBatteryPct}%`,
+        }
+      }
+
+      return forceDogzillaWaypointNavigationOnStartup({
+        runtimeConfig,
+        ros2Config,
+        logger: console,
+      })
+    })
+    .then((nav2Result) => {
+    if (nav2Result.status === 'ok') {
+      console.log(green('DOGZILLA Nav2 waypoint navigation ready.'))
+    } else if (nav2Result.enabled !== false) {
+      console.warn(`DOGZILLA Nav2 startup: ${nav2Result.reason || nav2Result.error || nav2Result.status || 'unknown'}`)
+    } else if (nav2Result.status === 'skipped') {
+      console.warn(`DOGZILLA Nav2 startup skipped: ${nav2Result.reason}`)
+    }
+  }).catch((error) => {
+    console.warn(`DOGZILLA Nav2 startup error: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
+
+async function verifySimplifiedDogzillaEndpoints({ robotRuntimeConfig, ros2Config, directBridgeStartup }) {
+  const isDogzillaDirect = robotRuntimeConfig.activeTarget?.kind === 'dogzilla-direct'
+
+  if (!isDogzillaDirect) {
+    return { ok: true }
+  }
+
+  const lidarHealth = await startDogzillaLidarClient()
+    .then(() => getDogzillaLidarHealth())
+    .catch((error) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+
+  if (!lidarHealth.ok) {
+    return {
+      ok: false,
+      error: `DOGZILLA rosbridge is not reachable: ${lidarHealth.error || lidarHealth.status || 'unknown'}`,
+    }
+  }
+
+  const directHealth = directBridgeStartup?.health
+  if (!directHealth || directHealth.status !== 'ok') {
+    return {
+      ok: false,
+      error: 'DOGZILLA Direct Bridge (8893) is not healthy.',
+    }
+  }
+
+  return { ok: true }
 }

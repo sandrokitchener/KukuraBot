@@ -18,6 +18,7 @@ import {
   clusterLidarPoints,
   createRobotMapRenderer,
   formatLidarFailureSummary,
+  formatMapStatusPayload,
   formatRobotMapWaypointTitle,
   formatWaypointReadinessSummary,
   getMapGridView,
@@ -27,6 +28,7 @@ import {
   getRobotMapRangeMeters,
   headingRadiansToCssRotation,
   lidarPointToMapPose,
+  occupancyGridCellToRGBA,
   poseToMapPosition,
   projectLidarPointToEgoView,
 } from '../public/robot-map.js'
@@ -611,6 +613,25 @@ test('robot map heading converts ROS yaw to CSS arrow rotation', () => {
   assert.equal(headingRadiansToCssRotation(Number.NaN), 0)
 })
 
+test('occupancyGridCellToRGBA thresholds live grid probabilities to match saved PGM', () => {
+  // Unknown stays unknown (warm gray).
+  assert.deepEqual(occupancyGridCellToRGBA(-1), { r: 206, g: 208, b: 205, a: 255 })
+
+  // Free and low-probability cells render as free cream.
+  assert.deepEqual(occupancyGridCellToRGBA(0), { r: 246, g: 247, b: 242, a: 255 })
+  assert.deepEqual(occupancyGridCellToRGBA(25), { r: 246, g: 247, b: 242, a: 255 })
+  assert.deepEqual(occupancyGridCellToRGBA(50), { r: 246, g: 247, b: 242, a: 255 })
+
+  // Uncertain mid-range cells render as unknown so the minimap matches the
+  // thresholded saved map instead of showing noisy Cartographer probabilities.
+  assert.deepEqual(occupancyGridCellToRGBA(51), { r: 206, g: 208, b: 205, a: 255 })
+  assert.deepEqual(occupancyGridCellToRGBA(64), { r: 206, g: 208, b: 205, a: 255 })
+
+  // Occupied cells render with a dark gradient.
+  assert.deepEqual(occupancyGridCellToRGBA(65), { r: 97, g: 98, b: 96, a: 255 })
+  assert.deepEqual(occupancyGridCellToRGBA(100), { r: 16, g: 17, b: 18, a: 255 })
+})
+
 
 test("createRobotMapRenderer exposes callable setPoseTrust", () => {
   const renderer = createRobotMapRenderer({
@@ -690,21 +711,21 @@ test('deriveSafeNextAction surfaces disabled/safe-next blocker for nav2 blocked 
     activeRobot: { uuid: 'dogzilla' },
     nav2Stability: { state: 'blocked', currentBlocker: 'Nav2 NavigateToPose action server is not running' },
   })
-  assert.equal(blocked.action, 'Start Nav')
+  assert.equal(blocked.action, 'Restart Nav')
   assert.match(blocked.blocker, /NavigateToPose action server/)
 
   const disconnected = deriveSafeNextAction({
     activeRobot: { uuid: 'dogzilla' },
     nav2Stability: { state: 'disconnected', currentBlocker: 'No runtime data from bridge' },
   })
-  assert.equal(disconnected.action, 'Start Nav')
+  assert.equal(disconnected.action, 'Restart Nav')
   assert.match(disconnected.blocker, /No runtime data from bridge/)
 
   const poseBlocked = deriveSafeNextAction({
     activeRobot: { uuid: 'dogzilla' },
     poseState: { status: 'error', error: 'Pose not waypoint-safe' },
   })
-  assert.equal(poseBlocked.action, 'Restart map localization')
+  assert.equal(poseBlocked.action, 'Localize on Map')
   assert.match(poseBlocked.blocker, /Pose not waypoint-safe/)
 
   const ready = deriveSafeNextAction({
@@ -778,4 +799,116 @@ test('dangerous maintenance actions require confirmation with consequence text',
   assert.match(stopVendor.message, /stop the vendor DOGZILLA app|unavailable until it is restarted/i)
 
   assert.equal(getConnectionActionConfirmation('probe-bridges'), null)
+})
+
+// --- formatMapStatusPayload tests ---
+
+test('formatMapStatusPayload reports no-map when payload is missing', () => {
+  const result = formatMapStatusPayload(null, null)
+  assert.equal(result.mode, 'no-map')
+  assert.equal(result.modeLabel, 'Map unavailable')
+  assert.equal(result.fresh, false)
+  assert.equal(result.occupiedCount, 0)
+})
+
+test('formatMapStatusPayload reports no-map when payload ok is false', () => {
+  const result = formatMapStatusPayload({ ok: false, status: 'no-map' }, null)
+  assert.equal(result.mode, 'no-map')
+  assert.equal(result.modeLabel, 'No map')
+})
+
+test('formatMapStatusPayload reads mode from health payload map field', () => {
+  const mapPayload = {
+    ok: true,
+    width: 100,
+    height: 100,
+    resolution: 0.05,
+    occupiedCount: 1200,
+    freeCount: 8400,
+    unknownCount: 400,
+    receivedAtAgeSec: 1.4,
+    receivedAtEpoch: 1000,
+    cells: 'AAAA',
+    origin: { x: 0, y: 0 },
+  }
+  const healthPayload = { map: { mode: 'mapping' } }
+  const result = formatMapStatusPayload(mapPayload, healthPayload)
+  assert.equal(result.mode, 'mapping')
+  assert.equal(result.modeLabel, 'Mapping')
+  assert.equal(result.fresh, true)
+  assert.equal(result.lastUpdateAgeSec, 1.4)
+  assert.match(result.freshnessLabel, /1\.4s ago/)
+  assert.equal(result.occupiedCount, 1200)
+  assert.equal(result.freeCount, 8400)
+  assert.match(result.cellCountsLabel, /1,200 occupied/)
+  assert.match(result.cellCountsLabel, /8,400 free/)
+  assert.match(result.cellCountsLabel, /400 unknown/)
+})
+
+test('formatMapStatusPayload marks stale map as not fresh', () => {
+  const mapPayload = {
+    ok: true,
+    width: 50,
+    height: 50,
+    resolution: 0.05,
+    occupiedCount: 10,
+    freeCount: 200,
+    receivedAtAgeSec: 12.3,
+    cells: 'AAAA',
+    origin: { x: 0, y: 0 },
+  }
+  const result = formatMapStatusPayload(mapPayload, null)
+  assert.equal(result.fresh, false)
+  assert.match(result.freshnessLabel, /12s ago/)
+})
+
+test('formatMapStatusPayload uses bbox for bounds label', () => {
+  const mapPayload = {
+    ok: true,
+    width: 100,
+    height: 100,
+    resolution: 0.05,
+    occupiedCount: 100,
+    freeCount: 500,
+    receivedAtAgeSec: 0.8,
+    cells: 'AAAA',
+    origin: { x: 0, y: 0 },
+    bbox: { minX: -1.5, minY: -2.0, maxX: 3.5, maxY: 2.5 },
+  }
+  const result = formatMapStatusPayload(mapPayload, null)
+  assert.equal(result.bboxLabel, 'Bounds 5.0×4.5m explored')
+})
+
+test('formatMapStatusPayload falls back to unknown when health has no mode', () => {
+  const mapPayload = {
+    ok: true,
+    width: 20,
+    height: 20,
+    resolution: 0.05,
+    occupiedCount: 5,
+    freeCount: 50,
+    receivedAtAgeSec: 2.1,
+    cells: 'AAAA',
+    origin: { x: 0, y: 0 },
+  }
+  const result = formatMapStatusPayload(mapPayload, {})
+  assert.equal(result.mode, 'unknown')
+})
+
+test('formatMapStatusPayload handles localization mode', () => {
+  const mapPayload = {
+    ok: true,
+    width: 50,
+    height: 50,
+    resolution: 0.05,
+    occupiedCount: 0,
+    freeCount: 0,
+    receivedAtAgeSec: null,
+    cells: 'AAAA',
+    origin: { x: 0, y: 0 },
+  }
+  const result = formatMapStatusPayload(mapPayload, { map: { mode: 'localization' } })
+  assert.equal(result.mode, 'localization')
+  assert.equal(result.modeLabel, 'Localizing')
+  assert.equal(result.fresh, false)
 })

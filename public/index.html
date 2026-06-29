@@ -260,53 +260,73 @@
               </div>
               <div class="robot-map-meta-row">
                 <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
+                <span id="robot-map-mode-chip" class="map-mode-chip" hidden>…</span>
+                <span id="robot-map-freshness" class="map-freshness" hidden></span>
+                <span id="robot-map-cell-counts" class="map-cell-counts" hidden></span>
+                <span id="robot-map-bbox" class="map-bbox" hidden></span>
               </div>
             </div>
- <details id="map-workflow-panel" class="map-workflow-panel">
- <summary class="map-workflow-head">
- <span class="map-workflow-title">Navigation Setup</span>
- <span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
- </summary>
+<details id="map-workflow-panel" class="map-workflow-panel">
+<summary class="map-workflow-head">
+<span class="map-workflow-title">Navigation Setup</span>
+<span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
+</summary>
               <div class="map-workflow-steps">
                 <div class="map-workflow-step">
                   <span class="map-step-number">1</span>
-                  <span class="map-step-label">Map your space</span>
+                  <span class="map-step-label">Localize on Map</span>
+                  <span class="map-step-hint">Find robot on saved map. Auto-started on app launch.</span>
                   <div class="map-workflow-actions">
-                    <button type="button" class="map-slam-button" data-connection-action="start-map-pose-mapping">New Map</button>
-                    <button type="button" class="map-slam-button show-on-slam" data-connection-action="save-map-pose">Save Map</button>
+                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Localize on Map</button>
                   </div>
                 </div>
                 <div class="map-workflow-step">
                   <span class="map-step-number">2</span>
-                  <span class="map-step-label">Set home position</span>
+                  <span class="map-step-label">Mark Origin</span>
+                  <span class="map-step-hint">Set charger/home. Once per map or after remap.</span>
                   <div class="map-workflow-actions">
-                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Find Position</button>
-                    <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Set Home</button>
+                    <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Mark Origin</button>
                   </div>
                 </div>
                 <div class="map-workflow-step">
                   <span class="map-step-number">3</span>
-                  <span class="map-step-label">Save waypoints</span>
+                  <span class="map-step-label">Save Waypoints</span>
+                  <span class="map-step-hint">DRIVE to each spot, wait for waypointSafe, then save.</span>
                   <div class="waypoint-capture-row">
                     <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
                     <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as a waypoint">Save Spot</button>
                     <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
                   </div>
                   <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
-                    <span class="stale-waypoints-label">Out of date — move robot here, then click Re-save</span>
+                    <span class="stale-waypoints-label">Out of date — drive robot here, then click Recapture</span>
                     <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
                   </div>
                 </div>
                 <div class="map-workflow-step">
                   <span class="map-step-number">4</span>
-                  <span class="map-step-label">Start navigation</span>
+                  <span class="map-step-label">Check Ready</span>
+                  <span class="map-step-hint">Verify Nav2 + waypoint readiness before dispatch.</span>
                   <div class="map-workflow-actions">
                     <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check Ready</button>
-                    <button type="button" class="map-workflow-button" data-connection-action="start-navigation">Start Nav</button>
+                    <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Nav</button>
                   </div>
                 </div>
               </div>
- </details>
+              <details id="map-new-space-section" class="map-new-space-section">
+                <summary class="map-new-space-head">
+                  <span class="map-new-space-title">Map a new space</span>
+                  <span class="map-new-space-hint">First time or replacing a stale map</span>
+                </summary>
+                <div class="map-new-space-body">
+                  <span id="slam-mode-chip" class="slam-mode-chip" hidden>Mapping</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" id="new-map-button" class="map-slam-button" data-connection-action="start-map-pose-mapping">New Map</button>
+                    <button type="button" id="save-map-button" class="map-slam-button" data-connection-action="save-map-pose" disabled>Save Map</button>
+                  </div>
+                  <p class="map-new-space-note">After Save Map, localization restarts automatically against the new map.</p>
+                </div>
+              </details>
+</details>
  <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
@@ -329,6 +349,7 @@
             <div class="robot-map-head">
               <h2>Camera</h2>
 <div class="robot-camera-actions">
+<button id="robot-camera-yolo-toggle" class="camera-refresh-button camera-yolo-toggle" type="button" aria-label="Toggle YOLO object detection" title="Toggle YOLO object detection">YOLO: Off</button>
 <button id="robot-camera-refresh-button" class="camera-refresh-button" type="button" aria-label="Refresh camera view" title="Refresh camera view" disabled>Refresh</button>
 <button id="robot-camera-recover-button" class="camera-refresh-button camera-recover-button" type="button" aria-label="Restart YOLO camera feed" title="Restart YOLO camera feed" disabled>Fix black feed</button>
 <span id="robot-camera-chip" class="runtime-chip">Waiting...</span>
@@ -488,14 +509,14 @@
             <button type="button" data-connection-action="start-yolo">Restart YOLO vision</button>
             <button type="button" data-connection-action="start-audio">Restart Pi audio</button>
             <button type="button" data-connection-action="start-lidar">Restart lidar bridge</button>
-            <button type="button" data-connection-action="start-map-pose">Restart map localization</button>
+            <button type="button" data-connection-action="start-map-pose">Localize on Map</button>
           </div>
           <details class="advanced-service-tools">
             <summary>Maintenance controls</summary>
             <div class="bridge-action-grid">
               <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
               <button type="button" data-connection-action="save-map-pose">Save Map</button>
-              <button type="button" data-connection-action="start-map-pose-mapping">Start Mapping</button>
+              <button type="button" data-connection-action="start-map-pose-mapping">New Map</button>
               <button type="button" data-connection-action="stop-vendor-app">Stop vendor app</button>
               <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
             </div>
@@ -579,40 +600,43 @@
           <div id="help-mermaid-container" class="help-mermaid-container">
             <pre class="mermaid">
 flowchart TD
-    A[Start mapping mode] --> B[Walk robot around space slowly]
-    B --> C[Return to starting area]
-    C --> D[Save new map identity]
-    D --> E[Start localization on saved map]
-    E --> F[Set charger origin here]
-    F --> G[Carry/walk robot to waypoint spot]
+    S{Saved map exists?}
+    S -->|no| A[Open Map a new space]
+    A --> B[New Map]
+    B --> C[Drive robot around slowly]
+    C --> D[Save Map]
+    D --> E[Auto-restart localization]
+    S -->|yes| E
+    E --> F[Mark Origin]
+    F --> G[Drive robot to waypoint spot]
     G --> H[Wait for pose stable]
-    H --> I[Save waypoint here]
+    H --> I[Save Spot]
     I --> J{More waypoints?}
     J -->|yes| G
-    J -->|no| K[Check waypoint readiness]
+    J -->|no| K[Check Ready]
     K --> L{All ready?}
     L -->|no| M[Recapture stale waypoints]
     M --> K
-    L -->|yes| N[Start waypoint navigator]
+    L -->|yes| N[Restart Nav if needed]
     N --> O[Say 'go to kitchen']
             </pre>
           </div>
           <div id="help-mermaid-fallback" class="help-mermaid-fallback" hidden>
             <p>Diagram could not be rendered. Flow:</p>
             <ol class="help-fallback-list">
-              <li>Start mapping mode</li>
-              <li>Walk robot around space slowly</li>
-              <li>Return to starting area</li>
-              <li>Save new map identity</li>
-              <li>Start localization on saved map</li>
-              <li>Set charger origin here</li>
-              <li>Carry/walk robot to waypoint spot</li>
-              <li>Wait for pose stable</li>
-              <li>Save waypoint here</li>
+              <li>If no saved map: open Map a new space, click New Map</li>
+              <li>Drive robot around slowly to build the map</li>
+              <li>Click Save Map</li>
+              <li>Localization restarts automatically against the new map</li>
+              <li>If saved map exists: app auto-starts localization</li>
+              <li>Mark Origin on the charger</li>
+              <li>Drive robot to each waypoint spot</li>
+              <li>Wait for pose stable / waypointSafe</li>
+              <li>Save Spot</li>
               <li>Repeat for more waypoints</li>
-              <li>Check waypoint readiness</li>
+              <li>Check Ready</li>
               <li>Recapture stale waypoints if needed</li>
-              <li>Start waypoint navigator</li>
+              <li>Restart Nav if not already running</li>
               <li>Say "go to kitchen"</li>
             </ol>
           </div>
@@ -622,32 +646,20 @@ flowchart TD
           <h3>Step-by-step instructions</h3>
           <ol class="help-steps">
             <li>
-              <strong>Start mapping mode</strong>
-              <p>Open the Mapping panel and click "Start mapping mode". This puts Cartographer into SLAM mode to build a new map.</p>
+              <strong>Localize on Map</strong>
+              <p>On a normal session, the app does this automatically. It starts Cartographer in localization mode against the saved map. Click "Localize on Map" if you need to restart it manually.</p>
             </li>
             <li>
-              <strong>Walk robot around space slowly</strong>
-              <p>Use manual controls or carry the robot upright at a steady pace. Keep the LiDAR clear of obstacles. Walk the entire area you want to map.</p>
+              <strong>Map a new space (only first time or when replacing a stale map)</strong>
+              <p>Open the "Map a new space" section and click "New Map". Cartographer enters SLAM mapping mode. Drive the robot slowly around the entire area to build the map, then click "Save Map". Localization restarts automatically against the new map.</p>
             </li>
             <li>
-              <strong>Return to starting area</strong>
-              <p>Bring the robot back to where you started mapping. This helps Cartographer close the loop and improve map quality.</p>
+              <strong>Mark Origin</strong>
+              <p>Place the robot on its charger. Click "Mark Origin". This establishes the (0,0) reference point for all waypoints. You only need to do this once per map, or after a remap.</p>
             </li>
             <li>
-              <strong>Save new map identity</strong>
-              <p>In the Mapping panel, click "Save new map identity". This saves the occupancy grid and assigns a unique map ID.</p>
-            </li>
-            <li>
-              <strong>Start localization on saved map</strong>
-              <p>Click "Localize on saved map". Cartographer switches to localization mode, matching the current LiDAR scan against the saved map.</p>
-            </li>
-            <li>
-              <strong>Set charger origin here</strong>
-              <p>Place the robot on its charger. Click "Set charger origin here". This establishes the (0,0) reference point for all waypoints.</p>
-            </li>
-            <li>
-              <strong>Carry/walk robot to waypoint spot</strong>
-              <p>Move the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch).</p>
+              <strong>Drive robot to waypoint spot</strong>
+              <p>Use manual controls to <strong>drive</strong> the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch). Do not carry the robot — Cartographer laser-only localization cannot globally re-localize after being carried.</p>
             </li>
             <li>
               <strong>Wait for pose stable</strong>
@@ -655,7 +667,7 @@ flowchart TD
             </li>
             <li>
               <strong>Save waypoint here</strong>
-              <p>Enter a waypoint name (e.g., "kitchen") and click "Save waypoint here". The current pose is saved with the map identity.</p>
+              <p>Enter a waypoint name (e.g., "kitchen") and click "Save Spot". The current pose is saved with the map identity.</p>
             </li>
             <li>
               <strong>Repeat for more waypoints</strong>
@@ -670,8 +682,8 @@ flowchart TD
               <p>If any waypoints show as stale (map identity mismatch), click "Recapture" next to each one and re-save at the correct location.</p>
             </li>
             <li>
-              <strong>Start waypoint navigator</strong>
-              <p>In the Diagnostics drawer, click "Start waypoint navigator". This launches Nav2 with the saved map and waypoints.</p>
+              <strong>Restart Nav if needed</strong>
+              <p>The app auto-starts Nav2 on launch. If the nav-chain health shows Nav2 is down, click "Restart Nav" in the Navigation Setup panel.</p>
             </li>
             <li>
               <strong>Say "go to kitchen"</strong>
@@ -712,7 +724,7 @@ flowchart TD
             <ul>
               <li>Check navigation chain health dots in Robot Info panel</li>
               <li>Verify map localization is running (pose should be stable)</li>
-              <li>Try "Restart map localization" in Diagnostics</li>
+              <li>Try "Localize on Map" in Diagnostics</li>
               <li>Check for "Repairing navigation..." status in nav badge</li>
             </ul>
           </details>

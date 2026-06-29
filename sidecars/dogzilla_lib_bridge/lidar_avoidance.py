@@ -12,7 +12,7 @@ from typing import Any
 from process_utils import summarize_process_text
 
 
-DEFAULT_MAP_SCAN_URL = os.environ.get("DOGZILLA_MAP_SCAN_URL", "http://127.0.0.1:8896/scan")
+DEFAULT_MAP_SCAN_URL = os.environ.get("DOGZILLA_MAP_SCAN_URL", "")
 DEFAULT_LIDAR_AVOIDANCE_ENABLED = os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_ENABLED", "1") != "0"
 DEFAULT_LIDAR_AVOIDANCE_TIMEOUT = float(os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_TIMEOUT", "4.0"))
 DEFAULT_LIDAR_AVOIDANCE_COMMAND = os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_COMMAND", "").strip()
@@ -192,7 +192,7 @@ class LidarAvoidanceSupervisor:
             ("host-ros2", ["bash", "-lc", LIDAR_AVOIDANCE_START_COMMAND], False),
             (
                 "lidar-container",
-                ["docker", "exec", "robodoge-lidar-bridge", "bash", "-lc", LIDAR_AVOIDANCE_START_COMMAND],
+                ["docker", "exec", "robodoge-rosbridge", "bash", "-lc", LIDAR_AVOIDANCE_START_COMMAND],
                 False,
             ),
         ]
@@ -205,7 +205,7 @@ class LidarAvoidanceSupervisor:
             ("host-ros2-scan-topic", ["bash", "-lc", command], False),
             (
                 "lidar-container-scan-topic",
-                ["docker", "exec", "robodoge-lidar-bridge", "bash", "-lc", command],
+                ["docker", "exec", "robodoge-rosbridge", "bash", "-lc", command],
                 False,
             ),
         ]

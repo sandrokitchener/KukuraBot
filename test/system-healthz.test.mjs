@@ -29,8 +29,8 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
         },
         lidar: {
           enabled: true,
-          healthUrl: 'http://10.0.4.32:8896/healthz',
-          poseUrl: 'http://10.0.4.32:8896/pose',
+          transport: 'rosbridge',
+          rosbridgeUrl: 'ws://10.0.4.32:9090',
         },
       },
       robotState: {
@@ -90,13 +90,13 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
         frames: 18,
         driver: 'oradar',
         topic: '/scan',
-        destination: 'http://10.0.4.32:8896/healthz',
+        destination: 'ws://10.0.4.32:9090',
       },
       pose: {
         ok: true,
         status: 'ok',
         waypointSafe: true,
-        destination: 'http://10.0.4.32:8896/pose',
+        destination: 'ws://10.0.4.32:9090',
         mapPose: {
           frame: 'map',
           childFrame: 'base_footprint',
@@ -159,7 +159,7 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
   assert.equal(payload.sensors.yoloVision.authority, 'DOGZILLA YOLO vision sidecar')
   assert.equal(payload.sensors.yoloVision.ageSec, 0.5)
   assert.equal(payload.sensors.isaac, undefined)
-  assert.equal(payload.sidecars.lidarBridge.destination, 'http://10.0.4.32:8896/healthz')
+  assert.equal(payload.sidecars.lidarBridge.destination, 'ws://10.0.4.32:9090')
   assert.equal(payload.sidecars.isaac.status, 'ok')
 })
 
@@ -244,7 +244,8 @@ test('buildHealthzPayload marks missing required map pose as failed', () => {
       dogzillaConfig: {
         lidar: {
           enabled: true,
-          poseUrl: 'http://10.0.4.32:8896/pose',
+          transport: 'rosbridge',
+          rosbridgeUrl: 'ws://10.0.4.32:9090',
         },
       },
       lidarHealth: {
@@ -257,7 +258,7 @@ test('buildHealthzPayload marks missing required map pose as failed', () => {
         status: 'no-pose',
         waypointSafe: false,
         error: 'TF lookup odom->base_footprint unavailable.',
-        destination: 'http://10.0.4.32:8896/pose',
+        destination: 'ws://10.0.4.32:9090',
       },
     },
   })

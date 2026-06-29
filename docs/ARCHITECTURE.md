@@ -18,7 +18,7 @@ public/ UI or packaged shell
 -> sidecar or robot bridge
 ```
 
-`run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge processes and ports, then imports `run.mjs`. `server.mjs` also starts a non-blocking DOGZILLA startup watchdog so direct `server.mjs`, LAN, packaged, or reused-app paths still self-heal required support services, the direct bridge, and Nav2 after the UI is up.
+`run.mjs` managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge process ports, then imports `run.mjs`. `server.mjs` serves HTTP/WebSocket, monitors rosbridge reconnects, and runs a low-frequency Nav2 repair watchdog for DOGZILLA direct mode after startup. `run.mjs` still triggers initial Nav2 startup via `startNav2Background()`; UI Connection Center and `npm run dogzilla:start-navigation` remain manual repair paths.
 
 ## Key entrypoints
 
@@ -50,19 +50,45 @@ Isaac Sim is a simulator target and sidecar only. It is not a real DOGZILLA
 sensor and must not participate in DOGZILLA navigation readiness or degrade
 real-world health when the active target is `dogzilla_direct`.
 
-For DOGZILLA waypoint dispatch, the direct bridge `/healthz` Nav2 payload is a
-status snapshot, not a guarantee that the next `/commands` request will skip
-checks. `/commands` re-probes Nav2 action, `/odom`/TF, lifecycle nodes, and
-`/scan_nav2` before sending a goal. Slow Pi lifecycle service responses can make
-the command path report inactive lifecycle nodes even when a later snapshot is
-ready; keep the direct-bridge lifecycle/status timeouts documented in
-`docs/NAVIGATION.md`.
+For DOGZILLA waypoint dispatch, the desktop-side preflight is staged so the
+command never waits on a slow full `/healthz` when the fast probes are already
+green:
 
-Map identity is part of that safety boundary. `robodoge_home_map.json` is the
-active map contract, and saved origins/waypoints are usable only when their
-fingerprints exist and match the active map. `/api/robot/state` caps live health
-probes so the UI can show blocked/localizing/stuck status without waiting on a
-slow bridge health request.
+1. `GET /healthz-lite` proves bridge reachability (2 s timeout).
+2. `GET /nav2/scan_info` forces a live refresh of `/scan_nav2` publisher state
+   (4 s timeout).
+3. Full `GET /healthz` is fetched only when map/lifecycle/odom detail is still
+   needed, capped at 6 s so it cannot hold the command open for tens of seconds.
+   If it times out while the fast probes are green, dispatch proceeds with a
+   warning and skips map-identity/pose validation for that request.
+
+`/commands` still re-probes Nav2 action, `/odom`/TF, lifecycle nodes, and
+`/scan_nav2` before sending a goal, and `locomotion.goto` remains async-by-default
+(`DOGZILLA_ASYNC_HTTP_GOTO=1`): the bridge returns `202` acceptance quickly and
+callers track completion through `/feedback`. Each waypoint dispatch records
+stage-level timing and failure attribution for `healthLite`, `scanInfo`,
+`fullHealth`, `readiness`, `preempt`, and `command`.
+
+The `/scan_nav2` scan filter (`scan_self_filter.py`) is supervised by
+`scan_filter_supervisor.py`, which captures stderr from the child process and
+treats "alive but not publishing" as a hard failure triggering restart. After
+repeated failures the supervisor keeps running with capped exponential backoff,
+because it is launched inside the rosbridge container rather than managed by a
+dedicated restart unit. The filter prints traceback before exiting nonzero on
+rclpy context errors so the supervisor logs the fault reason.
+
+HTTP `locomotion.goto` commands now default to async acceptance on the direct
+bridge (`DOGZILLA_ASYNC_HTTP_GOTO=1` by default). The bridge returns `202` with
+`navigation-accepted` and finishes Nav2 execution in background, while callers
+track completion through `/feedback` instead of holding the original POST open.
+
+Map identity no longer dispatch gate after rosbridge simplification.
+`config/robot-waypoints.json` remains authoritative waypoint source; saved
+origin state plus current rosbridge `map` pose resolve app-map waypoints at
+runtime. `/api/robot/state` caps live health probes so UI can show
+bridge-offline/localizing/stuck status without waiting on slow full bridge
+health request.
+DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists only the last valid reading in `output/app-cache/dogzilla-battery-state.json` so failed reads or app restarts can show `last-known` instead of losing prior monitor state.
 
 ## Config ownership
 
@@ -84,8 +110,8 @@ slow bridge health request.
 | `8892` | ROS2 bridge |
 | `8893` | DOGZILLA direct bridge |
 | `8894` | DOGZILLA YOLO vision |
-| `8895` | DOGZILLA audio cue |
-| `8896` | DOGZILLA LiDAR/map pose |
+| `8895` | DOGZILLA audio cue (keeps live volume state via `/volume`; direct callers like YOLO use it as fallback) |
+| `9090` | DOGZILLA rosbridge (Pi-hosted; scan/TF/map over WebSocket) |
 
 ## Tests
 

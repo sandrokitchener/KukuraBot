@@ -433,7 +433,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client.client_available = False
         client.server_available = False
         client._last_status_check = 0.0
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
         calls = []
 
         def fake_run_docker_python(script, *, timeout):
@@ -497,7 +497,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client.wait_timeout = 2.0
         client.goal_response_timeout = 3.0
         client.backend = "docker-rclpy"
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
         client.client_available = True
         client.server_available = True
         client.available = True
@@ -546,7 +546,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client._last_status_check = 0.0
         client.backend = "host-rclpy"
         client.available = False
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
         calls = []
 
         def fake_run_docker_python(script, *, timeout):
@@ -593,7 +593,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client._last_status_check = 0.0
         client.backend = "host-rclpy"
         client.available = False
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
 
         def fake_run_docker_python(script, *, timeout):
             raise dogzilla_lib_bridge.subprocess.TimeoutExpired(cmd=["docker"], timeout=timeout)
@@ -612,15 +612,15 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client.wait_timeout = 2.0
         client.goal_response_timeout = 3.0
         client.host_import_error = "No module named 'rclpy'"
-        client.import_error = "No module named 'rclpy'; docker:No such container: robodoge-lidar-bridge"
-        client.docker_import_error = "No such container: robodoge-lidar-bridge"
+        client.import_error = "No module named 'rclpy'; docker:No such container: robodoge-rosbridge"
+        client.docker_import_error = "No such container: robodoge-rosbridge"
         client.server_error = None
         client.client_available = False
         client.server_available = False
         client._last_status_check = 0.0
         client.backend = "host-rclpy"
         client.available = False
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
         calls = []
 
         def fake_run_docker_python(script, *, timeout):
@@ -659,7 +659,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client.goal_response_timeout = 3.0
         client.backend = "docker-rclpy"
         client.available = True
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
         calls = []
 
         def fake_run_docker_python(script, *, timeout):
@@ -677,7 +677,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(result["executed"])
         self.assertEqual(result["delivery"], "Nav2 NavigateToPose")
         self.assertEqual(result["backend"], "docker-rclpy")
-        self.assertEqual(result["container"], "robodoge-lidar-bridge")
+        self.assertEqual(result["container"], "robodoge-rosbridge")
         self.assertEqual(calls[0]["timeout"], 30.0)
         self.assertIn("dogzilla_direct_nav2_docker_client", calls[0]["script"])
         self.assertIn('\\"x\\": 1.25', calls[0]["script"])
@@ -690,7 +690,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         client.goal_response_timeout = 3.0
         client.backend = "docker-rclpy"
         client.available = True
-        client.docker_container = "robodoge-lidar-bridge"
+        client.docker_container = "robodoge-rosbridge"
 
         def fake_run_docker_python(script, *, timeout):
             raise dogzilla_lib_bridge.subprocess.TimeoutExpired(cmd=["docker"], timeout=timeout)

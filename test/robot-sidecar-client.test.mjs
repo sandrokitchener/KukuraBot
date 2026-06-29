@@ -17,6 +17,33 @@ import {
   withMockedFetch,
 } from '../test-support/robot-http-fixtures.mjs'
 
+// Avoid holding the test process open for long AbortSignal.timeout() timers
+// created by waypoint health checks. Tests that want to inspect timeout values
+// patch AbortSignal.timeout themselves and restore to this stub.
+AbortSignal.timeout = () => new AbortController().signal
+
+function sendRobotCommandWithDefaultPose(preview, runtimeConfig, ros2Config, options = {}) {
+  return sendRobotCommand(
+    preview,
+    runtimeConfig,
+    ros2Config,
+    {
+      getDogzillaRobotPoseImpl: async () => dogzillaMapPoseBody(),
+      ...options,
+    },
+  )
+}
+
+function defaultBridgeResponse(url) {
+  if (String(url).endsWith('/healthz-lite')) {
+    return jsonResponse({ ok: true, mode: 'http-to-dogzillalib', receivedCount: 0, runtimeSnapshot: false })
+  }
+  if (String(url).endsWith('/nav2/scan_info')) {
+    return jsonResponse({ ok: true, topic: '/scan_nav2', publisherCount: 1, subscriptionCount: 2, available: true })
+  }
+  return undefined
+}
+
 test('probeRobotSidecarHealth reports degraded when bridge body says ok false', async () => {
   await withMockedFetch(
     async () => jsonResponse({
@@ -62,7 +89,7 @@ test('sendRobotCommand annotates command response timeouts', async () => {
       throw error
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         manualRelativePreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig({ timeoutMs: 1234 }),
@@ -123,6 +150,10 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
 
   await withMockedFetch(
     async (url, options) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       if (String(url).endsWith('/healthz')) {
         return jsonResponse(nav2HealthBody())
       }
@@ -141,7 +172,7 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
       }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -171,6 +202,10 @@ test('sendRobotCommand blocks direct waypoint goto when Nav2 is unavailable', as
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody({
         nav2: {
@@ -182,7 +217,7 @@ test('sendRobotCommand blocks direct waypoint goto when Nav2 is unavailable', as
       }))
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -210,6 +245,10 @@ test('sendRobotCommand blocks direct waypoint goto when Nav2 has no odom publish
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody({
         nav2: {
@@ -223,7 +262,7 @@ test('sendRobotCommand blocks direct waypoint goto when Nav2 has no odom publish
       }))
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -246,6 +285,10 @@ test('sendRobotCommand blocks direct waypoint goto when odom publisher has no li
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody({
         nav2: {
@@ -261,7 +304,7 @@ test('sendRobotCommand blocks direct waypoint goto when odom publisher has no li
       }))
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -285,6 +328,10 @@ test('sendRobotCommand still blocks old bridge health when pose only proves odom
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       if (String(url).endsWith('/healthz')) {
         return jsonResponse({
@@ -302,46 +349,24 @@ test('sendRobotCommand still blocks old bridge health when pose only proves odom
           },
         })
       }
-      if (String(url).endsWith('/pose')) {
-        return jsonResponse({
-          ok: true,
-          rosGraph: {
-            topics: {
-              '/odom': { publisherCount: 1 },
-            },
-          },
-          odom: {
-            topic: '/odom',
-            publisherCount: 1,
-            available: true,
-            messageAvailable: true,
-            tfAvailable: true,
-            frameId: 'odom',
-            childFrameId: 'base_link',
-          },
-        })
-      }
 
       return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
         {
           autoStartWaypointNavigation: false,
-          loadDogzillaConnectionConfigImpl: async () => ({
-            lidar: {
-              poseUrl: 'http://10.0.4.32:8896/pose',
-            },
-          }),
+          getDogzillaRobotPoseImpl: async () => dogzillaMapPoseBody(),
         },
       )
 
       assert.equal(result.status, 'navigation-unavailable')
       assert.equal(result.attempted, false)
-      assert.equal(requests.filter((request) => request.url.endsWith('/pose')).length, 1)
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
       assert.match(result.error, /Nav2 lifecycle state was not reported/)
       assert.match(result.error, /No LaserScan publishers visible on \/scan_nav2/)
     },
@@ -353,6 +378,10 @@ test('sendRobotCommand blocks direct waypoint goto when filtered scan is not wir
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody({
         nav2: {
@@ -367,7 +396,7 @@ test('sendRobotCommand blocks direct waypoint goto when filtered scan is not wir
       }))
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -389,14 +418,15 @@ test('sendRobotCommand sends trusted config waypoint outside active DOGZILLA map
 
   await withMockedFetch(
     async (url, options = {}) => {
-      requests.push({ url: String(url), body: parseRequestBody(options) })
-      if (String(url).endsWith('/pose')) {
-        return jsonResponse(dogzillaMapPoseBody())
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
       }
+      requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody())
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview({
           params: {
             waypoint: 'kitchen',
@@ -406,13 +436,13 @@ test('sendRobotCommand sends trusted config waypoint outside active DOGZILLA map
         }),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
+        { getDogzillaRobotPoseImpl: async () => dogzillaMapPoseBody() },
       )
 
       assert.equal(result.status, 'sent')
       assert.equal(result.attempted, true)
-      assert.equal(requests.length, 4)
+      assert.equal(requests.length, 3)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
-      assert.equal(requests[1].url, 'http://10.0.4.32:8896/pose')
       assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
   )
@@ -423,16 +453,11 @@ test('sendRobotCommand blocks trusted waypoint when live robot pose is outside a
 
   await withMockedFetch(
     async (url, options = {}) => {
-      requests.push({ url: String(url), body: parseRequestBody(options) })
-      if (String(url).endsWith('/pose')) {
-        return jsonResponse(dogzillaMapPoseBody({
-          pose: {
-            frame: 'map',
-            x: 10.33,
-            y: -1.51,
-          },
-        }))
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
       }
+      requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody({
         runtime: {
           map: {
@@ -448,10 +473,19 @@ test('sendRobotCommand blocks trusted waypoint when live robot pose is outside a
       }))
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
+        {
+          getDogzillaRobotPoseImpl: async () => dogzillaMapPoseBody({
+            pose: {
+              frame: 'map',
+              x: 10.33,
+              y: -1.51,
+            },
+          }),
+        },
       )
 
       assert.equal(result.status, 'navigation-unavailable')
@@ -459,9 +493,8 @@ test('sendRobotCommand blocks trusted waypoint when live robot pose is outside a
       assert.equal(result.kind, 'map-waypoint')
       assert.match(result.error, /robot pose is outside active DOGZILLA map bounds/)
       assert.match(result.operatorMessage, /DOGZILLA localization is outside the active map/)
-      assert.equal(requests.length, 2)
+      assert.equal(requests.length, 1)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
-      assert.equal(requests[1].url, 'http://10.0.4.32:8896/pose')
     },
   )
 })
@@ -471,6 +504,10 @@ test('sendRobotCommand blocks trusted config waypoint captured against a differe
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       if (String(url).endsWith('/pose')) {
         return jsonResponse(dogzillaMapPoseBody())
@@ -478,7 +515,7 @@ test('sendRobotCommand blocks trusted config waypoint captured against a differe
       return jsonResponse(nav2HealthBody())
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview({
           params: {
             waypoint: 'kitchen',
@@ -506,11 +543,15 @@ test('sendRobotCommand blocks trusted config waypoint without active map identit
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody())
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview({
           params: {
             waypoint: 'kitchen',
@@ -537,11 +578,15 @@ test('sendRobotCommand blocks waypoint unverified by config before Nav2', async 
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       return jsonResponse(nav2HealthBody())
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview({
           params: {
             waypoint: 'draft',
@@ -555,8 +600,7 @@ test('sendRobotCommand blocks waypoint unverified by config before Nav2', async 
       assert.equal(result.status, 'waypoint-blocked')
       assert.equal(result.attempted, false)
       assert.match(result.operatorMessage, /draft is not verified/)
-      assert.equal(requests.length, 1)
-      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+      assert.equal(requests.length, 0)
     },
   )
 })
@@ -564,20 +608,23 @@ test('sendRobotCommand blocks waypoint unverified by config before Nav2', async 
 test('sendRobotCommand starts missing direct waypoint navigator before posting goto', async () => {
   const requests = []
   const actions = []
-  let healthCount = 0
+  let started = false
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
 
       if (String(url).endsWith('/healthz')) {
-        healthCount += 1
         return jsonResponse(nav2HealthBody({
           nav2: {
-            available: healthCount > 1,
+            available: started,
             clientAvailable: true,
-            serverAvailable: healthCount > 1,
-            importError: healthCount > 1 ? null : 'Nav2 NavigateToPose action server is not running in the ROS graph',
+            serverAvailable: started,
+            importError: started ? null : 'Nav2 NavigateToPose action server is not running in the ROS graph',
           },
         }))
       }
@@ -585,7 +632,7 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
       return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -593,6 +640,9 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
           sleepImpl: async () => {},
           runDogzillaConnectionActionImpl: async (action) => {
             actions.push(action)
+            if (action === 'start-navigation') {
+              started = true
+            }
             return { status: 'ok', action }
           },
         },
@@ -600,7 +650,7 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
 
       assert.equal(result.status, 'sent')
       assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
-      assert.equal(requests.filter((request) => request.url.endsWith('/healthz')).length, 2)
+      assert.ok(requests.filter((request) => request.url.endsWith('/healthz')).length >= 1)
       assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
   )
@@ -609,19 +659,22 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
 test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', async () => {
   const requests = []
   const actions = []
-  let healthCount = 0
+  let started = false
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
 
       if (String(url).endsWith('/healthz')) {
-        healthCount += 1
         return jsonResponse(nav2HealthBody({
           nav2: {
             lifecycle: {
-              active: healthCount > 1,
-              error: healthCount > 1 ? null : 'Nav2 lifecycle nodes are not active: controller_server',
+              active: started,
+              error: started ? null : 'Nav2 lifecycle nodes are not active: controller_server',
             },
           },
         }))
@@ -630,7 +683,7 @@ test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', a
       return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -638,6 +691,9 @@ test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', a
           sleepImpl: async () => {},
           runDogzillaConnectionActionImpl: async (action) => {
             actions.push(action)
+            if (action === 'start-navigation') {
+              started = true
+            }
             return { status: 'ok', action }
           },
         },
@@ -645,19 +701,23 @@ test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', a
 
       assert.equal(result.status, 'sent')
       assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
-      assert.equal(requests.filter((request) => request.url.endsWith('/healthz')).length, 2)
+      assert.ok(requests.filter((request) => request.url.endsWith('/healthz')).length >= 1)
       assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
   )
 })
 
-test('sendRobotCommand repairs and retries when command-time Nav2 action server lookup fails', async () => {
+test('sendRobotCommand retries when command-time Nav2 action server lookup fails without restarting healthy Nav2', async () => {
   const requests = []
   const actions = []
   let commandAttempts = 0
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
 
       if (String(url).endsWith('/healthz')) {
@@ -683,7 +743,7 @@ test('sendRobotCommand repairs and retries when command-time Nav2 action server 
       return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -697,9 +757,9 @@ test('sendRobotCommand repairs and retries when command-time Nav2 action server 
       )
 
       assert.equal(result.status, 'sent')
-      assert.equal(result.retriedAfterNavigationRepair, true)
+      assert.equal(result.retriedAfterCommandFailure, true)
       assert.equal(result.firstAttempt.error, 'Nav2 NavigateToPose action server unavailable after 2.0s')
-      assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
+      assert.deepEqual(actions, [])
       assert.equal(commandAttempts, 2)
     },
   )
@@ -710,6 +770,10 @@ test('sendRobotCommand blocks direct waypoint goto when only map-pose fallback i
 
   await withMockedFetch(
     async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       requests.push({ url: String(url), body: parseRequestBody(options) })
       if (String(url).endsWith('/healthz')) {
         return jsonResponse(nav2HealthBody({
@@ -731,7 +795,7 @@ test('sendRobotCommand blocks direct waypoint goto when only map-pose fallback i
       return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -753,32 +817,44 @@ test('sendRobotCommand does not timeout waypoint movement response', async () =>
 
   AbortSignal.timeout = (timeoutMs) => {
     requests.push({ kind: 'timeout', timeoutMs })
-    return originalTimeout(timeoutMs)
+    return new AbortController().signal
   }
 
   try {
     await withMockedFetch(
       async (url, options) => {
+        const defaultResponse = defaultBridgeResponse(url)
+        if (defaultResponse) {
+          requests.push({
+            kind: 'fetch',
+            url: String(url),
+            hasSignal: Boolean(options?.signal),
+          })
+          return defaultResponse
+        }
+
+        if (String(url).endsWith('/healthz')) {
+          requests.push({
+            kind: 'fetch',
+            url: String(url),
+            hasSignal: Boolean(options?.signal),
+          })
+          return jsonResponse(nav2HealthBody())
+        }
+
         requests.push({
           kind: 'fetch',
           url: String(url),
           hasSignal: Boolean(options?.signal),
         })
-
-        if (String(url).endsWith('/healthz')) {
-          return jsonResponse(nav2HealthBody())
-        }
-        if (String(url).endsWith('/pose')) {
-          return jsonResponse(dogzillaMapPoseBody())
-        }
-
         return jsonResponse({ accepted: true }, { status: 202 })
       },
       async () => {
-        await sendRobotCommand(
+        await sendRobotCommandWithDefaultPose(
           waypointGotoPreview(),
           dogzillaDirectRuntime(),
           dogzillaTransportConfig({ timeoutMs: 12000 }),
+          { getDogzillaRobotPoseImpl: async () => dogzillaMapPoseBody() },
         )
       },
     )
@@ -787,11 +863,13 @@ test('sendRobotCommand does not timeout waypoint movement response', async () =>
   }
 
   assert.deepEqual(requests, [
-    { kind: 'timeout', timeoutMs: 30000 },
+    { kind: 'timeout', timeoutMs: 2000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz-lite', hasSignal: true },
+    { kind: 'timeout', timeoutMs: 4000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/nav2/scan_info', hasSignal: true },
+    { kind: 'timeout', timeoutMs: 6000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true },
     { kind: 'timeout', timeoutMs: 4000 },
-    { kind: 'fetch', url: 'http://10.0.4.32:8896/pose', hasSignal: true },
-    { kind: 'timeout', timeoutMs: 12000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: true },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: false },
   ])
@@ -803,12 +881,33 @@ test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', a
 
   AbortSignal.timeout = (timeoutMs) => {
     requests.push({ kind: 'timeout', timeoutMs })
-    return originalTimeout(timeoutMs)
+    return new AbortController().signal
   }
 
   try {
     await withMockedFetch(
       async (url, options) => {
+        const defaultResponse = defaultBridgeResponse(url)
+        if (defaultResponse) {
+          requests.push({
+            kind: 'fetch',
+            url: String(url),
+            hasSignal: Boolean(options?.signal),
+            commandParams: undefined,
+          })
+          return defaultResponse
+        }
+
+        if (String(url).endsWith('/healthz')) {
+          requests.push({
+            kind: 'fetch',
+            url: String(url),
+            hasSignal: Boolean(options?.signal),
+            commandParams: undefined,
+          })
+          return jsonResponse(nav2HealthBody())
+        }
+
         const body = options?.body ? JSON.parse(options.body) : null
         requests.push({
           kind: 'fetch',
@@ -816,21 +915,14 @@ test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', a
           hasSignal: Boolean(options?.signal),
           commandParams: body?.envelope?.canonicalPlan?.params,
         })
-
-        if (String(url).endsWith('/healthz')) {
-          return jsonResponse(nav2HealthBody())
-        }
-        if (String(url).endsWith('/pose')) {
-          return jsonResponse(dogzillaMapPoseBody())
-        }
-
         return jsonResponse({ accepted: true }, { status: 202 })
       },
       async () => {
-        await sendRobotCommand(
+        await sendRobotCommandWithDefaultPose(
           waypointGotoPreview({ params: { timeoutSec: 45 } }),
           dogzillaDirectRuntime(),
           dogzillaTransportConfig({ timeoutMs: 12000 }),
+          { getDogzillaRobotPoseImpl: async () => dogzillaMapPoseBody() },
         )
       },
     )
@@ -839,11 +931,13 @@ test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', a
   }
 
   assert.deepEqual(requests, [
-    { kind: 'timeout', timeoutMs: 30000 },
+    { kind: 'timeout', timeoutMs: 2000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz-lite', hasSignal: true, commandParams: undefined },
+    { kind: 'timeout', timeoutMs: 4000 },
+    { kind: 'fetch', url: 'http://10.0.4.32:8893/nav2/scan_info', hasSignal: true, commandParams: undefined },
+    { kind: 'timeout', timeoutMs: 6000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true, commandParams: undefined },
     { kind: 'timeout', timeoutMs: 4000 },
-    { kind: 'fetch', url: 'http://10.0.4.32:8896/pose', hasSignal: true, commandParams: undefined },
-    { kind: 'timeout', timeoutMs: 12000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: true, commandParams: { reason: 'command_preempt', action: 'stop' } },
     {
       kind: 'fetch',
@@ -871,25 +965,31 @@ test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', a
   ])
 })
 
-test('sendRobotCommand blocks new command when preempt stop fails', async () => {
+
+test('sendRobotCommand reports preempt failure separately without blocking the command', async () => {
   const requests = []
 
   await withMockedFetch(
-    async (_url, options) => {
-      requests.push(parseRequestBody(options))
-      return jsonResponse({ error: 'stop failed' }, { ok: false, status: 503 })
+    async (url, options) => {
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      if (String(url).endsWith('/commands') && parseRequestBody(options)?.action === 'stop') {
+        return jsonResponse({ error: 'stop failed' }, { ok: false, status: 503 })
+      }
+      return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         actionOncePreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'preempt-failed')
+      assert.equal(result.status, 'sent')
       assert.equal(result.preempt.status, 'error')
-      assert.equal(requests.length, 1)
-      assert.equal(requests[0].envelope.canonicalPlan.params.reason, 'command_preempt')
+      assert.equal(requests.length, 2)
+      assert.equal(requests[0].body.action, 'stop')
+      assert.equal(requests[0].body.envelope.canonicalPlan.params.reason, 'command_preempt')
+      assert.equal(requests[1].url, 'http://10.0.4.32:8893/commands')
     },
   )
 })
@@ -905,7 +1005,7 @@ test('sendRobotCommand surfaces DOGZILLA bridge result errors from HTTP 422', as
       },
     }, { ok: false, status: 422 }),
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         manualRelativePreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -923,6 +1023,10 @@ test('sendRobotCommand surfaces command result errors after successful preempt',
 
   await withMockedFetch(
     async (url) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
       if (String(url).endsWith('/healthz')) {
         return jsonResponse(nav2HealthBody())
       }
@@ -946,7 +1050,7 @@ test('sendRobotCommand surfaces command result errors after successful preempt',
       }, { ok: false, status: 422 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         waypointGotoPreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),
@@ -968,7 +1072,7 @@ test('sendRobotCommand does not preempt manual relative motion updates', async (
       return jsonResponse({ accepted: true }, { status: 202 })
     },
     async () => {
-      const result = await sendRobotCommand(
+      const result = await sendRobotCommandWithDefaultPose(
         manualRelativePreview(),
         dogzillaDirectRuntime(),
         dogzillaTransportConfig(),

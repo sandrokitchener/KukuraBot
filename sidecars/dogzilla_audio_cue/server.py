@@ -38,10 +38,11 @@ DEFAULT_CUES = {
 
 
 class AudioState:
-    def __init__(self, sounds_dir: Path, player: str, aplay_device: str):
+    def __init__(self, sounds_dir: Path, player: str, aplay_device: str, volume: Any = None):
         self.sounds_dir = sounds_dir
         self.player = player
         self.aplay_device = aplay_device
+        self.volume = normalize_volume(volume)
         self.last_cue = ""
         self.last_error = ""
         self.play_count = 0
@@ -56,9 +57,22 @@ class AudioHandler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             self.send_json(HTTPStatus.OK, health_payload(self.server.state))
             return
+        if self.path == "/volume":
+            self.send_json(HTTPStatus.OK, {"ok": True, "volume": self.server.state.volume})
+            return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/volume":
+            try:
+                body = self.read_json()
+                self.server.state.volume = normalize_volume(body.get("volume"))
+                self.send_json(HTTPStatus.OK, {"ok": True, "volume": self.server.state.volume})
+            except Exception as error:
+                self.server.state.last_error = str(error)
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            return
+
         if self.path != "/cue":
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
@@ -105,12 +119,17 @@ def health_payload(state: AudioState) -> dict[str, Any]:
         "lastCue": state.last_cue,
         "lastError": state.last_error,
         "playCount": state.play_count,
+        "volume": state.volume,
     }
 
 
 def play_cue(state: AudioState, cue: str, volume: Any = None) -> dict[str, Any]:
     cleanup_processes(state)
-    volume_value = normalize_volume(volume)
+    if volume is None:
+        volume_value = state.volume
+    else:
+        volume_value = normalize_volume(volume)
+    state.volume = volume_value
     if cue == "thinking-stop":
         stop_active(state)
         state.last_cue = cue
@@ -253,12 +272,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sounds-dir", default=os.getenv("DOGZILLA_AUDIO_SOUNDS_DIR", "public/sounds"))
     parser.add_argument("--player", default=os.getenv("DOGZILLA_AUDIO_PLAYER", "aplay"))
     parser.add_argument("--aplay-device", default=os.getenv("DOGZILLA_AUDIO_APLAY_DEVICE", ""))
+    parser.add_argument("--default-volume", type=float, default=float(os.getenv("DOGZILLA_AUDIO_VOLUME", "1.0")))
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    state = AudioState(Path(args.sounds_dir), args.player, args.aplay_device)
+    state = AudioState(Path(args.sounds_dir), args.player, args.aplay_device, args.default_volume)
     server = ThreadingHTTPServer((args.host, args.port), AudioHandler)
     server.state = state  # type: ignore[attr-defined]
     print(f"DOGZILLA audio cue bridge listening on http://{args.host}:{args.port}", flush=True)

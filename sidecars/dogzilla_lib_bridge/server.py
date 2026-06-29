@@ -21,7 +21,7 @@ _SLEEP_LOCK = threading.Lock()
 _SLEEP_ACTIVE = False
 _AUTO_SLEEP_TIMER: threading.Timer | None = None
 _AUTO_SLEEP_DELAY_SEC = 300.0  # 5 min idle → auto sleep
-CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-lidar-bridge")
+CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
 YOLO_SERVICE = "robodoge-yolo-vision.service"
 NAV2_LIFECYCLE_NODE = "lifecycle_manager_navigation"
 CARTOGRAPHER_NODE = "cartographer_node"
@@ -145,6 +145,7 @@ from nav2_client import (
     DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT,
     DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT,
     DEFAULT_NAV2_ODOM_WAIT_TIMEOUT,
+    DEFAULT_NAV2_SCAN_TOPIC,
     DEFAULT_NAV2_STATUS_WAIT_TIMEOUT,
     DEFAULT_NAV2_WAIT_TIMEOUT,
     DEFAULT_ODOM_TOPIC,
@@ -158,12 +159,15 @@ ROBOT_NAME_FILE = ROOT_DIR / "robot_name.txt"
 DEFAULT_ROBOT_NAME = "Questing Beast"
 DEFAULT_HOST = os.environ.get("DOGZILLA_LIB_BRIDGE_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.environ.get("DOGZILLA_LIB_BRIDGE_PORT", "8893"))
-DEFAULT_SERIAL_PORT = os.environ.get("DOGZILLA_SERIAL_PORT", "/dev/ttyAMA0")
+DEFAULT_SERIAL_PORT = os.environ.get(
+    "DOGZILLA_ROBOT_SERIAL_PORT",
+    os.environ.get("DOGZILLA_SERIAL_PORT", "/dev/ttyAMA0"),
+)
 DEFAULT_DRY_RUN = os.environ.get("DOGZILLA_DIRECT_DRY_RUN", "1") != "0"
 DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID", "16")
 DEFAULT_INCLUDE_ATTITUDE_STATE = os.environ.get("DOGZILLA_INCLUDE_ATTITUDE_STATE", "0") == "1"
 DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") == "1"
-DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "0") == "1"
+DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "1") == "1"
 DEFAULT_NAV2_MIN_BATTERY_PCT = float(os.environ.get("DOGZILLA_NAV2_MIN_BATTERY_PCT", "5"))
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
 ROS_SETUP_COMMAND = (
@@ -864,6 +868,14 @@ class DogzillaRuntime:
         return None
 
 
+def _get_load_average() -> list[str] | None:
+    try:
+        with open("/proc/loadavg") as handle:
+            return handle.read().strip().split()[:3]
+    except Exception:
+        return None
+
+
 class BridgeServer(ThreadingHTTPServer):
     def __init__(self, server_address, handler_class, runtime: DogzillaRuntime):
         super().__init__(server_address, handler_class)
@@ -876,6 +888,17 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "DogzillaLibBridge/0.2"
 
     def do_GET(self):
+        if self.path == "/healthz-lite":
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "mode": "http-to-dogzillalib",
+                    "receivedCount": self.server.received_count,
+                    "runtimeSnapshot": False,
+                },
+            )
+            return
         if self.path == "/healthz":
             runtime = self.server.runtime.snapshot()
             self._send_json(
@@ -884,6 +907,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": runtime["available"],
                     "mode": "http-to-dogzillalib",
                     "receivedCount": self.server.received_count,
+                    "loadAverage": _get_load_average(),
                     "runtime": runtime,
                 },
             )
@@ -915,6 +939,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/nav2/speed_config":
             self._send_json(200, {"ok": True, "config": get_speed_config()})
+            return
+        if self.path == "/nav2/scan_info":
+            nav2 = self.server.runtime.nav2_client
+            refresh_error = None
+            if hasattr(nav2, "_refresh_status"):
+                try:
+                    nav2._refresh_status(force=True)
+                except Exception as exc:
+                    refresh_error = str(exc)
+            scan = nav2._scan_snapshot() if hasattr(nav2, "_scan_snapshot") else {}
+            checked_at = scan.get("checkedAt")
+            age_sec = None
+            if checked_at is not None:
+                try:
+                    age_sec = max(0.0, time.time() - float(checked_at))
+                except (TypeError, ValueError):
+                    age_sec = None
+            self._send_json(200, {
+                "ok": True,
+                "topic": scan.get("topic", DEFAULT_NAV2_SCAN_TOPIC),
+                "publisherCount": scan.get("publisherCount", 0),
+                "subscriptionCount": scan.get("subscriptionCount", 0),
+                "available": scan.get("available", False),
+                "checkedAt": checked_at,
+                "ageSec": age_sec,
+                "error": scan.get("error") or refresh_error,
+            })
             return
         if self.path == "/sleep":
             self._send_json(200, sleep_status())
