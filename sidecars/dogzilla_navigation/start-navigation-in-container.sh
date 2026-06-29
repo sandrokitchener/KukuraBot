@@ -3,7 +3,7 @@ set -eo pipefail
 
 REMOTE_ROOT="${REMOTE_ROOT:-/home/pi/robodoge}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
-POSE_PORT="${POSE_PORT:-8896}"
+POSE_PORT="${POSE_PORT:-9090}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
 DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-}"
 DOGZILLA_NAV2_BASE_PARAMS="${DOGZILLA_NAV2_BASE_PARAMS:-/opt/ros/humble/share/nav2_bringup/params/nav2_params.yaml}"
@@ -30,6 +30,7 @@ DOGZILLA_NAV2_FAILURE_TOLERANCE="${DOGZILLA_NAV2_FAILURE_TOLERANCE:-5.0}"
 DOGZILLA_NAV2_MIN_SPEED_XY="${DOGZILLA_NAV2_MIN_SPEED_XY:-0.03}"
 DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY="${DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY:-0.05}"
 DOGZILLA_NAV2_SCAN_FILTER_ENABLED="${DOGZILLA_NAV2_SCAN_FILTER_ENABLED:-1}"
+DOGZILLA_NAV2_SCAN_FILTER_REQUIRED="${DOGZILLA_NAV2_SCAN_FILTER_REQUIRED:-1}"
 DOGZILLA_NAV2_SCAN_FILTER_TOPIC="${DOGZILLA_NAV2_SCAN_FILTER_TOPIC:-/scan_nav2}"
 DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG="${DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG:-120}"
 DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG="${DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG:-260}"
@@ -53,13 +54,16 @@ export DOGZILLA_NAV2_PLANNER_FREQUENCY DOGZILLA_NAV2_SMOOTHER_FREQUENCY
 export DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE
 export DOGZILLA_NAV2_FAILURE_TOLERANCE
 export DOGZILLA_NAV2_MIN_SPEED_XY DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY
-export DOGZILLA_NAV2_SCAN_FILTER_ENABLED DOGZILLA_NAV2_SCAN_FILTER_TOPIC
+export DOGZILLA_NAV2_SCAN_FILTER_ENABLED DOGZILLA_NAV2_SCAN_FILTER_TOPIC DOGZILLA_NAV2_SCAN_FILTER_REQUIRED
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
 export DOGZILLA_NAV2_SPEED_RAMP_INTERVAL DOGZILLA_NAV2_SPEED_RAMP_BUFFER
 export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/logs"
+
+# Kill stale ROS2 daemon that can block topic discovery
+pkill -9 -f "ros2.*daemon" 2>/dev/null || true
 
 if command -v flock >/dev/null 2>&1; then
   exec 8>"$REMOTE_ROOT/logs/nav2-startup.lock"
@@ -323,21 +327,40 @@ if [ -n "$map_image" ] && [ ! -s "$map_image" ]; then
 fi
 
 python3 - <<'PY'
-import json
-import os
+import math
 import sys
-import urllib.request
+import time
 
-url = f"http://127.0.0.1:{os.environ.get('POSE_PORT', '8896')}/pose"
-try:
-    with urllib.request.urlopen(url, timeout=3) as response:
-        pose = json.loads(response.read().decode("utf-8"))
-except Exception as error:
-    print(f"Map pose bridge unavailable: {error}", file=sys.stderr)
-    raise SystemExit(2)
+import rclpy
+from tf2_ros import Buffer, TransformListener
 
-if not pose.get("ok") or not pose.get("waypointSafe"):
-    print(f"Map pose not waypoint-safe: {json.dumps(pose, sort_keys=True)[:1000]}", file=sys.stderr)
+rclpy.init(args=None)
+node = rclpy.create_node("robodoge_nav2_pose_probe")
+tf_buffer = Buffer(cache_time=rclpy.duration.Duration(seconds=5.0))
+TransformListener(tf_buffer, node)
+
+deadline = time.time() + 6.0
+pose = None
+error = None
+while time.time() < deadline:
+    rclpy.spin_once(node, timeout_sec=0.1)
+    try:
+        transform = tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        yaw = math.atan2(2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                         1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z))
+        pose = {"x": translation.x, "y": translation.y, "yaw": yaw}
+        break
+    except Exception as err:
+        error = err
+        time.sleep(0.25)
+
+node.destroy_node()
+rclpy.shutdown()
+
+if pose is None:
+    print(f"Map pose (map->base_link) unavailable: {error}", file=sys.stderr)
     raise SystemExit(2)
 PY
 
@@ -345,7 +368,7 @@ if [ "$DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED" = "1" ]; then
   pkill -f "[c]md_vel_gait_adapter.py" 2>/dev/null || true
   pkill -f "[y]ahboom_base.*base" 2>/dev/null || true
 
-  python3 - <<'PY'
+    python3 - <<'PY'
 import json
 import os
 import sys
@@ -388,7 +411,7 @@ PY
       > "$REMOTE_ROOT/logs/cmd-vel-gait-adapter.log" 2>&1 &
   )
 else
-  if ! ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
+  if ! timeout 7 ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
     pkill -f "[y]ahboom_base.*base" 2>/dev/null || true
     (
       exec 8>&- 2>/dev/null || true
@@ -398,13 +421,13 @@ else
 fi
 
 for _ in $(seq 1 60); do
-  if ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
+  if timeout 7 ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
     break
   fi
   sleep 0.5
 done
 
-if ! ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
+if ! timeout 7 ros2 topic info /cmd_vel 2>/dev/null | grep -q "Subscription count: [1-9]"; then
   if [ "$DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED" = "1" ]; then
     echo "DOGZILLA cmd_vel gait adapter did not subscribe to /cmd_vel. See $REMOTE_ROOT/logs/cmd-vel-gait-adapter.log" >&2
   else
@@ -415,27 +438,50 @@ fi
 
 if [ "$DOGZILLA_NAV2_SCAN_FILTER_ENABLED" = "1" ]; then
   pkill -f "[s]can_self_filter.py" 2>/dev/null || true
+  pkill -f "[s]can_filter_supervisor.py" 2>/dev/null || true
+
   (
     exec 8>&- 2>/dev/null || true
-    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_self_filter.py" \
+    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_filter_supervisor.py" \
+      --filter-script "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_self_filter.py" \
       --input-topic /scan \
       --output-topic "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" \
       --mask-start-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG" \
       --mask-end-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG" \
       --mask-range-m "$DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M" \
-      > "$REMOTE_ROOT/logs/scan-self-filter.log" 2>&1 &
+      --check-interval 10 \
+      --max-restarts 5 \
+      --remote-root "$REMOTE_ROOT" \
+      > "$REMOTE_ROOT/logs/scan-filter-supervisor.log" 2>&1 &
   )
 
-  for _ in $(seq 1 30); do
-    if ros2 topic info "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" 2>/dev/null | grep -q "Publisher count: [1-9]"; then
-      break
+    scan_filter_ready=0
+    for _ in $(seq 1 30); do
+      if timeout 7 ros2 topic info "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" 2>/dev/null | grep -q "Publisher count: [1-9]"; then
+        scan_filter_ready=1
+        break
+      fi
+      sleep 0.5
+    done
+
+    if [ "$scan_filter_ready" != "1" ]; then
+      echo "DOGZILLA scan filter did not publish on $DOGZILLA_NAV2_SCAN_FILTER_TOPIC within 15s startup window." >&2
+      tail -40 "$REMOTE_ROOT/logs/scan-filter-supervisor.log" >&2 2>/dev/null || true
+      tail -40 "$REMOTE_ROOT/logs/scan-self-filter.log" >&2 2>/dev/null || true
+      if [ "$DOGZILLA_NAV2_SCAN_FILTER_REQUIRED" = "1" ]; then
+        exit 2
+      fi
+      echo "DOGZILLA_NAV2_SCAN_FILTER_REQUIRED != 1; continuing without /scan_nav2. Nav2 costmaps may lack filtered scan." >&2
     fi
-    sleep 0.5
-  done
-fi
+  fi
+
+topic_publisher_count() {
+  timeout --kill-after=3 10 ros2 topic info "$1" 2>/dev/null | awk '/Publisher count:/ { print $3; found=1 } END { if (!found) print 0 }' || true
+  return 0
+}
 
 odom_publisher_count() {
-  ros2 topic info /odom 2>/dev/null | awk '/Publisher count:/ { print $3; found=1 } END { if (!found) print 0 }'
+  topic_publisher_count /odom
 }
 
 odom_has_live_sample() {
@@ -495,12 +541,15 @@ wait_for_odom_sample() {
 
 probe_odom_tf() {
   local base_frame
-  for base_frame in base_link base_footprint; do
-    timeout 5 ros2 run tf2_ros tf2_echo odom "$base_frame" > /tmp/robodoge-odom-tf-probe.txt 2>&1 || true
-    if grep -q "Translation:" /tmp/robodoge-odom-tf-probe.txt; then
-      echo "$base_frame"
-      return 0
-    fi
+  local source_frame
+  for source_frame in odom map; do
+    for base_frame in base_link base_footprint; do
+      timeout 5 ros2 run tf2_ros tf2_echo "$source_frame" "$base_frame" > /tmp/robodoge-odom-tf-probe.txt 2>&1 || true
+      if grep -q "Translation:" /tmp/robodoge-odom-tf-probe.txt; then
+        echo "$base_frame"
+        return 0
+      fi
+    done
   done
   return 1
 }
@@ -522,14 +571,20 @@ wait_for_odom_tf() {
 start_tf_odom_helper() {
   local base_frame="${1:-base_link}"
   pkill -f "[t]f_odom_publisher.py" 2>/dev/null || true
+  pkill -f "[o]dom_publisher_supervisor.py" 2>/dev/null || true
   sleep 1
   (
     exec 8>&- 2>/dev/null || true
-    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
+    nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/odom_publisher_supervisor.py" \
+      --publisher-script "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
       --odom-frame odom \
       --base-frame "$base_frame" \
-      --topic /odom \
-      > "$REMOTE_ROOT/logs/tf-odom-publisher.log" 2>&1 &
+      --odom-topic /odom \
+      --check-interval 5 \
+      --max-restarts 10 \
+      --startup-grace-sec 20 \
+      --remote-root "$REMOTE_ROOT" \
+      > "$REMOTE_ROOT/logs/odom-supervisor.log" 2>&1 &
   )
 }
 
@@ -545,17 +600,21 @@ start_map_pose_localization() {
     POSE_PORT="$POSE_PORT" \
     ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
     DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}" \
+    DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-0}" \
+    DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-0}" \
+    DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-0}" \
+    DOGZILLA_INITIAL_POSE_SKIP="${DOGZILLA_INITIAL_POSE_SKIP:-0}" \
     bash "$map_pose_script" >&2
 }
 
 ensure_odom_tf() {
   local tf_target
-  if tf_target="$(wait_for_odom_tf 2 1)"; then
+  if tf_target="$(wait_for_odom_tf 15 2)"; then
     echo "$tf_target"
     return 0
   fi
 
-  echo "No usable TF odom->base_link/base_footprint transform is available. Nav2 can accept NavigateToPose goals without it, but DOGZILLA map waypoints are unsafe and can stall in recovery turns." >&2
+  echo "No usable TF odom/map->base_link/base_footprint transform is available. Nav2 can accept NavigateToPose goals without it, but DOGZILLA map waypoints are unsafe and can stall in recovery turns." >&2
   cat /tmp/robodoge-odom-tf-probe.txt >&2 2>/dev/null || true
 
   if start_map_pose_localization; then
@@ -563,7 +622,7 @@ ensure_odom_tf() {
       echo "$tf_target"
       return 0
     fi
-    echo "Cartographer map-pose startup ran, but odom->base_link/base_footprint TF still did not become available." >&2
+    echo "Cartographer map-pose startup ran, but odom/map->base_link/base_footprint TF still did not become available." >&2
     cat /tmp/robodoge-odom-tf-probe.txt >&2 2>/dev/null || true
   fi
 
@@ -592,13 +651,13 @@ if [ "$odom_publishers" -gt 0 ] && ! odom_has_live_sample; then
   fi
 
   if ! odom_has_live_sample && ! pgrep -f "[t]f_odom_publisher.py" >/dev/null 2>&1; then
-    tf_target="$(ensure_odom_tf)"
-    start_tf_odom_helper "$tf_target"
+        tf_target="$(ensure_odom_tf)"
+        start_tf_odom_helper "$tf_target"
     wait_for_odom_sample 20 1 || true
   fi
 fi
 
-if ! ros2 topic info /odom 2>/dev/null | grep -q "Publisher count: [1-9]"; then
+if test "$(topic_publisher_count /odom)" = "0"; then
   echo "No /odom publisher is running. Checking for TF odom->base_link so Nav2 can receive TF-derived odometry." >&2
   tf_target="$(ensure_odom_tf)"
 
@@ -611,7 +670,7 @@ if ! ros2 topic info /odom 2>/dev/null | grep -q "Publisher count: [1-9]"; then
     exit 2
   fi
 
-  if ! ros2 topic info /odom 2>/dev/null | grep -q "Publisher count: [1-9]"; then
+  if test "$(topic_publisher_count /odom)" = "0"; then
     echo "TF-derived /odom publisher is running, but /odom discovery is not visible yet. Continuing; app readiness will wait before sending waypoints." >&2
   fi
 fi
@@ -634,42 +693,143 @@ else
   tail -80 "$REMOTE_ROOT/logs/tf-odom-publisher.log" >&2 2>/dev/null || true
 fi
 
-pkill -f "[r]obodoge_nav2_navigation_launch.py" 2>/dev/null || true
-pkill -f "[l]ifecycle_manager_navigation" 2>/dev/null || true
-pkill -f "[b]t_navigator" 2>/dev/null || true
-pkill -f "[c]ontroller_server" 2>/dev/null || true
-pkill -f "[s]moother_server" 2>/dev/null || true
-pkill -f "[p]lanner_server" 2>/dev/null || true
-pkill -f "[b]ehavior_server" 2>/dev/null || true
-pkill -f "[w]aypoint_follower" 2>/dev/null || true
-pkill -f "[v]elocity_smoother" 2>/dev/null || true
-pkill -f "[m]ap_server" 2>/dev/null || true
+try_graceful_nav2_recovery() {
+  # Attempt per-node lifecycle recovery before doing a full kill/restart.
+  # Returns 0 if all nodes are active after recovery, 1 if full restart needed.
+  local nodes="controller_server planner_server bt_navigator behavior_server"
+  local all_active=true
+  local inactive_nodes=""
 
-(
-  exec 8>&- 2>/dev/null || true
-  nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
-    map:="$DOGZILLA_NAV2_MAP" \
-    params_file:="$DOGZILLA_NAV2_PARAMS" \
-    use_sim_time:=false \
-    autostart:=true \
-    use_respawn:=true \
-    > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
-)
+  for node_name in $nodes; do
+    local state_label
+    state_label=$(timeout 3 ros2 service call "/${node_name}/get_state" lifecycle_msgs/srv/GetState 2>/dev/null \
+      | grep -oP "label: ['\"]?\K[^'\"]*") || true
+    if [ "$state_label" != "active" ] && [ "$state_label" != "Active" ]; then
+      all_active=false
+      inactive_nodes="$inactive_nodes $node_name"
+    fi
+  done
 
-nav_ready=0
-for _ in $(seq 1 120); do
-  if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$" \
-    && grep -q "Managed nodes are active" "$REMOTE_ROOT/logs/nav2-navigation.log" 2>/dev/null; then
-    nav_ready=1
-    break
+  if [ "$all_active" = true ]; then
+    echo "All Nav2 lifecycle nodes already active; no recovery needed." >&2
+    return 0
   fi
-  sleep 1
-done
 
-if [ "$nav_ready" != "1" ]; then
-  echo "Nav2 NavigateToPose did not become fully active. Log tail:" >&2
-  tail -120 "$REMOTE_ROOT/logs/nav2-navigation.log" >&2 || true
-  exit 1
+  echo "Inactive Nav2 nodes detected:$inactive_nodes — attempting graceful lifecycle recovery." >&2
+
+  for node_name in $inactive_nodes; do
+    echo "  Deactivating $node_name..." >&2
+    timeout 3 ros2 service call "/${node_name}/change_state" lifecycle_msgs/srv/ChangeState \
+      "{transition: {id: 2}}" >/dev/null 2>&1 || true
+  done
+
+  # Wait for lifecycle manager to reactivate nodes
+  echo "  Waiting for lifecycle manager to reactivate nodes..." >&2
+  local recovered=true
+  for _ in $(seq 1 10); do
+    sleep 1
+    recovered=true
+    for node_name in $inactive_nodes; do
+      local state_label
+      state_label=$(timeout 3 ros2 service call "/${node_name}/get_state" lifecycle_msgs/srv/GetState 2>/dev/null \
+        | grep -oP "label: ['\"]?\K[^'\"]*") || true
+      if [ "$state_label" != "active" ] && [ "$state_label" != "Active" ]; then
+        recovered=false
+        break
+      fi
+    done
+    if [ "$recovered" = true ]; then
+      echo "  Graceful recovery succeeded: all nodes active." >&2
+      return 0
+    fi
+  done
+
+  echo "  Graceful recovery failed: some nodes still inactive after 10s." >&2
+  return 1
+}
+
+# First try graceful per-node recovery; only do full restart if that fails
+if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$"; then
+  if try_graceful_nav2_recovery; then
+    echo "Nav2 recovered via graceful lifecycle restart." >&2
+  else
+    echo "Graceful recovery insufficient; performing full Nav2 restart." >&2
+    pkill -f "[r]obodoge_nav2_navigation_launch.py" 2>/dev/null || true
+    pkill -f "[l]ifecycle_manager_navigation" 2>/dev/null || true
+    pkill -f "[b]t_navigator" 2>/dev/null || true
+    pkill -f "[c]ontroller_server" 2>/dev/null || true
+    pkill -f "[s]moother_server" 2>/dev/null || true
+    pkill -f "[p]lanner_server" 2>/dev/null || true
+    pkill -f "[b]ehavior_server" 2>/dev/null || true
+    pkill -f "[w]aypoint_follower" 2>/dev/null || true
+    pkill -f "[v]elocity_smoother" 2>/dev/null || true
+    pkill -f "[m]ap_server" 2>/dev/null || true
+
+    (
+      exec 8>&- 2>/dev/null || true
+      nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
+        map:="$DOGZILLA_NAV2_MAP" \
+        params_file:="$DOGZILLA_NAV2_PARAMS" \
+        use_sim_time:=false \
+        autostart:=true \
+        use_respawn:=true \
+        > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
+    )
+
+    nav_ready=0
+    for _ in $(seq 1 120); do
+      if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$" \
+        && grep -q "Managed nodes are active" "$REMOTE_ROOT/logs/nav2-navigation.log" 2>/dev/null; then
+        nav_ready=1
+        break
+      fi
+      sleep 1
+    done
+
+    if [ "$nav_ready" != "1" ]; then
+      echo "Nav2 NavigateToPose did not become fully active after restart. Log tail:" >&2
+      tail -120 "$REMOTE_ROOT/logs/nav2-navigation.log" >&2 || true
+      exit 1
+    fi
+  fi
+else
+  pkill -f "[r]obodoge_nav2_navigation_launch.py" 2>/dev/null || true
+  pkill -f "[l]ifecycle_manager_navigation" 2>/dev/null || true
+  pkill -f "[b]t_navigator" 2>/dev/null || true
+  pkill -f "[c]ontroller_server" 2>/dev/null || true
+  pkill -f "[s]moother_server" 2>/dev/null || true
+  pkill -f "[p]lanner_server" 2>/dev/null || true
+  pkill -f "[b]ehavior_server" 2>/dev/null || true
+  pkill -f "[w]aypoint_follower" 2>/dev/null || true
+  pkill -f "[v]elocity_smoother" 2>/dev/null || true
+  pkill -f "[m]ap_server" 2>/dev/null || true
+
+  (
+    exec 8>&- 2>/dev/null || true
+    nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
+      map:="$DOGZILLA_NAV2_MAP" \
+      params_file:="$DOGZILLA_NAV2_PARAMS" \
+      use_sim_time:=false \
+      autostart:=true \
+      use_respawn:=true \
+      > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
+  )
+
+  nav_ready=0
+  for _ in $(seq 1 120); do
+    if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$" \
+      && grep -q "Managed nodes are active" "$REMOTE_ROOT/logs/nav2-navigation.log" 2>/dev/null; then
+      nav_ready=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$nav_ready" != "1" ]; then
+    echo "Nav2 NavigateToPose did not become fully active. Log tail:" >&2
+    tail -120 "$REMOTE_ROOT/logs/nav2-navigation.log" >&2 || true
+    exit 1
+  fi
 fi
 
 python3 - <<'PY'

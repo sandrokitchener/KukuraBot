@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
+import traceback
 
 
 def angle_in_window(angle: float, start: float, end: float) -> bool:
@@ -61,12 +63,19 @@ def main(argv: list[str] | None = None) -> int:
             filtered.ranges = ranges
             self.publisher.publish(filtered)
 
+    node: ScanSelfFilter | None = None
     rclpy.init()
-    node = ScanSelfFilter()
     try:
+        node = ScanSelfFilter()
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        return 0
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        return 1
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
     return 0
