@@ -3509,7 +3509,7 @@ function buildAssistantText(payload) {
   }
 
   const command = normalizeCommandName(payload.parsed.command)
-  if (isRobotRuntimeTarget(payload) && payload.robotDispatch?.status === 'sent') {
+  if (isRobotRuntimeTarget(payload) && (payload.robotDispatch?.status === 'sent' || payload.robotDispatch?.status === 'accepted')) {
     return formatParsedCommandJson(payload, 2) || summarizeParsedCommand(command, payload)
   }
 
@@ -3673,6 +3673,16 @@ function formatIsaacSummary(isaacSim, isaacDispatch) {
 }
 
 function formatRobotSummary(robotRuntime, robotDispatch, payload) {
+  if (robotDispatch?.status === 'accepted') {
+    const commandJson = formatParsedCommandJson(payload)
+    return commandJson ? `Robot command accepted, navigating\u2026 ${commandJson}` : 'Robot command accepted, navigating\u2026'
+  }
+
+  if (robotDispatch?.status === 'rejected') {
+    const error = robotDispatch.error || robotDispatch.body?.result?.error || `HTTP ${robotDispatch.responseStatus || 'unknown'}`
+    return `Robot command rejected: ${error}`
+  }
+
   if (robotDispatch?.status === 'sent') {
     const commandJson = formatParsedCommandJson(payload)
     return commandJson ? `Robot command JSON: ${commandJson}` : 'Robot dispatch completed.'
@@ -3728,7 +3738,7 @@ function isRobotDispatchFailure(robotDispatch) {
   if (status === 'navigation-unavailable' && robotDispatch.recovery) {
     return false
   }
-  return ['error', 'navigation-unavailable', 'waypoint-blocked', 'preempt-failed'].includes(status)
+  return ['error', 'rejected', 'navigation-unavailable', 'waypoint-blocked', 'preempt-failed'].includes(status)
 }
 
 function isActiveDispatchFailure(payload) {

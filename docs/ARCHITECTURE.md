@@ -62,13 +62,17 @@ green:
    If it times out while the fast probes are green, dispatch proceeds with a
    warning and skips map-identity/pose validation for that request.
 
-`/commands` no longer uses the Docker ROS backend for normal goal dispatch;
-`DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED` defaults to `0` so the hot path runs
-host `rclpy` only. `locomotion.goto` remains async-by-default
-(`DOGZILLA_ASYNC_HTTP_GOTO=1`): the bridge returns `202` acceptance quickly and
-callers track completion through `/feedback`. The background thread updates the
-same `commandId` record and reports `no-motion` when no gait adapter command or
-odom delta is observed within the bounded window. Each waypoint dispatch records
+`/commands` uses the Docker ROS backend for goal dispatch;
+`DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED` defaults to `1`. The bridge sends the
+goal synchronously and returns `202` with `delivery: "accepted"` only after the
+Nav2 action server accepts it. The background thread monitors motion only (no
+double goal send). `locomotion.goto` auto-promotes from `idle` to `navigate`
+with a 45 s bounded readiness wait (`DOGZILLA_NAV2_PROMOTE_TIMEOUT_SEC`), polling
+every 2 s and returning the latest blockers on timeout. Callers track
+completion through `/feedback`. The background thread updates the same
+`commandId` record and reports `motionStatus` values (`"moving"`,
+`"no-motion"`, `"cancelled"`, `"failed"`) using lightweight cached state only
+(no Docker probes in the monitor loop). Each waypoint dispatch records
 stage-level timing and failure attribution for `healthLite`, `scanInfo`,
 `fullHealth`, `readiness`, `preempt`, and `command`.
 
@@ -88,9 +92,10 @@ dedicated restart unit. The filter prints traceback before exiting nonzero on
 rclpy context errors so the supervisor logs the fault reason.
 
 HTTP `locomotion.goto` commands now default to async acceptance on the direct
-bridge (`DOGZILLA_ASYNC_HTTP_GOTO=1` by default). The bridge returns `202` with
-`navigation-accepted` and finishes Nav2 execution in background, while callers
-track completion through `/feedback` instead of holding the original POST open.
+bridge (`DOGZILLA_ASYNC_HTTP_GOTO=1` by default). The bridge sends the goal
+synchronously, returns `202` with `delivery: "accepted"` only after the Nav2
+action server accepts it, then monitors motion in background. Callers track
+completion through `/feedback` instead of holding the original POST open.
 
 Map identity no longer dispatch gate after rosbridge simplification.
 `config/robot-waypoints.json` remains authoritative waypoint source; saved

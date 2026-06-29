@@ -22,7 +22,7 @@ _NAV_MODE_LOCK = threading.Lock()
 # localize: one Cartographer localization process only.
 # navigate: one Cartographer + Nav2 + scan filter + gait adapter.
 # sleep: stop map-pose/Nav2/rosbridge-heavy work.
-_NAV_MODE: str = os.environ.get("DOGZILLA_DEFAULT_NAV_MODE", "navigate")
+_NAV_MODE: str = os.environ.get("DOGZILLA_DEFAULT_NAV_MODE", "idle")
 _NAV_MODE_HISTORY: deque[dict[str, Any]] = deque(maxlen=20)
 _NAV_MODE_TRANSITIONING = False
 _NAV_MODE_AUTO_DEMOTE_TIMER: threading.Timer | None = None
@@ -322,6 +322,8 @@ DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") 
 DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "1") == "1"
 DEFAULT_NAV2_MIN_BATTERY_PCT = float(os.environ.get("DOGZILLA_NAV2_MIN_BATTERY_PCT", "5"))
 DEFAULT_NO_MOTION_WINDOW_SEC = float(os.environ.get("DOGZILLA_NO_MOTION_WINDOW_SEC", "10.0"))
+DEFAULT_NAV2_PROMOTE_TIMEOUT_SEC = float(os.environ.get("DOGZILLA_NAV2_PROMOTE_TIMEOUT_SEC", "45.0"))
+DEFAULT_NAV2_PROMOTE_POLL_SEC = float(os.environ.get("DOGZILLA_NAV2_PROMOTE_POLL_SEC", "2.0"))
 
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
 ROS_SETUP_COMMAND = (
@@ -798,25 +800,75 @@ class DogzillaRuntime:
                 robot.attitude(axis, clamp(float(params[key]), low, high))
         return {"executed": True, "delivery": "DOGZILLALib", "kind": "pose.body"}
 
+    def _wait_for_nav2_readiness(self, timeout_sec: float, poll_sec: float) -> dict[str, Any]:
+        """Poll nav2 snapshot until waypointReady or timeout. Return latest blockers dict."""
+        deadline = time.monotonic() + timeout_sec
+        latest: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            snapshot = self.nav2_client.snapshot()
+            latest = snapshot
+            if snapshot.get("waypointReady") is True:
+                return {"ok": True, "snapshot": snapshot}
+            time.sleep(poll_sec)
+        return {"ok": False, "snapshot": latest, "blockers": latest.get("blockers", [])}
+
     def _execute_goto(self, params: dict[str, Any], cancel_event: threading.Event | None = None) -> dict[str, Any]:
         # A fresh goto replaces any previous navigation cancel signal and drops a
         # stale command_preempt gate, but never silently overrides a latched
-        # emergency_stop safety block.
+        # emergency_stop safety block. Clear preempt BEFORE readiness checks so
+        # a stale block cannot mask a fresh navigation attempt.
         self._clear_command_preempt_nav2_cmd_vel_block()
 
         current_mode = get_nav_mode()
+        mode_transition: dict[str, Any] | None = None
+        if current_mode == "sleep":
+            # Sleep requires explicit wake; do not auto-promote.
+            return {
+                "executed": False,
+                "delivery": "rejected",
+                "kind": "locomotion.goto",
+                "waypoint": params.get("waypoint") or "",
+                "waypointSafe": False,
+                "error": "Nav mode is sleep; call POST /mode navigate first",
+                "navMode": current_mode,
+            }
         if current_mode not in ("navigate", "localize"):
+            # Auto-promote from idle/localize to navigate, then wait for readiness.
             mode_result = set_nav_mode("navigate")
             if not mode_result.get("ok"):
                 return {
                     "executed": False,
-                    "delivery": "nav-mode-transition-failed",
+                    "delivery": "rejected",
                     "kind": "locomotion.goto",
                     "waypoint": params.get("waypoint") or "",
                     "waypointSafe": False,
                     "error": mode_result.get("error") or "failed to enter navigate mode",
                     "navMode": current_mode,
                     "modeResult": mode_result,
+                }
+            mode_transition = {
+                "from": current_mode,
+                "to": "navigate",
+                "started": True,
+            }
+            # Bounded readiness wait with latest blockers.
+            readiness = self._wait_for_nav2_readiness(
+                DEFAULT_NAV2_PROMOTE_TIMEOUT_SEC, DEFAULT_NAV2_PROMOTE_POLL_SEC
+            )
+            if not readiness.get("ok"):
+                blockers = readiness.get("blockers") or []
+                return {
+                    "executed": False,
+                    "delivery": "rejected",
+                    "kind": "locomotion.goto",
+                    "waypoint": params.get("waypoint") or "",
+                    "waypointSafe": False,
+                    "error": "Nav2 promotion timed out; latest blockers: "
+                    + ("; ".join(str(b) for b in blockers) if blockers else "unknown"),
+                    "navMode": get_nav_mode(),
+                    "modeTransition": mode_transition,
+                    "blockers": blockers,
+                    "snapshot": readiness.get("snapshot"),
                 }
 
         frame = str(params.get("frame") or "map")
@@ -850,7 +902,7 @@ class DogzillaRuntime:
         if not nav_prerequisites.get("ok"):
             return {
                 "executed": False,
-                "delivery": "nav2-prerequisite-unavailable",
+                "delivery": "rejected",
                 "kind": "locomotion.goto",
                 "waypoint": params.get("waypoint") or "",
                 "waypointSafe": frame == "map",
@@ -858,6 +910,7 @@ class DogzillaRuntime:
                 "nav2Prerequisites": nav_prerequisites,
                 "fallback": "disabled",
                 "fallbackError": "Refusing DOGZILLALib map-pose movement fallback; Nav2 with live odometry is required for waypoint navigation.",
+                **({"modeTransition": mode_transition} if mode_transition else {}),
             }
 
         battery_state = self.read_state()
@@ -911,22 +964,34 @@ class DogzillaRuntime:
             if result.get("delivery") == "nav2-unavailable":
                 return {
                     **result,
+                    "delivery": "rejected",
                     "lidarAvoidance": avoidance_result,
                     "fallback": "disabled",
                     "fallbackError": "Refusing DOGZILLALib map-pose movement fallback; Nav2 NavigateToPose is required for waypoint navigation.",
                 }
 
-            return {**result, "lidarAvoidance": avoidance_result}
+            return {**result, "delivery": "rejected", "lidarAvoidance": avoidance_result}
 
         self._clear_command_preempt_nav2_cmd_vel_block()
-        return {
+        # Normalize the app-facing delivery contract: async goto returns
+        # exactly "accepted" — never "Nav2 NavigateToPose" or
+        # "navigation-accepted". The original delivery is preserved under
+        # deliveryDetail for diagnostics.
+        original_delivery = result.get("delivery")
+        response = {
             **result,
+            "delivery": "accepted",
+            "deliveryDetail": original_delivery,
             "kind": "locomotion.goto",
             "waypoint": params.get("waypoint") or "",
             "waypointSafe": frame == "map",
             "arrivalToleranceMeters": params.get("arrivalToleranceMeters", params.get("arrival_tolerance_meters")),
             "lidarAvoidance": avoidance_result,
         }
+        if mode_transition is not None:
+            response["modeTransition"] = mode_transition
+            response["warning"] = "Nav2 was started from idle; first command may have startup latency."
+        return response
 
     def _robot(self):
         if self.robot is not None:
@@ -1021,6 +1086,10 @@ class DogzillaRuntime:
                         stop_error = str(error)
 
         nav2_cancel = self._cancel_nav2_active_goal()
+        # Defensive: even though _execute_command_preempt never sets a block,
+        # clear any stale command_preempt block before returning so preempt
+        # can never latch across commands.
+        self._clear_command_preempt_nav2_cmd_vel_block()
         result = {
             "executed": stop_error is None,
             "delivery": "stop" if stop_error is None else "stop-error",
@@ -1105,17 +1174,6 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "DogzillaLibBridge/0.2"
 
     def do_GET(self):
-        if self.path == "/healthz-lite":
-            self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "mode": "http-to-dogzillalib",
-                    "receivedCount": self.server.received_count,
-                    "runtimeSnapshot": False,
-                },
-            )
-            return
         if self.path == "/healthz":
             runtime = self.server.runtime.snapshot()
             self._send_json(
@@ -1133,6 +1191,14 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if self.path == "/healthz-lite":
+            # Lightweight endpoint: uses cached nav2 state only (no forced
+            # Docker probes). Exposes nav mode, gait block, and nav2 readiness
+            # so operators can check dispatch readiness without /healthz load.
+            nav2 = self.server.runtime.nav2_client
+            try:
+                nav2_snapshot = nav2.snapshot()
+            except Exception as exc:
+                nav2_snapshot = {"error": str(exc), "waypointReady": False, "canSendGoal": False, "backend": "unknown"}
             self._send_json(
                 200,
                 {
@@ -1143,6 +1209,10 @@ class Handler(BaseHTTPRequestHandler):
                     "navMode": get_nav_mode(),
                     "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
                     "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
+                    "nav2Ready": bool(nav2_snapshot.get("waypointReady")),
+                    "waypointReady": bool(nav2_snapshot.get("waypointReady")),
+                    "nav2Backend": nav2_snapshot.get("backend", "unknown"),
+                    "canSendGoal": bool(nav2_snapshot.get("canSendGoal")),
                     "runtimeSnapshot": False,
                 },
             )
@@ -1254,7 +1324,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             result = set_nav_mode(mode)
             self._send_json(200 if result.get("ok") else 400, result)
-            _cancel_nav_mode_demote()
             return
 
         if self.path == "/nav2/speed_config":
@@ -1286,38 +1355,67 @@ class Handler(BaseHTTPRequestHandler):
         command_id = f"dogzilla-lib-{self.server.received_count:04d}"
         _schedule_auto_sleep(restart=True)
         if canonical_plan.get("kind") == "locomotion.goto" and DEFAULT_ASYNC_HTTP_GOTO:
-            result = {
-                "executed": True,
-                "delivery": "navigation-accepted",
-                "kind": "locomotion.goto",
-                "waypoint": (canonical_plan.get("params") or {}).get("waypoint") or "",
-                "async": True,
-                "status": "running",
-            }
-            record = {
-                "commandId": command_id,
-                "receivedAt": utc_now(),
-                "envelope": envelope,
-                "canonicalPlan": canonical_plan,
-                "result": result,
-            }
-            self.server.recent_commands.appendleft(record)
-            append_log_record(record)
-            threading.Thread(
-                target=self._execute_background_command,
-                args=(command_id, envelope, canonical_plan),
-                daemon=True,
-            ).start()
-            self._send_json(
-                202,
-                {
-                    "accepted": True,
+            # Synchronous phase: pre-check, promote if needed, send goal
+            # exactly once, wait for acceptance. The background thread only
+            # monitors motion — it must NOT call runtime.execute() or
+            # send_goal() again (that was the double-send bug).
+            result = self.server.runtime.execute(canonical_plan)
+            command_accepted = bool(result.get("executed")) and result.get("delivery") == "accepted"
+
+            if command_accepted:
+                # Goal was accepted by Nav2. Start background motion monitor.
+                start_gait_count = int(getattr(self.server.runtime, "nav2_gait_adapter_count", 0) or 0)
+                started_at = time.monotonic()
+                result["async"] = True
+                result["status"] = "running"
+                record = {
                     "commandId": command_id,
+                    "receivedAt": utc_now(),
+                    "envelope": envelope,
+                    "canonicalPlan": canonical_plan,
                     "result": result,
-                    **identity_payload(),
-                },
-            )
-            return
+                }
+                self.server.recent_commands.appendleft(record)
+                append_log_record(record)
+                threading.Thread(
+                    target=self._monitor_background_motion,
+                    args=(command_id, envelope, canonical_plan, start_gait_count, started_at),
+                    daemon=True,
+                ).start()
+                self._send_json(
+                    202,
+                    {
+                        "accepted": True,
+                        "commandId": command_id,
+                        "result": result,
+                        **identity_payload(),
+                    },
+                )
+                return
+            else:
+                # Goal was rejected or failed. Return immediately.
+                status_code = 422
+                record = {
+                    "commandId": command_id,
+                    "receivedAt": utc_now(),
+                    "envelope": envelope,
+                    "canonicalPlan": canonical_plan,
+                    "result": result,
+                    "completedAt": utc_now(),
+                    "motionStatus": "failed" if result.get("error") else "rejected",
+                }
+                self.server.recent_commands.appendleft(record)
+                append_log_record(record)
+                self._send_json(
+                    status_code,
+                    {
+                        "accepted": False,
+                        "commandId": command_id,
+                        "result": result,
+                        **identity_payload(),
+                    },
+                )
+                return
 
         _schedule_auto_sleep(restart=True)
         result = self.server.runtime.execute(canonical_plan)
@@ -1345,29 +1443,46 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
-    def _execute_background_command(self, command_id: str, envelope: dict[str, Any], canonical_plan: dict[str, Any]) -> None:
+    def _monitor_background_motion(
+        self,
+        command_id: str,
+        envelope: dict[str, Any],
+        canonical_plan: dict[str, Any],
+        start_gait_count: int,
+        started_at: float,
+    ) -> None:
+        """Background motion monitor for an accepted async goto.
+
+        CRITICAL: This method must NOT call runtime.execute() or
+        nav2_client.send_goal() — the goal was already sent synchronously
+        in the handler. This thread only monitors for physical motion.
+        """
         runtime = self.server.runtime
-        start_gait_count = int(getattr(runtime, "nav2_gait_adapter_count", 0) or 0)
-        started_at = time.monotonic()
+        motion_status: str = "no-motion"
+        error_detail: str | None = None
 
-        result = runtime.execute(canonical_plan)
-
-        # Async truth: if Nav2 accepted the goal, monitor for physical motion.
-        motion_status: str | None = None
-        if result.get("executed") and result.get("delivery") in ("Nav2 NavigateToPose", "navigation-accepted"):
+        try:
             motion_status = self._monitor_navigation_motion(
                 runtime,
                 start_gait_count=start_gait_count,
                 started_at=started_at,
                 window_sec=DEFAULT_NO_MOTION_WINDOW_SEC,
             )
-            if motion_status:
-                result["motionStatus"] = motion_status
+        except Exception as exc:
+            motion_status = "failed"
+            error_detail = str(exc)
 
         completed_at = utc_now()
+
+        # Fetch the result from the existing record (set by the handler).
+        result: dict[str, Any] = {}
         updated = False
         for record in self.server.recent_commands:
             if record.get("commandId") == command_id:
+                result = dict(record.get("result") or {})
+                result["motionStatus"] = motion_status
+                if error_detail:
+                    result["monitorError"] = error_detail
                 record["completedAt"] = completed_at
                 record["result"] = result
                 record["background"] = True
@@ -1376,6 +1491,13 @@ class Handler(BaseHTTPRequestHandler):
                 break
 
         if not updated:
+            result = {
+                "executed": True,
+                "delivery": "accepted",
+                "motionStatus": motion_status,
+            }
+            if error_detail:
+                result["monitorError"] = error_detail
             self.server.recent_commands.appendleft({
                 "commandId": command_id,
                 "completedAt": completed_at,
@@ -1403,16 +1525,47 @@ class Handler(BaseHTTPRequestHandler):
         start_gait_count: int,
         started_at: float,
         window_sec: float,
-    ) -> str | None:
+    ) -> str:
+        """Monitor for physical motion using lightweight cached state only.
+
+        Does NOT call full /healthz-style Docker probes or
+        nav2_client._refresh_status(force=True) in a loop. Uses:
+          - runtime.nav2_gait_adapter_count (in-memory counter)
+          - nav2_client._odom_snapshot() (reads cached fields, no Docker probe)
+
+        Returns one of: "moving", "no-motion", "cancelled", "failed".
+        "moving" requires observed motion (gait count increase or odom
+        timestamp advancing). Goal acceptance alone is NOT "moving".
+        """
         deadline = started_at + window_sec
+        nav2_client = getattr(runtime, "nav2_client", None)
+        start_odom_ts = None
+        if nav2_client is not None:
+            try:
+                start_odom_ts = nav2_client._odom_snapshot().get("lastMessageAt")
+            except Exception:
+                start_odom_ts = None
+
         while time.monotonic() < deadline:
             if runtime._navigation_cancel_event().is_set():
                 return "cancelled"
+
+            # Primary signal: gait adapter count (in-memory, no Docker call)
             current_gait_count = int(getattr(runtime, "nav2_gait_adapter_count", 0) or 0)
             if current_gait_count > start_gait_count:
-                return None
-            # Future: compare odom pose delta here.
+                return "moving"
+
+            # Secondary signal: odom timestamp advancing (cached, no Docker probe)
+            if nav2_client is not None and start_odom_ts is not None:
+                try:
+                    current_odom_ts = nav2_client._odom_snapshot().get("lastMessageAt")
+                    if current_odom_ts is not None and current_odom_ts != start_odom_ts:
+                        return "moving"
+                except Exception:
+                    pass
+
             time.sleep(0.5)
+
         return "no-motion"
 
     def _read_json_body(self):

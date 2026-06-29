@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -80,6 +81,12 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         dogzilla_lib_bridge.DEFAULT_MAP_YAML_FILE = yaml_path
         self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_MAP_METADATA_FILE", old_metadata))
         self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_MAP_YAML_FILE", old_yaml))
+
+        # Preserve nav mode across tests — default is now "idle" but existing
+        # goto tests expect "navigate" to avoid triggering Docker promotion.
+        old_nav_mode = dogzilla_lib_bridge._NAV_MODE
+        dogzilla_lib_bridge._NAV_MODE = "navigate"
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_NAV_MODE", old_nav_mode))
 
     def test_state_read_aliases_accept_study_page_method_names(self):
         fake = FakeRobot()
@@ -257,7 +264,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertTrue(result["executed"])
-        self.assertEqual(result["delivery"], "Nav2 NavigateToPose")
+        self.assertEqual(result["delivery"], "accepted")
         self.assertEqual(result["kind"], "locomotion.goto")
         self.assertEqual(result["waypoint"], "living_room")
         self.assertTrue(result["waypointSafe"])
@@ -303,7 +310,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertFalse(result["executed"])
-        self.assertEqual(result["delivery"], "nav2-prerequisite-unavailable")
+        self.assertEqual(result["delivery"], "rejected")
         self.assertIn("No publishers on /odom", result["error"])
         self.assertFalse(hasattr(runtime.nav2_client, "goal"))
 
@@ -376,7 +383,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertTrue(result["executed"])
-        self.assertEqual(result["delivery"], "Nav2 NavigateToPose")
+        self.assertEqual(result["delivery"], "accepted")
         self.assertEqual(runtime.nav2_client.goal["frame"], "odom")
         self.assertFalse(result["waypointSafe"])
 
@@ -400,7 +407,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertFalse(result["executed"])
-        self.assertEqual(result["delivery"], "nav2-unavailable")
+        self.assertEqual(result["delivery"], "rejected")
         self.assertEqual(result["error"], "Nav2 NavigateToPose action server unavailable")
 
     def test_nav2_command_action_wait_timeout_matches_pi_load(self):
@@ -652,24 +659,8 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(calls[0]["timeout"], 6)
         self.assertEqual(snapshot["dockerStatusTimeoutSec"], dogzilla_lib_bridge.DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT)
 
-    def test_nav2_client_rejects_docker_send_goal_by_default(self):
-        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
-        client.action_name = "navigate_to_pose"
-        client.backend = "docker-rclpy"
-        client.docker_container = "robodoge-rosbridge"
-        calls = []
-
-        def fake_run_docker_python(script, *, timeout):
-            calls.append({"script": script, "timeout": timeout})
-            return dogzilla_lib_bridge.subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-
-        client._run_docker_python = fake_run_docker_python
-        result = client.send_goal(frame="map", x=1.25, y=-0.5, yaw=0.2)
-
-        self.assertFalse(result["executed"])
-        self.assertEqual(result["delivery"], "nav2-unavailable")
-        self.assertIn("Docker Nav2 goal backend disabled", result["error"])
-        self.assertEqual(calls, [])
+    def test_docker_send_goal_enabled_by_default(self):
+        self.assertTrue(dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED)
 
     def test_nav2_client_sends_goal_through_docker_backend_when_enabled(self):
         previous = dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED
@@ -1071,15 +1062,15 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             "receivedAt": dogzilla_lib_bridge.utc_now(),
             "envelope": envelope,
             "canonicalPlan": envelope["canonicalPlan"],
-            "result": {"executed": True, "delivery": "navigation-accepted"},
+            "result": {"executed": True, "delivery": "accepted"},
         })
 
         previous_window = dogzilla_lib_bridge.DEFAULT_NO_MOTION_WINDOW_SEC
         dogzilla_lib_bridge.DEFAULT_NO_MOTION_WINDOW_SEC = 0.2
         self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_NO_MOTION_WINDOW_SEC", previous_window))
 
-        dogzilla_lib_bridge.Handler._execute_background_command(
-            MockHandler(bridge_server), command_id, envelope, envelope["canonicalPlan"]
+        dogzilla_lib_bridge.Handler._monitor_background_motion(
+            MockHandler(bridge_server), command_id, envelope, envelope["canonicalPlan"], 0, time.monotonic()
         )
 
         matching = [r for r in bridge_server.recent_commands if r.get("commandId") == command_id]

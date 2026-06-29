@@ -82,7 +82,7 @@ The live Cartographer grid contains raw probabilities (`0-100`), while saved `.p
 Direct bridge runtime truth distinguishes action discovery from waypoint-ready stack truth:
 
 - `navigation.actionServerDiscovered` reports whether `/navigate_to_pose` was visible in the ROS graph during the latest discovery check.
-- `navigation.waypointReady` / `navigation.available` may still be `true` when lifecycle nodes are active and `/odom` plus `/scan_nav2` are live. Pi DDS action discovery can briefly miss the action while the stack is otherwise usable.
+- `navigation.waypointReady` / `navigation.available` require `can_send_goal()` to be true — the active backend must be able to actually send goals. If Docker goal sending is disabled or the host action client is missing, `waypointReady` is `false` even when lifecycle nodes, `/odom`, and `/scan_nav2` are live.
 - `send_goal` still waits for the real `NavigateToPose` action server before accepting a waypoint command. Do not remove that send-time wait.
 
 When startup or preflight says the action server is blocked but lifecycle, `/odom`, and `/scan_nav2` are green in `/healthz`, treat action discovery as diagnostic evidence, not automatic proof that Nav2 is down.
@@ -120,7 +120,37 @@ The direct bridge must own `/dev/ttyAMA0` exclusively during live navigation. Ya
 The bridge distinguishes two stop paths:
 
 - `emergency_stop` (reason `emergency_stop`): latches `/nav2/cmd_vel` blocked until an explicit unlatch path is used. A subsequent `locomotion.goto` does **not** silently clear this safety block.
-- `command_preempt` (reason `command_preempt`): cancels the active Nav2 goal and stops robot motion, but does **not** latch `/nav2/cmd_vel` blocked. A fresh `locomotion.goto` clears any stale command-preempt gate at start.
+- `command_preempt` (reason `command_preempt`): cancels the active Nav2 goal and stops robot motion, but does **not** latch `/nav2/cmd_vel` blocked. A fresh `locomotion.goto` clears any stale command-preempt gate before readiness checks. `_execute_command_preempt()` also defensively clears any stale `command_preempt` block before returning.
+
+## Navigation execution contract
+
+The async goto path uses a normalized app-facing delivery contract:
+
+| `delivery` | Meaning |
+| --- | --- |
+| `"accepted"` | Nav2 `NavigateToPose` goal was accepted by the action server. Background motion monitor started. HTTP 202. |
+| `"rejected"` | Prerequisites failed, goal was rejected, or promote timeout hit. HTTP 422. Includes `error` and `blockers`. |
+
+The original internal delivery name (e.g. `"Nav2 NavigateToPose"`) is preserved under `deliveryDetail` for diagnostics.
+
+**Single goal send invariant:** The synchronous phase sends the goal exactly once. The background thread (`_monitor_background_motion`) only monitors motion — it must NOT call `runtime.execute()` or `nav2_client.send_goal()` again.
+
+**Motion status values** (set by the background monitor):
+
+| `motionStatus` | Meaning |
+| --- | --- |
+| `"moving"` | Gait adapter count increased OR odom timestamp advanced. Goal acceptance alone is NOT `"moving"`. |
+| `"no-motion"` | Goal accepted but neither gait nor odom changed within the window. |
+| `"cancelled"` | Navigation cancel event was set. |
+| `"failed"` | Background monitor threw an exception. `monitorError` field contains the detail. |
+
+The motion monitor uses lightweight cached state only — `runtime.nav2_gait_adapter_count` (in-memory counter) and `nav2_client._odom_snapshot()` (reads cached fields). It does NOT call `_refresh_status(force=True)` or Docker probes in a loop.
+
+**Readiness invariant:** `waypointReady=true` requires `can_send_goal()` to be true. If Docker goal sending is disabled or the host action client is missing, `waypointReady` is `false` even if the lifecycle/odom/scan stack is otherwise active.
+
+**Promote timeout:** `DOGZILLA_NAV2_PROMOTE_TIMEOUT_SEC=45` (poll every `DOGZILLA_NAV2_PROMOTE_POLL_SEC=2` s). If the timeout hits, the response includes the latest blockers collected during polling (action missing, odom missing, lifecycle inactive, scan missing, cannot send goal, etc.), not a generic timeout message.
+
+`/healthz-lite` exposes: `navMode`, `loadAverage`, `gaitBlocked`, `gaitBlockedReason`, `nav2Ready`, `waypointReady`, `nav2Backend`, `canSendGoal`. Use `/healthz-lite` for frequent UI polls; full `/healthz` is for diagnostics or failures only.
 
 ## Pi load-shed modes
 
@@ -137,9 +167,10 @@ Control modes via the bridge:
 
 - `GET /mode` returns current mode and transition history.
 - `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` transitions the stack.
-- `locomotion.goto` automatically requests `navigate` mode if not already in `navigate` or `localize`.
+- `locomotion.goto` automatically promotes from `idle`/`localize` to `navigate` mode, waits for bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), then sends the goal synchronously.
+- `locomotion.goto` from `sleep` is rejected; call `POST /mode navigate` first.
 - After `DOGZILLA_NAV_MODE_IDLE_DELAY_SEC` (default 300 s) of inactivity the bridge demotes toward `idle`.
-- Default at startup is `navigate` for compatibility; set `DOGZILLA_DEFAULT_NAV_MODE=idle` to keep the Pi cool at boot.
+- Default at startup is `idle`. The bridge does not start the Nav2 stack until a goto or explicit `/mode navigate` is issued.
 
 The app defaults to bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and the `server.mjs` Nav2 repair watchdog call `POST /mode navigate` on the bridge instead of independently launching SSH scripts. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center "Restart Nav" remains an explicit SSH repair path.
 
@@ -153,7 +184,7 @@ export DOGZILLA_NAV2_GAIT_SMOOTHER_BYPASS=1
 
 This sets `DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC=/cmd_vel_nav` (raw controller output) instead of `/cmd_vel` (smoothed output). Only enable after confirming Nav2 accepts goals; tune the smoother after movement is restored.
 
-`/healthz-lite` and `/healthz` now include compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, and `gaitBlockedReason`. Use `/healthz-lite` for frequent UI polls; full `/healthz` is for diagnostics or failures only. The UI slows state/map polling when `navMode` is `idle` or `sleep`.
+`/healthz-lite` includes compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, `gaitBlockedReason`, `nav2Ready`, `waypointReady`, `nav2Backend`, `canSendGoal`. Full `/healthz` is for diagnostics or failures only. The UI slows state/map polling when `navMode` is `idle` or `sleep`.
 
 ## Starting and deploying
 

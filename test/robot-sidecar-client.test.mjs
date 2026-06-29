@@ -163,11 +163,13 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
 
       requestUrl = url
       requests.push(parseRequestBody(options))
+      const body = parseRequestBody(options)
+      const delivery = body?.action === 'stop' ? 'stop' : 'accepted'
       return jsonResponse({
         accepted: true,
         result: {
           executed: true,
-          delivery: 'Nav2 NavigateToPose',
+          delivery,
         },
       }, { status: 202 })
     },
@@ -179,7 +181,7 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
         { autoStartWaypointNavigation: false },
       )
 
-      assert.equal(result.status, 'sent')
+      assert.equal(result.status, 'accepted')
       assert.equal(result.preempt.status, 'sent')
       assert.equal(requestUrl, 'http://10.0.4.32:8893/commands')
       assert.equal(requests.length, 2)
@@ -1056,7 +1058,7 @@ test('sendRobotCommand surfaces command result errors after successful preempt',
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'error')
+      assert.equal(result.status, 'rejected')
       assert.equal(result.preempt.status, 'sent')
       assert.equal(result.error, 'LiDAR obstacle avoidance unavailable (locomotion.goto)')
     },

@@ -15,7 +15,7 @@ DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID
 DEFAULT_NAV2_ACTION = os.environ.get("DOGZILLA_NAV2_ACTION", "navigate_to_pose")
 DEFAULT_NAV2_DOCKER_CONTAINER = os.environ.get("DOGZILLA_NAV2_DOCKER_CONTAINER", "robodoge-rosbridge")
 DEFAULT_NAV2_DOCKER_ENABLED = os.environ.get("DOGZILLA_NAV2_DOCKER_ENABLED", "1") != "0"
-DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = os.environ.get("DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED", "0") != "0"
+DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = os.environ.get("DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED", "1") != "0"
 DEFAULT_NAV2_ALLOWED_FRAMES = {
     frame.strip()
     for frame in os.environ.get("DOGZILLA_NAV2_ALLOWED_FRAMES", "map,odom").split(",")
@@ -1900,6 +1900,14 @@ finally:
             check=False,
         )
 
+    def can_send_goal(self) -> bool:
+        """Return True only when the active backend can actually send NavigateToPose goals."""
+        if self.backend == "docker-rclpy":
+            return bool(DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED) and self.client_available
+        if self.backend == "host-rclpy":
+            return self.client_available and self._action_client is not None
+        return False
+
     def snapshot(self) -> dict[str, Any]:
         self._refresh_status()
         odom = self._odom_snapshot()
@@ -1910,12 +1918,15 @@ finally:
             and lifecycle.get("active") is True
             and scan.get("available") is True
         )
-        # Action discovery can briefly fail under Pi DDS load even while
-        # bt_navigator and the rest of Nav2 are active. Treat the active Nav2
-        # stack as waypoint-ready for startup/preflight; send_goal still does
-        # its own ActionClient wait before accepting a command.
-        waypoint_ready = stack_ready and (self.available or lifecycle.get("active") is True)
+        # Readiness invariant: waypointReady requires the active backend to be
+        # able to send goals. If the Docker goal backend is disabled or the host
+        # action client is missing, waypointReady must be false even if the
+        # lifecycle/odom/scan stack is otherwise active.
+        can_send = self.can_send_goal()
+        waypoint_ready = stack_ready and can_send
         blockers: list[str] = []
+        if not can_send:
+            blockers.append("Nav2 goal backend cannot send goals")
         if not self.available and not stack_ready:
             blockers.append(self.import_error or self.server_error or "Nav2 NavigateToPose action server unavailable")
         if odom.get("available") is not True:
@@ -1931,6 +1942,7 @@ finally:
             "clientAvailable": self.client_available,
             "serverAvailable": self.server_available,
             "actionServerDiscovered": self.server_available,
+            "canSendGoal": can_send,
             "action": self.action_name,
             "odom": odom,
             "lifecycle": lifecycle,

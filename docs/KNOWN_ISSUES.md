@@ -9,6 +9,7 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 
 ## DOGZILLA Navigation
 
+- **Docker goal-split (fix applied, pending live verification).** `DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED` was `"0"` while `DEFAULT_NAV2_DOCKER_ENABLED` was `"1"` — bridge reported `waypointReady=true` but could not send goals. Fix: default is now `"1"`, `can_send_goal()` gates `waypointReady`, and `/healthz-lite` exposes `canSendGoal`/`nav2Backend`. Entry stays here until live acceptance is proven on the Pi: idle -> goto -> Nav2 accepted -> gait/cmd_vel/pose moved -> preempt clears -> idle demotes.
 - **Nav2 action discovery can be a false startup blocker.** The direct bridge reports `navigation.actionServerDiscovered` separately from `navigation.waypointReady`. If lifecycle nodes are active and `/odom` plus `/scan_nav2` are live, bridge readiness may be waypoint-ready even when Pi DDS action discovery briefly misses `/navigate_to_pose`. `send_goal` still waits for the real action server before accepting a command. See `docs/NAVIGATION.md`.
 - **Resolved startup blocker: `/odom` and `/scan_nav2` did not stay ready long enough for waypoint commands.** The repo `/odom` and `/scan_nav2` helpers now run under supervisors. `/odom` uses `odom->base_link` when available, otherwise synthetic relative odom anchored at first `map->base_link`.
 - **Single-shot start failure:** One SSH hiccup in `start-map-pose` or `start-navigation` could leave Nav2 down for the session. `lib/dogzilla-start-retry.mjs` wraps both actions in a 3-attempt loop.
