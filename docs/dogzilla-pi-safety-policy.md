@@ -34,11 +34,12 @@ Vendor-owned paths to preserve:
 - `/home/pi/DOGZILLA`
 - Yahboom app server on port `6500`
 - Yahboom TCP server on `192.168.8.88:6000`
-- `yahboom_oled.service`
 - `jupyter.service`
 - `wayvnc.service`
 - `NetworkManager.service`
 - Docker images/containers unless explicitly approved
+
+Live-navigation exception: `yahboom_oled.service` and the Yahboom `app_dogzilla.py`/`oled_dogzilla.py` processes must be stopped before the Robo-Doge direct bridge runs, because both try to own `/dev/ttyAMA0`. `scripts/stop-dogzilla-vendor-app-ssh.ps1` and `robodoge-direct-bridge.service` stop and disable `yahboom_oled.service` on live navigation machines. `/dev/ttyAMA1` (LiDAR/ROS) remains untouched.
 
 ## Revert Procedure
 

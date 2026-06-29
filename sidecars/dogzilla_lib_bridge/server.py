@@ -352,8 +352,11 @@ class DogzillaRuntime:
         if self.dry_run:
             return {"executed": False, "delivery": "dry-run", "kind": kind, "params": params}
 
-        if kind == "noop" and params.get("reason") in ("emergency_stop", "command_preempt"):
-            return self._execute_emergency_stop(reason=str(params.get("reason") or "emergency_stop"))
+        if kind == "noop" and params.get("reason") == "emergency_stop":
+            return self._execute_emergency_stop(reason="emergency_stop")
+
+        if kind == "noop" and params.get("reason") == "command_preempt":
+            return self._execute_command_preempt()
 
         if kind == "locomotion.goto":
             cancel_event = self._replace_navigation_cancel_event()
@@ -641,6 +644,10 @@ class DogzillaRuntime:
         return {"executed": True, "delivery": "DOGZILLALib", "kind": "pose.body"}
 
     def _execute_goto(self, params: dict[str, Any], cancel_event: threading.Event | None = None) -> dict[str, Any]:
+        # A fresh goto replaces any previous navigation cancel signal and drops a
+        # stale command_preempt gate, but never silently overrides a latched
+        # emergency_stop safety block.
+        self._clear_command_preempt_nav2_cmd_vel_block()
         frame = str(params.get("frame") or "map")
         if frame not in DEFAULT_NAV2_ALLOWED_FRAMES:
             return {"executed": False, "error": f"unsupported_navigation_frame:{frame}"}
@@ -740,7 +747,7 @@ class DogzillaRuntime:
 
             return {**result, "lidarAvoidance": avoidance_result}
 
-        self._clear_nav2_cmd_vel_block()
+        self._clear_command_preempt_nav2_cmd_vel_block()
         return {
             **result,
             "kind": "locomotion.goto",
@@ -820,6 +827,40 @@ class DogzillaRuntime:
             result["error"] = stop_error
         return result
 
+    def _execute_command_preempt(self) -> dict[str, Any]:
+        self.cancel_active_navigation()
+        # Preempt cancels prior motion before a new command; unlike emergency_stop
+        # it must not latch /nav2/cmd_vel blocked.
+
+        performance_stopped = False
+        stop_error: str | None = None
+        if not self.available:
+            stop_error = self.import_error or "DOGZILLALib unavailable"
+        else:
+            with self._lock:
+                robot = self._robot()
+                if robot is None:
+                    stop_error = self.robot_error or "robot unavailable"
+                else:
+                    try:
+                        performance_stopped = stop_performance_mode(robot)
+                        robot.stop()
+                    except Exception as error:
+                        self.robot_error = str(error)
+                        stop_error = str(error)
+
+        nav2_cancel = self._cancel_nav2_active_goal()
+        result = {
+            "executed": stop_error is None,
+            "delivery": "stop" if stop_error is None else "stop-error",
+            "performanceStopped": performance_stopped,
+            "nav2CmdVelBlocked": False,
+            "nav2Cancel": nav2_cancel,
+        }
+        if stop_error is not None:
+            result["error"] = stop_error
+        return result
+
     def _cancel_nav2_active_goal(self) -> dict[str, Any]:
         nav2_client = getattr(self, "nav2_client", None)
         cancel_goal = getattr(nav2_client, "cancel_active_goal", None)
@@ -843,6 +884,11 @@ class DogzillaRuntime:
     def _clear_nav2_cmd_vel_block(self) -> None:
         self.nav2_cmd_vel_blocked = False
         self.nav2_cmd_vel_blocked_reason = None
+
+    def _clear_command_preempt_nav2_cmd_vel_block(self) -> None:
+        if getattr(self, "nav2_cmd_vel_blocked_reason", None) == "command_preempt":
+            self.nav2_cmd_vel_blocked = False
+            self.nav2_cmd_vel_blocked_reason = None
 
     def _nav2_cmd_vel_is_blocked(self) -> bool:
         return bool(getattr(self, "nav2_cmd_vel_blocked", False))

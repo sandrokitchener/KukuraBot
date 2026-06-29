@@ -61,6 +61,7 @@ Invoke-RestMethod -TimeoutSec 8 http://127.0.0.1:3037/api/robot/state |
 DOGZILLA support services:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts/stop-dogzilla-vendor-app-ssh.ps1
 powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-bridge-ssh.ps1 -Bridge direct -Live -Background
 powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-rosbridge-ssh.ps1 -Background
 powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-yolo-vision-ssh.ps1 -Background

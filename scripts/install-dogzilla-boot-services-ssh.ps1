@@ -124,13 +124,15 @@ sudo tee /etc/systemd/system/robodoge-direct-bridge.service >/dev/null <<SERVICE
 Description=Robo-Doge DOGZILLA Direct Bridge
 After=network-online.target
 Wants=network-online.target
+Conflicts=yahboom_oled.service
 
 [Service]
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
-ExecStartPre=/bin/bash -lc 'pkill -f "[/]home/pi/DOGZILLA/app_dogzilla/app_dogzilla.py" 2>/dev/null || true; pkill -f "[s]idecars/dogzilla_lib_bridge/server.py" 2>/dev/null || true'
+ExecStartPre=+/bin/bash -lc 'systemctl stop yahboom_oled.service 2>/dev/null || true; pkill -TERM -f "[a]pp_dogzilla.py" 2>/dev/null || true; pkill -TERM -f "[o]led_dogzilla.py" 2>/dev/null || true; sleep 0.8; pkill -KILL -f "[a]pp_dogzilla.py" 2>/dev/null || true; pkill -KILL -f "[o]led_dogzilla.py" 2>/dev/null || true; sleep 0.3; for pid in $(pgrep -f "[a]pp_dogzilla.py" 2>/dev/null) $(pgrep -f "[o]led_dogzilla.py" 2>/dev/null); do if ls -l /proc/$pid/fd 2>/dev/null | grep -qF "/dev/ttyAMA0"; then echo "Yahboom process $pid still owns /dev/ttyAMA0" >&2; exit 1; fi; done'
+ExecStartPre=/bin/bash -lc 'pkill -f "[s]idecars/dogzilla_lib_bridge/server.py" 2>/dev/null || true'
 ExecStart=/usr/bin/python3 $REMOTE_ROOT/sidecars/dogzilla_lib_bridge/server.py --host 0.0.0.0 --port $DIRECT_PORT --live
 Restart=always
 RestartSec=3
@@ -235,6 +237,8 @@ sudo systemctl stop robodoge-lidar-bridge.service 2>/dev/null || true
 sudo systemctl disable robodoge-lidar-bridge.service 2>/dev/null || true
 sudo docker rm -f robodoge-lidar-bridge 2>/dev/null || true
 sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service
+# Prevent the Yahboom OLED vendor app from respawning and reclaiming /dev/ttyAMA0 on live navigation machines.
+sudo systemctl disable --now yahboom_oled.service 2>/dev/null || true
 sudo systemctl restart robodoge-audio-cue.service || true
 sudo systemctl restart robodoge-yolo-vision.service || true
 sudo systemctl restart robodoge-rosbridge.service || true

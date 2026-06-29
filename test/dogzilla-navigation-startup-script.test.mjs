@@ -467,6 +467,38 @@ test('DOGZILLA boot service install runs map-pose in its own container', async (
   assert.match(script, /bash sidecars\/dogzilla_map_pose\/start-map-pose-in-container\.sh/)
 })
 
+test('DOGZILLA direct bridge SSH startup stops vendor app before launching bridge', async () => {
+  const script = await readFile(BRIDGE_SSH_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /stop-dogzilla-vendor-app-ssh\.ps1/)
+  assert.match(script, /stopVendorArgs/)
+  assert.match(script, /DOGZILLA vendor app stop failed/)
+  assert.ok(script.indexOf('stop-dogzilla-vendor-app-ssh.ps1') < script.indexOf('server.py --host'))
+})
+
+test('DOGZILLA boot service install makes direct bridge conflict with yahboom_oled', async () => {
+  const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+
+  assert.match(script, /Conflicts=yahboom_oled\.service/)
+  assert.match(script, /ExecStartPre=\+\/bin\/bash -lc/)
+  assert.match(script, /systemctl stop yahboom_oled\.service/)
+  assert.match(script, /pkill -TERM -f "\[a\]pp_dogzilla\.py"/)
+  assert.match(script, /pkill -TERM -f "\[o\]led_dogzilla\.py"/)
+  assert.match(script, /pkill -KILL -f "\[a\]pp_dogzilla\.py"/)
+  assert.match(script, /pkill -KILL -f "\[o\]led_dogzilla\.py"/)
+  assert.match(script, /\/dev\/ttyAMA0/)
+})
+
+test('DOGZILLA boot service install disables yahboom_oled after enabling direct bridge', async () => {
+  const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+
+  const enableIndex = script.indexOf('systemctl enable robodoge-direct-bridge.service')
+  const disableIndex = script.indexOf('systemctl disable --now yahboom_oled.service')
+
+  assert.ok(enableIndex > 0, 'expected direct-bridge enable')
+  assert.ok(disableIndex > enableIndex, 'expected yahboom_oled disable after direct-bridge enable')
+})
+
 function nodeBlock(source, packageName) {
   const start = source.indexOf(`package="${packageName}"`)
   assert.notEqual(start, -1, `missing ${packageName} node`)

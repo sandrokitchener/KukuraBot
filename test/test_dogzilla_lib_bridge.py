@@ -876,7 +876,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(runtime.navigation_cancel.is_set())
         self.assertEqual(runtime.robot.calls, [("perform", 0), ("stop",)])
 
-    def test_emergency_stop_blocks_nav2_cmd_vel_until_next_goto_is_accepted(self):
+    def test_emergency_stop_blocks_nav2_cmd_vel_and_goto_does_not_clear_it(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
         runtime.import_error = None
         runtime.robot_error = None
@@ -891,6 +891,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(stop["executed"])
         self.assertTrue(runtime.navigation_cancel.is_set())
         self.assertTrue(runtime.nav2_cmd_vel_blocked)
+        self.assertEqual(runtime.nav2_cmd_vel_blocked_reason, "emergency_stop")
         self.assertEqual(stop["nav2Cancel"]["goalsCanceling"], 1)
 
         blocked = runtime.execute_nav2_cmd_vel({
@@ -915,20 +916,19 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertTrue(goto["executed"])
-        self.assertFalse(runtime.nav2_cmd_vel_blocked)
+        self.assertTrue(runtime.nav2_cmd_vel_blocked)
+        self.assertEqual(runtime.nav2_cmd_vel_blocked_reason, "emergency_stop")
 
         resumed = runtime.execute_nav2_cmd_vel({
             "linear": {"x": 0.13, "y": 0.0},
             "angular": {"z": 0.0},
         })
 
-        self.assertTrue(resumed["executed"])
-        self.assertEqual(runtime.nav2_gait_adapter_count, 2)
-        self.assertEqual(runtime.robot.calls[-3][0], "move")
-        self.assertEqual(runtime.robot.calls[-3][1], "x")
-        self.assertGreater(runtime.robot.calls[-3][2], 0)
+        self.assertFalse(resumed["executed"])
+        self.assertEqual(resumed["delivery"], "nav2-gait-adapter-blocked")
+        self.assertEqual(resumed["blockedReason"], "emergency_stop")
 
-    def test_command_preempt_cancels_nav2_and_blocks_gait_adapter(self):
+    def test_command_preempt_cancels_nav2_without_blocking_gait_adapter(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
         runtime.import_error = None
         runtime.robot_error = None
@@ -936,26 +936,59 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         runtime.dry_run = False
         runtime._lock = threading.Lock()
         runtime.navigation_cancel = threading.Event()
+        runtime.nav2_cmd_vel_blocked = False
+        runtime.nav2_cmd_vel_blocked_reason = None
         runtime.nav2_client = FakeCancelableNav2Client()
 
         stop = runtime.execute({"kind": "noop", "params": {"reason": "command_preempt"}})
 
         self.assertTrue(stop["executed"])
         self.assertTrue(runtime.navigation_cancel.is_set())
-        self.assertTrue(runtime.nav2_cmd_vel_blocked)
-        self.assertEqual(runtime.nav2_cmd_vel_blocked_reason, "command_preempt")
+        self.assertFalse(runtime.nav2_cmd_vel_blocked)
+        self.assertIsNone(runtime.nav2_cmd_vel_blocked_reason)
         self.assertEqual(stop["nav2Cancel"]["goalsCanceling"], 1)
         self.assertEqual(runtime.nav2_client.cancel_calls, 1)
 
-        blocked = runtime.execute_nav2_cmd_vel({
+        motion = runtime.execute_nav2_cmd_vel({
             "linear": {"x": 0.13, "y": 0.0},
             "angular": {"z": 0.2},
         })
 
-        self.assertFalse(blocked["executed"])
-        self.assertEqual(blocked["delivery"], "nav2-gait-adapter-blocked")
-        self.assertEqual(blocked["blockedReason"], "command_preempt")
-        self.assertEqual(runtime.robot.calls, [("perform", 0), ("stop",)])
+        self.assertTrue(motion["executed"])
+        self.assertEqual(motion["delivery"], "DOGZILLALib nav2 gait adapter")
+        self.assertEqual(runtime.robot.calls[2:4], [("pace", "slow"), ("gait_type", "walk")])
+
+    def test_goto_after_command_preempt_allows_nav2_goal_and_cmd_vel_motion(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+        runtime.navigation_cancel = threading.Event()
+        runtime.nav2_cmd_vel_blocked = False
+        runtime.nav2_cmd_vel_blocked_reason = None
+        runtime.nav2_client = FakeCancelableNav2Client()
+
+        preempt = runtime.execute({"kind": "noop", "params": {"reason": "command_preempt"}})
+
+        self.assertTrue(preempt["executed"])
+        self.assertFalse(runtime.nav2_cmd_vel_blocked)
+
+        goto = runtime.execute({
+            "kind": "locomotion.goto",
+            "params": {
+                "frame": "map",
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "waypoint": "garage",
+            },
+        })
+
+        self.assertTrue(goto["executed"])
+        self.assertEqual(goto["waypoint"], "garage")
+        self.assertFalse(runtime.nav2_cmd_vel_blocked)
 
 
 class FakeRobot:

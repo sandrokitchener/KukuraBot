@@ -111,6 +111,17 @@ The repo odom helper first uses `odom->base_link`; if absent, it anchors the fir
 
 The scan filter and odom helpers are supervised because child `rclpy` processes can exit or stop publishing while the process still exists. ROS2 CLI readiness calls are bounded because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
 
+## Direct bridge hardware ownership and stop semantics
+
+The direct bridge must own `/dev/ttyAMA0` exclusively during live navigation. Yahboom's `app_dogzilla.py` and `oled_dogzilla.py` (including the `yahboom_oled.service` unit) must be stopped before the bridge starts. `scripts/stop-dogzilla-vendor-app-ssh.ps1` stops the service, kills both processes, and fails if either still holds `/dev/ttyAMA0` open. `scripts/install-dogzilla-boot-services-ssh.ps1` adds `Conflicts=yahboom_oled.service` to `robodoge-direct-bridge.service`, runs an equivalent privileged `ExecStartPre=+` vendor-stop flow, and disables `yahboom_oled.service` after enable.
+
+`/dev/ttyAMA1` remains LiDAR/ROS-owned; do not stop or repurpose it.
+
+The bridge distinguishes two stop paths:
+
+- `emergency_stop` (reason `emergency_stop`): latches `/nav2/cmd_vel` blocked until an explicit unlatch path is used. A subsequent `locomotion.goto` does **not** silently clear this safety block.
+- `command_preempt` (reason `command_preempt`): cancels the active Nav2 goal and stops robot motion, but does **not** latch `/nav2/cmd_vel` blocked. A fresh `locomotion.goto` clears any stale command-preempt gate at start.
+
 ## Starting and deploying
 
 `start-map-pose` and `start-navigation` are wrapped in a 3-attempt retry loop (`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s) for startup and command-time repair.
