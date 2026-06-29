@@ -25,55 +25,60 @@ npm run dogzilla:validate-waypoints
 npm run dogzilla:start-navigation
 npm run dogzilla:start-map-pose
 npm run dogzilla:set-origin
+npx zx scripts/probe-dogzilla-rosbridge.mjs
 ```
 
-Map identity / stale waypoint check:
+Direct Nav2 graph check on Pi:
 
 ```powershell
-Invoke-RestMethod -TimeoutSec 45 http://10.0.4.32:8893/healthz | Select-Object -ExpandProperty runtime | Select-Object -ExpandProperty map | ConvertTo-Json -Depth 8
+ssh -F output/pi-ssh/config dogzilla "docker exec robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=16; timeout 8 ros2 action list | grep navigate_to_pose; timeout 8 ros2 topic info /odom; timeout 8 ros2 topic info /scan_nav2'"
+```
+
+Direct bridge Nav2 truth:
+
+```powershell
+Invoke-RestMethod -TimeoutSec 15 http://10.0.4.32:8893/healthz |
+  Select-Object -ExpandProperty runtime |
+  Select-Object -ExpandProperty navigation |
+  ConvertTo-Json -Depth 8
+```
+
+Waypoint / origin check:
+
+```powershell
 Get-Content output/app-cache/dogzilla-map-origin.json
 npm run dogzilla:validate-waypoints
 ```
 
-Expected rule: active map fingerprint, saved origin fingerprint, and waypoint fingerprint must all exist and match before app-map waypoint dispatch is trusted.
-
-Recurring lifecycle-dispatch failure check:
+Navigation status from app state:
 
 ```powershell
-npm run dogzilla:probe-nav
-Invoke-RestMethod -TimeoutSec 45 http://10.0.4.32:8893/healthz | Select-Object -ExpandProperty runtime | Select-Object -ExpandProperty nav2 | ConvertTo-Json -Depth 8
-ssh -F output/pi-ssh/config dogzilla "tail -n 20 /home/pi/robodoge/sidecars/dogzilla_lib_bridge/command_log.ndjson"
-ssh -F output/pi-ssh/config dogzilla 'docker exec robodoge-lidar-bridge bash -lc "source /opt/ros/humble/setup.bash; export ROS_DOMAIN_ID=16; for n in controller_server planner_server bt_navigator behavior_server; do echo NODE:\$n; ros2 lifecycle get /\$n || true; done"'
-```
-
-Expected current direct-bridge Nav2 timing defaults:
-
-```text
-lifecycleWaitTimeoutSec: 12
-dockerStatusTimeoutSec: 30
-```
-
-Navigation repair/status from app state:
-
-```powershell
-Invoke-RestMethod -TimeoutSec 8 http://127.0.0.1:3037/api/robot/state | Select-Object -ExpandProperty navigationStatus | ConvertTo-Json -Depth 8
-```
-
-Expected active repair signal:
-
-```text
-status: repairing
-text: Repairing navigation...
+Invoke-RestMethod -TimeoutSec 8 http://127.0.0.1:3037/api/robot/state |
+  Select-Object -ExpandProperty navigationStatus |
+  ConvertTo-Json -Depth 8
 ```
 
 DOGZILLA support services:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-bridge-ssh.ps1 -Bridge direct -Live -Background
+powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-rosbridge-ssh.ps1 -Background
 powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-yolo-vision-ssh.ps1 -Background
 powershell -ExecutionPolicy Bypass -File scripts/start-dogzilla-audio-cue-ssh.ps1 -Background
 npm run dogzilla:start-map-pose
 npm run dogzilla:start-navigation
+```
+
+Build or rebuild pre-baked Cartographer/Nav2 Docker image on Pi:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-dogzilla-docker-image-ssh.ps1
+```
+
+Install or reinstall Pi systemd boot services:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-dogzilla-boot-services-ssh.ps1
 ```
 
 Health endpoints:
@@ -81,7 +86,7 @@ Health endpoints:
 ```powershell
 Invoke-RestMethod -TimeoutSec 8 http://10.0.4.32:8893/healthz
 Invoke-RestMethod -TimeoutSec 8 http://10.0.4.32:8894/healthz
-Invoke-RestMethod -TimeoutSec 8 http://10.0.4.32:8896/healthz
+# rosbridge has no HTTP healthz; verify via scripts/probe-dogzilla-rosbridge.mjs
 ```
 
 SSH:
@@ -95,7 +100,7 @@ Manual Nav2 message fix:
 
 ```powershell
 scp -F output/pi-ssh/config scripts/install-nav2-msgs-in-container.sh dogzilla:/home/pi/robodoge/
-ssh -F output/pi-ssh/config dogzilla "docker exec robodoge-lidar-bridge sudo bash /home/pi/robodoge/install-nav2-msgs-in-container.sh"
+ssh -F output/pi-ssh/config dogzilla "docker exec robodoge-rosbridge sudo bash /home/pi/robodoge/install-nav2-msgs-in-container.sh"
 ssh -F output/pi-ssh/config dogzilla "sudo systemctl restart robodoge-direct-bridge.service; sleep 5"
 ```
 
@@ -135,7 +140,7 @@ npm run tauri
 npm run tauri:dev
 ```
 
-Android-specific Tauri commands are in the Android section above.
+Android-specific Tauri commands are in the Android section.
 
 ## Verification
 

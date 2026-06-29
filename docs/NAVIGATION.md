@@ -6,7 +6,7 @@ Read this for SLAM, Nav2, waypoints, saved map origin, pose, robot movement, and
 
 1. Local Yahboom docs under `docs/DOGZILLA-main`, especially `14.Lidar course`.
 2. Repo configs and code listed below.
-3. Live Pi/bridge/Nav2 state when behavior depends on the robot.
+3. Live Pi, bridge, and Nav2 state when behavior depends on robot.
 
 Do not use generic ROS assumptions when local DOGZILLA docs or live evidence disagree.
 
@@ -14,7 +14,7 @@ Do not use generic ROS assumptions when local DOGZILLA docs or live evidence dis
 
 Relevant docs:
 
-- `docs/DOGZILLA-main/14.Lidar course/1. Introduction and use of radar.pdf`
+- `docs/DOGZILLA-main/14.Lidar course/1. Introduction use radar.pdf`
 - `docs/DOGZILLA-main/14.Lidar course/Robot dog mapping.pdf`
 - `docs/DOGZILLA-main/14.Lidar course/Robot Dog Navigation.pdf`
 - `docs/DOGZILLA-main/14.Lidar course/5. Patrol.pdf`
@@ -25,18 +25,12 @@ Stable facts captured in repo docs:
 - Mapping/localization is Cartographer-based.
 - DOGZILLA has no physical chassis odometer; Cartographer/localization supplies odom-style data.
 - Yahboom navigation docs point to `localization_imu_odom.launch.py` and `navigation2.launch.py`.
-- **IMU is unreliable**: Both Cartographer lua configs set `TRAJECTORY_BUILDER_2D.use_imu_data = false` because the DOGZILLA IMU endpoint (`/imu`) does not reliably produce data. Cartographer operates in laser-only mode with `use_online_correlative_scan_matching = true` as fallback. If IMU is ever restored, re-enable with caution and test that the full TF chain (`odom->base_link`, `map->base_link`) becomes resolvable.
+- Both Cartographer lua configs set `TRAJECTORY_BUILDER_2D.use_imu_data = false` because the DOGZILLA IMU endpoint (`/imu`) is not reliable. If IMU is restored, retest the full TF chain before re-enabling it.
 
-## Current Robo-Doge navigation model
-
-Robo-Doge uses `app_map` waypoints to decouple saved waypoints from Cartographer's raw `map` origin.
+## Current Robo-Doge
 
 ```text
-capture live map pose
--> mapPoseToAppPose()
--> save waypoint frame: app_map
--> dispatch resolves app_map back to current map pose
--> Nav2 NavigateToPose
+capture live map pose -> mapPoseToAppPose() -> save waypoint frame: app_map -> dispatch resolves app_map back to current map pose -> Nav2 NavigateToPose
 ```
 
 Key files:
@@ -46,186 +40,145 @@ Key files:
 | `lib/dogzilla-map-frame.mjs` | `mapPoseToAppPose()` and `appPoseToMapPose()` |
 | `scripts/capture-dogzilla-map-pose.mjs` | Captures current pose into `config/robot-waypoints.json` |
 | `scripts/set-dogzilla-map-origin.mjs` | Saves current pose as map origin |
-| `scripts/migrate-waypoints-to-appmap.mjs` | Migrates old raw-map entries |
 | `lib/dogzilla-waypoint-navigation-launcher.mjs` | Starts/checks waypoint navigation and auto-saves origin |
-| `lib/robot-command-compiler.mjs` | Resolves waypoint pose for dispatch |
-| `lib/dogzilla-navigation-readiness.mjs` | Readiness evaluation |
-| `sidecars/dogzilla_lib_bridge/nav2_client.py` | Nav2 client inside direct bridge path |
+| `lib/robot-command-compiler.mjs` | Resolves waypoint pose and builds dispatch plan |
+| `lib/app-service.mjs` | Uses the same resolved runtime/ROS2 config for chat preview and robot dispatch |
+| `lib/dogzilla-navigation-readiness.mjs` | App-side readiness evaluation |
+| `sidecars/dogzilla_lib_bridge/nav2_client.py` | Direct bridge Nav2 client and runtime truth |
 | `sidecars/dogzilla_navigation/start-navigation-in-container.sh` | Container-side Nav2 install/param/filter/launch script |
-| `sidecars/dogzilla_map_pose/save-map-pose-in-container.sh` | Saves explicit SLAM maps with unique map IDs |
+| `sidecars/dogzilla_navigation/tf_odom_publisher.py` | Publishes `/odom`; falls back to synthetic relative odom anchored at first `map->base_link` pose when no `odom` frame exists |
+| `sidecars/dogzilla_navigation/odom_publisher_supervisor.py` | Keeps the repo `/odom` helper alive |
+| `sidecars/dogzilla_navigation/scan_filter_supervisor.py` | Keeps `/scan_nav2` alive |
+| `sidecars/dogzilla_navigation/wait-nav2-ready.sh` | Bounded in-container readiness check for `/navigate_to_pose`, `/odom`, and `/scan_nav2` |
 
-## Map identity contract
-
-- Saved maps are identity-bearing artifacts. `save-map-pose-in-container.sh` writes a unique `robodoge_home_<timestamp>` map ID into `robodoge_home_map.json`; bridge health exposes that ID plus fingerprint.
-- `start-map-pose-in-container.sh` and `start-navigation-in-container.sh` resolve active `.pbstream` / `.yaml` from `robodoge_home_map.json` before falling back to legacy `robodoge_home.*` paths.
-- Saving is refused while Cartographer is in localization mode unless `DOGZILLA_MAP_SAVE_ALLOW_LOCALIZATION=1` is set. Use explicit SLAM mapping mode for new maps.
-- A saved origin is usable only when its `map.id` and `map.fingerprint` match the active map. If active map identity is unavailable, missing, or mismatched, the UI must show raw `map` pose and a stale-map warning, not a confident `app_map` pose.
-- Existing waypoints whose map identity is missing or does not match the active map are historical/stale for readiness and dispatch. Do not rewrite them automatically; recapture after the active map and charger origin are stable.
-
-## Waypoint authority
+## Map and waypoint authority
 
 - `config/robot-waypoints.json` is authoritative for real coordinates and trust fields.
 - Do not rewrite, downgrade, disable, or "correct" trusted waypoints without explicit user instruction.
-- Diagnostics may warn about map identity, bounds, fingerprints, or drift without editing config. Readiness and command dispatch must block missing/stale-map identity even though the source file remains authoritative.
+- Diagnostics may warn about drift or stale origin without editing config.
 - Notes are never authoritative for dispatch or validation.
+- Current verified `app_map` waypoints include `living_room`, `kitchen`, `garage`, and `charger` with `mapId: robodoge_home`.
 
-Current source inspection shows verified `app_map` waypoints for `living_room`, `kitchen`, `garage`, and `charger` with `mapId: robodoge_home`. Other map-pose entries are unverified in the current file.
+Map-identity fingerprint checks no longer block dispatch by themselves. If saved origin is missing, the app can fall back to the current map pose, but physical alignment may still be wrong and should be recaptured when it drifts.
+
+## Topic contract
+
+Two independent topics carry occupancy grids on the DOGZILLA Pi:
+
+| Topic | Publisher | Purpose |
+| --- | --- | --- |
+| `/map` | Nav2 `map_server` | Static saved map (`.yaml`), used by Nav2 |
+| `/map_cartographer` | Cartographer occupancy grid | Live SLAM/localization grid for app minimap truth |
+
+The live Cartographer grid contains raw probabilities (`0-100`), while saved `.pgm` output is thresholded into free/unknown/occupied. `public/robot-map.js` thresholds live cells so the minimap looks like the saved map:
+
+- `-1` -> unknown.
+- `0-50` -> free.
+- `51-64` -> unknown.
+- `65-100` -> occupied.
+
+## Direct bridge Nav2 readiness
+
+Direct bridge runtime truth distinguishes action discovery from waypoint-ready stack truth:
+
+- `navigation.actionServerDiscovered` reports whether `/navigate_to_pose` was visible in the ROS graph during the latest discovery check.
+- `navigation.waypointReady` / `navigation.available` may still be `true` when lifecycle nodes are active and `/odom` plus `/scan_nav2` are live. Pi DDS action discovery can briefly miss the action while the stack is otherwise usable.
+- `send_goal` still waits for the real `NavigateToPose` action server before accepting a waypoint command. Do not remove that send-time wait.
+
+When startup or preflight says the action server is blocked but lifecycle, `/odom`, and `/scan_nav2` are green in `/healthz`, treat action discovery as diagnostic evidence, not automatic proof that Nav2 is down.
+
+## Waypoint capture requires continuous tracking
+
+DOGZILLA runs Cartographer in laser-only localization mode (`use_imu_data = false`, `use_odometry = false`). The real-time correlative scan matcher searches only a local window around the last known pose; it is not global localization.
+
+The robot must be driven to each waypoint spot before capture so pose tracking stays continuous. Carrying the robot and setting it down can leave `waypointSafe: true` while the pose is wrong because that flag only proves fresh `map`-frame TF, not physical correctness.
+
+If Nav2 cannot drive to a spot, use manual controls. If the robot was carried, restart localization at a known reference such as the charger before driving to the waypoint spot.
 
 ## Readiness checks
 
-Fast commands:
+Fast commands live in `docs/COMMANDS.md`.
 
-See `docs/COMMANDS.md`.
+Startup/preflight readiness is based on:
 
-Readiness should progress through:
+1. `nav2_msgs` import works.
+2. `/odom` has live samples and odom-to-base TF.
+3. Nav2 lifecycle nodes are active.
+4. `/scan_nav2` has a live publisher and costmap subscribers.
+5. `/navigate_to_pose` action discovery is reported, but Pi DDS discovery misses are tolerated at bridge readiness if the rest of the stack is proven.
 
-1. `nav2_msgs` import works, no `No module named 'nav2_msgs'`.
-2. `/navigate_to_pose` action server is available.
-3. `/odom` message and TF are available.
-4. Nav2 lifecycle nodes are active. (`probe_nav2_lifecycle_with_retry` auto-retries once on transient failures to avoid the slow-lifecycle false blocker.)
-5. Filtered scan is available on `/scan_nav2`. (`probe_scan_topic_with_retry` auto-retries once.)
-6. `ready: true`.
+The repo odom helper first uses `odom->base_link`; if absent, it anchors the first live `map->base_link` pose and publishes synthetic relative `/odom`. Do not publish raw global map pose as odom.
 
-Startup prints these as separate terminal gates before app launch:
-Nav2 action server, `/odom` odom samples, `odom->base_link/base_footprint` TF,
-Nav2 lifecycle nodes, `/scan_nav2` filtered scan, and map-frame pose. `npm
-start` blocks before spawning the app when DOGZILLA waypoint navigation remains
-unready. Standalone `node server.mjs` applies the same gate before listen. Use
-`APP_DOGZILLA_STARTUP_REQUIRE_NAV=0` only for non-navigation debugging.
-After launch, `server.mjs` keeps a DOGZILLA startup watchdog monitor running
-(`APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS`, default 12 seconds). The monitor
-sets `repairState.repairing = true` while actively repairing, which the UI
-surfaces as a `Repairing navigation...` status with yellow severity. If the
-app sees the direct bridge or Nav2 waypoint prerequisites degrade, the monitor
-reuses the same self-heal path instead of waiting for the next operator
-command.
-
-`nav2Stability` in `/api/robot/state` is derived from the **current** bridge
-health probe only, not the cached display health. When the current probe fails
-or is absent, the tracker records `disconnected`/`blocked` truthfully even if a
-cached prior health payload is still being used for display continuity (robot
-state, telemetry, waypoints). The snapshot exposes
-`bridgeHealthCachedForDisplay` so the UI can tell display-derived data apart
-from a fresh probe. Command-time repair in `lib/robot-sidecar-client.mjs`
-records the original command-dispatch blocker via `recordNav2CommandFailure`
-before logging repair start/result, so the Nav2 event log answers what failed,
-when, from where, and whether repair worked.
-
-**Note:** The 12-second monitor interval is a deliberate trade-off. It was
-reduced from 30s to detect Nav2 degradation faster so the user does not wait
-nearly half a minute before auto-repair kicks in. If the Pi SSH load from the
-monitor probe becomes a problem, raise `APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS`
-to 20000-30000. Do not lower below 8s without proving the Pi lifecycle probes
-and direct-bridge health still complete in time.
-
-`/state` is the fast liveness probe. `/preflight` is heavier.
-
-Direct-bridge Nav2 checks intentionally allow slow Pi lifecycle responses:
-`DOGZILLA_NAV2_LIFECYCLE_WAIT_TIMEOUT` defaults to 12 seconds and
-`DOGZILLA_NAV2_DOCKER_STATUS_TIMEOUT` defaults to 30 seconds. Do not lower them
-without proving command-time `/controller_server/get_state`,
-`/planner_server/get_state`, `/bt_navigator/get_state`, and
-`/behavior_server/get_state` responses stay fast under load.
-Command-time `NavigateToPose` server waits also default to 12 seconds
-(`DOGZILLA_NAV2_WAIT_TIMEOUT`) because Pi action-server discovery can lag even
-when `/healthz` is green.
-If a waypoint command still returns a command-time `Nav2 NavigateToPose action
-server unavailable` response, `lib/robot-sidecar-client.mjs` treats it as
-recoverable for DOGZILLA Direct Bridge: it starts map-pose localization, starts
-Nav2 waypoint navigation, waits for readiness, then retries the original
-waypoint command once before surfacing the error.
-
-If dispatch fails with `Nav2 lifecycle nodes are not active:
-controller_server, planner_server, bt_navigator, behavior_server`, verify the
-command-time path before changing waypoints or restarting Nav2. `/healthz` is a
-snapshot and `/commands` re-probes prerequisites before sending a goal; those can
-temporarily disagree when lifecycle services are slow. Use the recurring
-lifecycle-dispatch recipe in `docs/COMMANDS.md` to verify bridge timing,
-command logs, and lifecycle services.
+The scan filter and odom helpers are supervised because child `rclpy` processes can exit or stop publishing while the process still exists. ROS2 CLI readiness calls are bounded because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
 
 ## Starting and deploying
 
-`start-map-pose` and `start-navigation` are wrapped in a 3-attempt retry loop
-(`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s) at both startup and
-command-time repair. This mirrors the existing `start-direct` 3-attempt pattern
-from `robot-startup-sequence.mjs` and addresses the SSH-hiccup failure mode
-where a single transient start failure would leave Nav2 down for the session.
-
-Start navigation:
+`start-map-pose` and `start-navigation` are wrapped in a 3-attempt retry loop (`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s) for startup and command-time repair.
 
 ```powershell
 npm run dogzilla:start-navigation
 ```
 
-App startup and command-time waypoint repair must start map-pose localization before Nav2. `lib/dogzilla-startup-watchdog.mjs`, `lib/dogzilla-waypoint-navigation-launcher.mjs`, and `lib/robot-sidecar-client.mjs` use `start-map-pose` first, then `start-navigation`, because Nav2 launch can fail when `/pose` is HTTP 503 / `no-pose`.
+App startup and command-time waypoint repair start map-pose localization before Nav2. `lib/dogzilla-waypoint-navigation-launcher.mjs` and `lib/robot-sidecar-client.mjs` use `start-map-pose` first because Nav2 launch needs live Cartographer map pose.
 
-`scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-lidar-bridge`.
+`scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar, reads saved origin, and runs `docker exec robodoge-map-pose` to publish initial pose. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge`.
 
-Startup scripts are Windows-PowerShell driven SSH launchers. Keep remote snippets
-CRLF-proof: avoid PowerShell heredocs sent through SSH, serialize apt work with
-the shared startup locks, and use parent-safe `pgrep` stop loops for background
-services. Map-pose localization chooses the no-IMU `_noimu` Cartographer config
-before launch; do not move config selection after Cartographer starts.
+Startup scripts are Windows PowerShell-driven SSH launchers. Avoid PowerShell heredocs sent through SSH, serialize apt work through startup locks, and use parent-safe `pgrep` stop loops for background services.
 
-Map workflow:
+## Cartographer/Nav2 Docker image
+
+The rosbridge/map-pose containers share custom image `robodoge/ros-humble-cartographer:1.0`, based on `yahboomtechnology/ros-humble:3.6` with Cartographer, Nav2, and `ros-humble-rosbridge-server` pre-installed. Pre-baking avoids repeated multi-minute apt installs and dpkg-lock races after Pi reboots.
+
+Key files:
+
+| File | Role |
+| --- | --- |
+| `sidecars/dogzilla_map_pose/Dockerfile` | Image definition |
+| `scripts/build-dogzilla-docker-image-ssh.ps1` | Builds image on Pi |
+| `scripts/install-dogzilla-boot-services-ssh.ps1` | Deploys systemd units using the image |
+
+## Map workflow
 
 ```powershell
-npm run dogzilla:start-map-pose        # localize against active saved map, no map mutation
-# In UI Mini Map > Mapping: Localize on saved map
-# In UI Mini Map > Mapping: Set charger origin here
-# In UI Mini Map > Mapping: Save waypoint here, then Check waypoint readiness
-# In UI Mini Map > Mapping: Start new SLAM map / Save new map identity for explicit new-map mode
-npm run dogzilla:set-origin            # recapture origin after active map changes
+npm run dogzilla:start-map-pose
+npm run dogzilla:set-origin
 npm run dogzilla:validate-waypoints
 ```
 
-After saving a new SLAM map, existing origins and app-map waypoints should report stale until recaptured against the new active map identity.
+In UI Mini Map > Navigation Setup:
 
-### Stale waypoint recapture
+1. Localize on Map.
+2. Mark Origin.
+3. Save Spot, then Check Ready.
+4. Restart Nav when repair is needed.
 
-When waypoints go stale (map identity mismatch, origin drift, etc.), the
-waypoint-readiness panel in the UI lists the affected waypoints with a
-`Recapture here` button. Cartographer laser-only localization does NOT
-require Nav2 or odometry, so the user can pick up the robot, carry it to the
-physical waypoint spot, set it down, wait for `waypointSafe: true`, and click
-`Recapture here` to overwrite the waypoint with the current map pose.
+For a new map, expand "Map a new space": New Map -> drive -> Save Map. Save Map restarts localization against the new map.
 
-The recapture flow calls `POST /api/dogzilla/waypoints` with the stale
-waypoint's name. The endpoint requires a `waypointSafe` pose. When current map
-identity and a matching map-origin snapshot are available, it overwrites the
-waypoint in `config/robot-waypoints.json` as `app_map` and writes the new
-`mapFingerprint` / `mapId` so readiness can flip back to ready. If origin
-state is stale or missing, the endpoint falls back to storing a raw `map` pose
-instead of pretending the app-map identity is safe.
+`Localize on Map` seeds Cartographer localization from the saved charger origin (`output/app-cache/dogzilla-map-origin.json`), defaulting to `(0, 0, 0)` when no origin exists. It is local refinement, not global relocalization.
 
-There is no batch-recapture: the robot must physically be at each waypoint
-spot. Recapture is always explicit — waypoints are never silently rewritten
-or downgraded (see `AGENTS.md`).
+## Waypoint recapture
 
-SSH config:
+When a saved waypoint no longer aligns with physical space, recapture it explicitly. Cartographer laser-only localization does not require Nav2 or odometry, but it cannot globally relocalize after the robot is carried.
 
-```text
-output/pi-ssh/config
-alias: dogzilla
-host: 10.0.4.32
-user: pi
-```
+Drive the robot to the physical waypoint spot, wait for `waypointSafe: true`, then use `Recapture here`. The endpoint requires a waypoint-safe pose and overwrites that waypoint in `config/robot-waypoints.json` as `app_map` using the current pose.
 
-Operational recipes such as the manual Nav2 message fix and direct-bridge Nav2
-client deploy live in `docs/COMMANDS.md`.
+There is no batch recapture: the robot must physically be at each waypoint spot. Recapture is always explicit; waypoints are never silently rewritten or downgraded.
+
+## Chat waypoint dispatch
+
+Chat command handling must use the same resolved runtime and ROS2 config for preview and dispatch. The direct DOGZILLA target should not stop at "Robot preview ready" when `dispatchOnChat` is enabled and a ready waypoint command compiles. Verify with `robotDispatch.status`, not just assistant text.
 
 ## Tuning
 
-`config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance.
-
-Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`.
+`config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance. Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`.
 
 ## Known live-work rules
 
-- For "spins and goes nowhere", inspect live costmap, scan, timeout, and recovery evidence before changing planner assumptions or waypoint data.
+- For "spins/goes nowhere", inspect live costmap, scan, timeout, and recovery evidence before changing planner assumptions or waypoint data.
 - Local tests prove plumbing, not live route correctness.
-- If the robot is low battery or unhealthy, pause live motion retries and continue only local code/tests.
+- If robot is low battery or unhealthy, pause live motion retries and continue only local code/tests.
 - If robot heads the wrong way, verify translation direction and heading/orientation early.
+- For waypoint capture, drive the robot to the spot. Carrying it can leave `waypointSafe` true while pose is wrong.
 
 ## More detail
 
