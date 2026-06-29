@@ -70,6 +70,25 @@ npm run dogzilla:start-map-pose
 npm run dogzilla:start-navigation
 ```
 
+Direct bridge navigation modes (Pi load shedding):
+
+```powershell
+# Check current mode
+Invoke-RestMethod -Method GET -Uri http://10.0.4.32:8893/mode | ConvertTo-Json -Depth 4
+
+# Enter low-load idle (bridge + audio/camera only)
+Invoke-RestMethod -Method POST -Uri http://10.0.4.32:8893/mode -Body '{"mode":"idle"}' -ContentType 'application/json'
+
+# Start Cartographer localization only
+Invoke-RestMethod -Method POST -Uri http://10.0.4.32:8893/mode -Body '{"mode":"localize"}' -ContentType 'application/json'
+
+# Start full Nav2 stack (Cartographer + Nav2 + scan filter + gait adapter)
+Invoke-RestMethod -Method POST -Uri http://10.0.4.32:8893/mode -Body '{"mode":"navigate"}' -ContentType 'application/json'
+
+# Sleep: stop heavy nav work
+Invoke-RestMethod -Method POST -Uri http://10.0.4.32:8893/mode -Body '{"mode":"sleep"}' -ContentType 'application/json'
+```
+
 Build or rebuild pre-baked Cartographer/Nav2 Docker image on Pi:
 
 ```powershell

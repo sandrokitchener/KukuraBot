@@ -17,14 +17,21 @@ from pathlib import Path
 from typing import Any
 
 
-_SLEEP_LOCK = threading.Lock()
-_SLEEP_ACTIVE = False
-_AUTO_SLEEP_TIMER: threading.Timer | None = None
-_AUTO_SLEEP_DELAY_SEC = 300.0  # 5 min idle → auto sleep
+_NAV_MODE_LOCK = threading.Lock()
+# idle: direct bridge, audio, camera optional; no Nav2; no Cartographer burn unless UI explicitly localizing.
+# localize: one Cartographer localization process only.
+# navigate: one Cartographer + Nav2 + scan filter + gait adapter.
+# sleep: stop map-pose/Nav2/rosbridge-heavy work.
+_NAV_MODE: str = os.environ.get("DOGZILLA_DEFAULT_NAV_MODE", "navigate")
+_NAV_MODE_HISTORY: deque[dict[str, Any]] = deque(maxlen=20)
+_NAV_MODE_TRANSITIONING = False
+_NAV_MODE_AUTO_DEMOTE_TIMER: threading.Timer | None = None
+_NAV_MODE_IDLE_DELAY_SEC = float(os.environ.get("DOGZILLA_NAV_MODE_IDLE_DELAY_SEC", "300.0"))
 CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
 YOLO_SERVICE = "robodoge-yolo-vision.service"
 NAV2_LIFECYCLE_NODE = "lifecycle_manager_navigation"
 CARTOGRAPHER_NODE = "cartographer_node"
+SCAN_FILTER_PROCESSES = ["scan_filter_supervisor", "scan_self_filter"]
 
 
 def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
@@ -37,66 +44,207 @@ def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
         return -1, str(e)
 
 
+def _valid_nav_mode(mode: str) -> bool:
+    return mode in ("idle", "localize", "navigate", "sleep")
+
+
+def get_nav_mode() -> str:
+    with _NAV_MODE_LOCK:
+        return str(_NAV_MODE)
+
+
+def nav_mode_snapshot() -> dict[str, Any]:
+    with _NAV_MODE_LOCK:
+        return {
+            "mode": _NAV_MODE,
+            "transitioning": _NAV_MODE_TRANSITIONING,
+            "idleDelaySec": _NAV_MODE_IDLE_DELAY_SEC,
+            "history": list(_NAV_MODE_HISTORY),
+        }
+
+
+def _record_nav_mode_transition(previous: str, mode: str, detail: dict[str, Any] | None = None) -> None:
+    with _NAV_MODE_LOCK:
+        _NAV_MODE_HISTORY.appendleft({
+            "at": utc_now(),
+            "from": previous,
+            "to": mode,
+            "detail": detail or {},
+        })
+
+
+def _set_nav_mode(mode: str, detail: dict[str, Any] | None = None) -> None:
+    global _NAV_MODE
+    with _NAV_MODE_LOCK:
+        previous = _NAV_MODE
+        _NAV_MODE = mode
+    _record_nav_mode_transition(previous, mode, detail)
+
+
+def set_nav_mode(mode: str) -> dict[str, Any]:
+    global _NAV_MODE_TRANSITIONING
+    mode = str(mode).lower().strip()
+    if not _valid_nav_mode(mode):
+        return {"ok": False, "error": f"invalid_nav_mode:{mode}", "validModes": ["idle", "localize", "navigate", "sleep"]}
+
+    with _NAV_MODE_LOCK:
+        if _NAV_MODE_TRANSITIONING:
+            return {"ok": False, "error": "nav_mode_transition_in_progress", "mode": _NAV_MODE}
+        current = _NAV_MODE
+        if current == mode:
+            return {"ok": True, "mode": mode, "changed": False}
+        _NAV_MODE_TRANSITIONING = True
+
+    try:
+        if mode == "sleep":
+            result = _enter_sleep_mode()
+        elif mode == "idle":
+            result = _enter_idle_mode()
+        elif mode == "localize":
+            result = _enter_localize_mode()
+        elif mode == "navigate":
+            result = _enter_navigate_mode()
+        else:
+            result = {"ok": False, "error": f"unhandled_nav_mode:{mode}"}
+
+        if result.get("ok"):
+            _set_nav_mode(mode, result)
+            # After any explicit mode set, schedule demotion to idle after inactivity.
+            _schedule_nav_mode_demote(target_mode="idle")
+        return {**result, "mode": get_nav_mode(), "previousMode": current, "changed": result.get("ok")}
+    finally:
+        with _NAV_MODE_LOCK:
+            _NAV_MODE_TRANSITIONING = False
+
+
+def _enter_sleep_mode() -> dict[str, Any]:
+    stopped: list[dict[str, Any]] = []
+
+    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f imu_publisher")
+    stopped.append({"service": "imu_publisher", "stopped": code == 0 or code == 1, "output": out.strip()})
+
+    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {CARTOGRAPHER_NODE}")
+    stopped.append({"service": "cartographer", "stopped": code == 0 or code == 1, "output": out.strip()})
+
+    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {NAV2_LIFECYCLE_NODE}")
+    stopped.append({"service": "nav2", "stopped": code == 0 or code == 1, "output": out.strip()})
+
+    for proc in SCAN_FILTER_PROCESSES:
+        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {proc}")
+        stopped.append({"service": proc, "stopped": code == 0 or code == 1, "output": out.strip()})
+
+    code, out = _run(f"sudo systemctl stop {YOLO_SERVICE}")
+    stopped.append({"service": "yolo-vision", "stopped": code == 0, "output": out.strip()})
+
+    _cancel_nav_mode_demote()
+    return {"ok": True, "stopped": stopped, "stoppedCount": len([s for s in stopped if s["stopped"]])}
+
+
+def _enter_idle_mode() -> dict[str, Any]:
+    # Keep direct bridge, audio, camera optional. Stop heavy nav work.
+    result = _enter_sleep_mode()
+    return {"ok": True, **result, "note": "idle keeps bridge/audio/camera; nav stack stopped"}
+
+
+def _enter_localize_mode() -> dict[str, Any]:
+    # Ensure nav2 is not running, then start cartographer/map-pose only.
+    nav2_stop = _stop_nav2()
+    scan_stop = _stop_scan_filter()
+    carto_start = _start_map_pose()
+    yolo_start = _start_yolo()
+    return {
+        "ok": True,
+        "started": [carto_start, yolo_start],
+        "stopped": [nav2_stop, scan_stop],
+    }
+
+
+def _enter_navigate_mode() -> dict[str, Any]:
+    # Full navigation stack: cartographer + Nav2 + scan filter.
+    carto_start = _start_map_pose()
+    nav2_start = _start_nav2()
+    yolo_start = _start_yolo()
+    return {
+        "ok": True,
+        "started": [carto_start, nav2_start, yolo_start],
+    }
+
+
+def _start_map_pose() -> dict[str, Any]:
+    code, out = _run(
+        f"docker exec {CONTAINER_NAME} bash /home/pi/robodoge/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh",
+        timeout=30.0,
+    )
+    return {"service": "cartographer", "started": code == 0, "output": out.strip()[:200]}
+
+
+def _start_nav2() -> dict[str, Any]:
+    code, out = _run(
+        f"docker exec {CONTAINER_NAME} bash /home/pi/robodoge/sidecars/dogzilla_navigation/start-navigation-in-container.sh",
+        timeout=180.0,
+    )
+    return {"service": "nav2", "started": code == 0, "output": out.strip()[:200]}
+
+
+def _start_yolo() -> dict[str, Any]:
+    code, out = _run(f"sudo systemctl start {YOLO_SERVICE}")
+    return {"service": "yolo-vision", "started": code == 0, "output": out.strip()}
+
+
+def _stop_nav2() -> dict[str, Any]:
+    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {NAV2_LIFECYCLE_NODE}")
+    return {"service": "nav2", "stopped": code == 0 or code == 1, "output": out.strip()}
+
+
+def _stop_scan_filter() -> dict[str, Any]:
+    stopped: list[dict[str, Any]] = []
+    for proc in SCAN_FILTER_PROCESSES:
+        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {proc}")
+        stopped.append({"service": proc, "stopped": code == 0 or code == 1, "output": out.strip()})
+    return {"service": "scan-filter", "stopped": all(s["stopped"] for s in stopped), "details": stopped}
+
+
+def _schedule_nav_mode_demote(target_mode: str = "idle") -> None:
+    global _NAV_MODE_AUTO_DEMOTE_TIMER
+    _cancel_nav_mode_demote()
+    if _NAV_MODE_IDLE_DELAY_SEC > 0:
+        _NAV_MODE_AUTO_DEMOTE_TIMER = threading.Timer(_NAV_MODE_IDLE_DELAY_SEC, _nav_mode_demote_callback, args=(target_mode,))
+        _NAV_MODE_AUTO_DEMOTE_TIMER.daemon = True
+        _NAV_MODE_AUTO_DEMOTE_TIMER.start()
+
+
+def _cancel_nav_mode_demote() -> None:
+    global _NAV_MODE_AUTO_DEMOTE_TIMER
+    if _NAV_MODE_AUTO_DEMOTE_TIMER is not None:
+        _NAV_MODE_AUTO_DEMOTE_TIMER.cancel()
+        _NAV_MODE_AUTO_DEMOTE_TIMER = None
+
+
+def _nav_mode_demote_callback(target_mode: str) -> None:
+    result = set_nav_mode(target_mode)
+    print(f"[auto-nav-mode] {json.dumps(result)}")
+
+
+# Legacy sleep/wake helpers now expressed as mode transitions.
 def sleep_pi() -> dict[str, Any]:
-    global _SLEEP_ACTIVE
-    with _SLEEP_LOCK:
-        if _SLEEP_ACTIVE:
-            return {"ok": True, "sleeping": True, "note": "already sleeping"}
-        stopped: list[dict[str, Any]] = []
-
-        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f imu_publisher")
-        stopped.append({"service": "imu_publisher", "stopped": code == 0 or code == 1, "output": out.strip()})
-
-        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {CARTOGRAPHER_NODE}")
-        stopped.append({"service": "cartographer", "stopped": code == 0 or code == 1, "output": out.strip()})
-
-        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {NAV2_LIFECYCLE_NODE}")
-        stopped.append({"service": "nav2", "stopped": code == 0 or code == 1, "output": out.strip()})
-
-        code, out = _run(f"sudo systemctl stop {YOLO_SERVICE}")
-        stopped.append({"service": "yolo-vision", "stopped": code == 0, "output": out.strip()})
-
-        _cancel_auto_sleep()
-        _SLEEP_ACTIVE = True
-        return {"ok": True, "sleeping": True, "stopped": stopped, "stoppedCount": len([s for s in stopped if s["stopped"]])}
+    return set_nav_mode("sleep")
 
 
 def wake_pi() -> dict[str, Any]:
-    global _SLEEP_ACTIVE
-    with _SLEEP_LOCK:
-        started: list[dict[str, Any]] = []
-
-        code, out = _run(f"docker exec {CONTAINER_NAME} bash /home/pi/robodoge/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh", timeout=30.0)
-        started.append({"service": "cartographer", "started": code == 0, "output": out.strip()[:200]})
-
-        code, out = _run(f"sudo systemctl start {YOLO_SERVICE}")
-        started.append({"service": "yolo-vision", "started": code == 0, "output": out.strip()})
-
-        _schedule_auto_sleep(restart=True)
-        _SLEEP_ACTIVE = False
-        return {"ok": True, "sleeping": False, "started": started, "startedCount": len([s for s in started if s["started"]])}
+    return set_nav_mode("localize")
 
 
 def sleep_status() -> dict[str, Any]:
-    with _SLEEP_LOCK:
-        return {"ok": True, "sleeping": _SLEEP_ACTIVE}
+    snap = nav_mode_snapshot()
+    return {"ok": True, "sleeping": snap["mode"] == "sleep", "mode": snap["mode"]}
 
 
 def _schedule_auto_sleep(restart: bool = False) -> None:
-    global _AUTO_SLEEP_TIMER
-    if restart:
-        _cancel_auto_sleep()
-    if _AUTO_SLEEP_TIMER is None:
-        _AUTO_SLEEP_TIMER = threading.Timer(_AUTO_SLEEP_DELAY_SEC, _auto_sleep_callback)
-        _AUTO_SLEEP_TIMER.daemon = True
-        _AUTO_SLEEP_TIMER.start()
+    _schedule_nav_mode_demote(target_mode="sleep" if get_nav_mode() != "idle" else "idle")
 
 
 def _cancel_auto_sleep() -> None:
-    global _AUTO_SLEEP_TIMER
-    if _AUTO_SLEEP_TIMER is not None:
-        _AUTO_SLEEP_TIMER.cancel()
-        _AUTO_SLEEP_TIMER = None
+    _cancel_nav_mode_demote()
 
 
 def _auto_sleep_callback() -> None:
@@ -133,12 +281,15 @@ from map_metadata import (
     sha256_file,
 )
 
-from motion_utils import clamp, normalize_angle
+from motion_utils import clamp, normalize_angle, scan_obstacle_counts
 from nav2_gait_adapter import (
+    DEFAULT_NAV2_GAIT_ALLOW_TROT,
+    DEFAULT_NAV2_GAIT_MAX_TURN_RATE,
     get_speed_config,
     nav2_cmd_vel_to_locomotion,
     update_speed_config,
 )
+import nav2_client as nav2_client_module
 from nav2_client import (
     DEFAULT_NAV2_ACTION,
     DEFAULT_NAV2_ALLOWED_FRAMES,
@@ -146,6 +297,7 @@ from nav2_client import (
     DEFAULT_NAV2_GOAL_RESPONSE_TIMEOUT,
     DEFAULT_NAV2_ODOM_WAIT_TIMEOUT,
     DEFAULT_NAV2_SCAN_TOPIC,
+    DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED,
     DEFAULT_NAV2_STATUS_WAIT_TIMEOUT,
     DEFAULT_NAV2_WAIT_TIMEOUT,
     DEFAULT_ODOM_TOPIC,
@@ -169,6 +321,8 @@ DEFAULT_INCLUDE_ATTITUDE_STATE = os.environ.get("DOGZILLA_INCLUDE_ATTITUDE_STATE
 DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") == "1"
 DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "1") == "1"
 DEFAULT_NAV2_MIN_BATTERY_PCT = float(os.environ.get("DOGZILLA_NAV2_MIN_BATTERY_PCT", "5"))
+DEFAULT_NO_MOTION_WINDOW_SEC = float(os.environ.get("DOGZILLA_NO_MOTION_WINDOW_SEC", "10.0"))
+
 MAX_RECENT_COMMANDS = int(os.environ.get("DOGZILLA_LIB_BRIDGE_HISTORY", "20"))
 ROS_SETUP_COMMAND = (
     "source /opt/ros/humble/setup.bash 2>/dev/null || true; "
@@ -315,6 +469,7 @@ class DogzillaRuntime:
             "nav2": nav2,
             "navigation": self.navigation_snapshot(nav2),
             "lidarAvoidance": self.lidar_avoidance.snapshot() if hasattr(self, "lidar_avoidance") else None,
+            "navMode": get_nav_mode(),
             "nav2GaitAdapter": {
                 "receivedCount": int(getattr(self, "nav2_gait_adapter_count", 0) or 0),
                 "lastCommand": getattr(self, "last_nav2_gait_command", None),
@@ -648,6 +803,22 @@ class DogzillaRuntime:
         # stale command_preempt gate, but never silently overrides a latched
         # emergency_stop safety block.
         self._clear_command_preempt_nav2_cmd_vel_block()
+
+        current_mode = get_nav_mode()
+        if current_mode not in ("navigate", "localize"):
+            mode_result = set_nav_mode("navigate")
+            if not mode_result.get("ok"):
+                return {
+                    "executed": False,
+                    "delivery": "nav-mode-transition-failed",
+                    "kind": "locomotion.goto",
+                    "waypoint": params.get("waypoint") or "",
+                    "waypointSafe": False,
+                    "error": mode_result.get("error") or "failed to enter navigate mode",
+                    "navMode": current_mode,
+                    "modeResult": mode_result,
+                }
+
         frame = str(params.get("frame") or "map")
         if frame not in DEFAULT_NAV2_ALLOWED_FRAMES:
             return {"executed": False, "error": f"unsupported_navigation_frame:{frame}"}
@@ -954,7 +1125,25 @@ class Handler(BaseHTTPRequestHandler):
                     "mode": "http-to-dogzillalib",
                     "receivedCount": self.server.received_count,
                     "loadAverage": _get_load_average(),
+                    "navMode": get_nav_mode(),
+                    "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
+                    "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
                     "runtime": runtime,
+                },
+            )
+            return
+        if self.path == "/healthz-lite":
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "mode": "http-to-dogzillalib",
+                    "receivedCount": self.server.received_count,
+                    "loadAverage": _get_load_average(),
+                    "navMode": get_nav_mode(),
+                    "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
+                    "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
+                    "runtimeSnapshot": False,
                 },
             )
             return
@@ -1013,6 +1202,9 @@ class Handler(BaseHTTPRequestHandler):
                 "error": scan.get("error") or refresh_error,
             })
             return
+        if self.path == "/mode":
+            self._send_json(200, {"ok": True, "navMode": get_nav_mode(), **nav_mode_snapshot()})
+            return
         if self.path == "/sleep":
             self._send_json(200, sleep_status())
             return
@@ -1020,6 +1212,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, sleep_status())
             return
         self._send_json(404, {"error": "Not found"})
+
 
     def do_POST(self):
         if self.path == "/nav2/cmd_vel":
@@ -1050,9 +1243,22 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/wake":
             result = wake_pi()
             self._send_json(200, result)
+            _schedule_auto_sleep(restart=True)
+            return
+
+        if self.path == "/mode":
+            payload = self._read_json_body()
+            mode = payload.get("mode") if isinstance(payload, dict) else None
+            if not mode:
+                self._send_json(400, {"ok": False, "error": "Expected JSON object with 'mode' key"})
+                return
+            result = set_nav_mode(mode)
+            self._send_json(200 if result.get("ok") else 400, result)
+            _cancel_nav_mode_demote()
             return
 
         if self.path == "/nav2/speed_config":
+
             payload = self._read_json_body()
             if not isinstance(payload, dict):
                 self._send_json(400, {"error": "Expected JSON object with speed config overrides"})
@@ -1140,17 +1346,74 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _execute_background_command(self, command_id: str, envelope: dict[str, Any], canonical_plan: dict[str, Any]) -> None:
-        result = self.server.runtime.execute(canonical_plan)
-        record = {
+        runtime = self.server.runtime
+        start_gait_count = int(getattr(runtime, "nav2_gait_adapter_count", 0) or 0)
+        started_at = time.monotonic()
+
+        result = runtime.execute(canonical_plan)
+
+        # Async truth: if Nav2 accepted the goal, monitor for physical motion.
+        motion_status: str | None = None
+        if result.get("executed") and result.get("delivery") in ("Nav2 NavigateToPose", "navigation-accepted"):
+            motion_status = self._monitor_navigation_motion(
+                runtime,
+                start_gait_count=start_gait_count,
+                started_at=started_at,
+                window_sec=DEFAULT_NO_MOTION_WINDOW_SEC,
+            )
+            if motion_status:
+                result["motionStatus"] = motion_status
+
+        completed_at = utc_now()
+        updated = False
+        for record in self.server.recent_commands:
+            if record.get("commandId") == command_id:
+                record["completedAt"] = completed_at
+                record["result"] = result
+                record["background"] = True
+                record["motionStatus"] = motion_status
+                updated = True
+                break
+
+        if not updated:
+            self.server.recent_commands.appendleft({
+                "commandId": command_id,
+                "completedAt": completed_at,
+                "envelope": envelope,
+                "canonicalPlan": canonical_plan,
+                "result": result,
+                "background": True,
+                "motionStatus": motion_status,
+            })
+
+        append_log_record({
             "commandId": command_id,
-            "completedAt": utc_now(),
+            "completedAt": completed_at,
             "envelope": envelope,
             "canonicalPlan": canonical_plan,
             "result": result,
             "background": True,
-        }
-        self.server.recent_commands.appendleft(record)
-        append_log_record(record)
+            "motionStatus": motion_status,
+        })
+
+    def _monitor_navigation_motion(
+        self,
+        runtime: DogzillaRuntime,
+        *,
+        start_gait_count: int,
+        started_at: float,
+        window_sec: float,
+    ) -> str | None:
+        deadline = started_at + window_sec
+        while time.monotonic() < deadline:
+            if runtime._navigation_cancel_event().is_set():
+                return "cancelled"
+            current_gait_count = int(getattr(runtime, "nav2_gait_adapter_count", 0) or 0)
+            if current_gait_count > start_gait_count:
+                return None
+            # Future: compare odom pose delta here.
+            time.sleep(0.5)
+        return "no-motion"
 
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", "0"))

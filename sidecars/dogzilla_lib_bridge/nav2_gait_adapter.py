@@ -24,6 +24,9 @@ _SPEED_CONFIG: dict[str, Any] = {
     "allowTrot": os.environ.get("DOGZILLA_NAV2_GAIT_ALLOW_TROT", "0") == "1",
 }
 
+DEFAULT_NAV2_GAIT_MAX_TURN_RATE = _SPEED_CONFIG["maxTurnRate"]
+DEFAULT_NAV2_GAIT_ALLOW_TROT = _SPEED_CONFIG["allowTrot"]
+
 
 def get_speed_config() -> dict[str, Any]:
     """Return a copy of the current dynamic speed config."""

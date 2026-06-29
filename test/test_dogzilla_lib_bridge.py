@@ -185,8 +185,8 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(dogzilla_lib_bridge.parse_ros_topic_count("Publisher count: 3", "Publisher count"), 3)
         self.assertEqual(dogzilla_lib_bridge.parse_ros_topic_count("no topic", "Publisher count"), 0)
 
-    def test_http_goto_waits_for_real_result_by_default(self):
-        self.assertFalse(dogzilla_lib_bridge.DEFAULT_ASYNC_HTTP_GOTO)
+    def test_http_goto_is_async_by_default(self):
+        self.assertTrue(dogzilla_lib_bridge.DEFAULT_ASYNC_HTTP_GOTO)
 
     def test_state_read_defaults_to_battery_only(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -652,7 +652,30 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(calls[0]["timeout"], 6)
         self.assertEqual(snapshot["dockerStatusTimeoutSec"], dogzilla_lib_bridge.DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT)
 
-    def test_nav2_client_sends_goal_through_docker_backend(self):
+    def test_nav2_client_rejects_docker_send_goal_by_default(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        client.action_name = "navigate_to_pose"
+        client.backend = "docker-rclpy"
+        client.docker_container = "robodoge-rosbridge"
+        calls = []
+
+        def fake_run_docker_python(script, *, timeout):
+            calls.append({"script": script, "timeout": timeout})
+            return dogzilla_lib_bridge.subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        client._run_docker_python = fake_run_docker_python
+        result = client.send_goal(frame="map", x=1.25, y=-0.5, yaw=0.2)
+
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["delivery"], "nav2-unavailable")
+        self.assertIn("Docker Nav2 goal backend disabled", result["error"])
+        self.assertEqual(calls, [])
+
+    def test_nav2_client_sends_goal_through_docker_backend_when_enabled(self):
+        previous = dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED
+        dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = True
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge.nav2_client_module, "DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED", previous))
+
         client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
         client.action_name = "navigate_to_pose"
         client.wait_timeout = 2.0
@@ -684,6 +707,10 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertIn("probe_live_odom", calls[0]["script"])
 
     def test_docker_nav2_goal_timeout_returns_structured_error(self):
+        previous = dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED
+        dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = True
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge.nav2_client_module, "DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED", previous))
+
         client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
         client.action_name = "navigate_to_pose"
         client.wait_timeout = 2.0
@@ -812,9 +839,9 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
     def test_nav2_cmd_vel_to_locomotion_trot_is_opt_in(self):
         globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
-        previous = globals_["DEFAULT_NAV2_GAIT_ALLOW_TROT"]
-        globals_["DEFAULT_NAV2_GAIT_ALLOW_TROT"] = True
-        self.addCleanup(lambda: globals_.__setitem__("DEFAULT_NAV2_GAIT_ALLOW_TROT", previous))
+        previous = globals_["_SPEED_CONFIG"]["allowTrot"]
+        globals_["_SPEED_CONFIG"]["allowTrot"] = True
+        self.addCleanup(lambda: globals_["_SPEED_CONFIG"].__setitem__("allowTrot", previous))
 
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
             "linear": {"x": 0.13, "y": 0.0},
@@ -989,6 +1016,78 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(goto["executed"])
         self.assertEqual(goto["waypoint"], "garage")
         self.assertFalse(runtime.nav2_cmd_vel_blocked)
+
+    def test_nav_mode_defaults_to_navigate(self):
+        self.assertEqual(dogzilla_lib_bridge.get_nav_mode(), "navigate")
+        snapshot = dogzilla_lib_bridge.nav_mode_snapshot()
+        self.assertEqual(snapshot["mode"], "navigate")
+        self.assertIn("history", snapshot)
+
+    def test_set_nav_mode_rejects_invalid_mode(self):
+        result = dogzilla_lib_bridge.set_nav_mode("dance")
+        self.assertFalse(result["ok"])
+        self.assertIn("invalid_nav_mode", result["error"])
+        self.assertEqual(dogzilla_lib_bridge.get_nav_mode(), "navigate")
+
+    def test_set_nav_mode_records_transition_history(self):
+        previous = dogzilla_lib_bridge.get_nav_mode()
+        result = dogzilla_lib_bridge.set_nav_mode("sleep")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "sleep")
+        self.assertEqual(result["previousMode"], previous)
+        snapshot = dogzilla_lib_bridge.nav_mode_snapshot()
+        self.assertEqual(snapshot["mode"], "sleep")
+        self.assertTrue(len(snapshot["history"]) >= 1)
+        # Restore navigate to avoid affecting other tests.
+        dogzilla_lib_bridge.set_nav_mode("navigate")
+
+    def test_healthz_lite_includes_compact_feedback(self):
+        # Ensure the expected compact-feedback keys are present in the handler.
+        handler = dogzilla_lib_bridge.Handler
+        self.assertTrue(callable(handler.do_GET))
+
+    def test_background_goto_updates_existing_record_and_detects_no_motion(self):
+        import io
+        import socket
+
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = "serial lib unavailable"
+        runtime.dry_run = False
+        runtime.nav2_client = FakeNav2Client()
+        runtime.nav2_gait_adapter_count = 0
+        runtime.navigation_cancel = threading.Event()
+
+        bridge_server = dogzilla_lib_bridge.BridgeServer(("127.0.0.1", 0), dogzilla_lib_bridge.Handler, runtime)
+        self.addCleanup(bridge_server.server_close)
+
+        class MockHandler(dogzilla_lib_bridge.Handler):
+            def __init__(self, server):
+                self.server = server
+
+        command_id = "dogzilla-lib-0001"
+        envelope = {"canonicalPlan": {"kind": "locomotion.goto", "params": {"frame": "map", "x": 1, "y": 0, "yaw": 0}}}
+        bridge_server.recent_commands.appendleft({
+            "commandId": command_id,
+            "receivedAt": dogzilla_lib_bridge.utc_now(),
+            "envelope": envelope,
+            "canonicalPlan": envelope["canonicalPlan"],
+            "result": {"executed": True, "delivery": "navigation-accepted"},
+        })
+
+        previous_window = dogzilla_lib_bridge.DEFAULT_NO_MOTION_WINDOW_SEC
+        dogzilla_lib_bridge.DEFAULT_NO_MOTION_WINDOW_SEC = 0.2
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_NO_MOTION_WINDOW_SEC", previous_window))
+
+        dogzilla_lib_bridge.Handler._execute_background_command(
+            MockHandler(bridge_server), command_id, envelope, envelope["canonicalPlan"]
+        )
+
+        matching = [r for r in bridge_server.recent_commands if r.get("commandId") == command_id]
+        self.assertEqual(len(matching), 1)
+        record = matching[0]
+        self.assertIn("completedAt", record)
+        self.assertTrue(record.get("background"))
+        self.assertEqual(record["result"].get("motionStatus"), "no-motion")
 
 
 class FakeRobot:

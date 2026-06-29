@@ -15,6 +15,7 @@ DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID
 DEFAULT_NAV2_ACTION = os.environ.get("DOGZILLA_NAV2_ACTION", "navigate_to_pose")
 DEFAULT_NAV2_DOCKER_CONTAINER = os.environ.get("DOGZILLA_NAV2_DOCKER_CONTAINER", "robodoge-rosbridge")
 DEFAULT_NAV2_DOCKER_ENABLED = os.environ.get("DOGZILLA_NAV2_DOCKER_ENABLED", "1") != "0"
+DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = os.environ.get("DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED", "0") != "0"
 DEFAULT_NAV2_ALLOWED_FRAMES = {
     frame.strip()
     for frame in os.environ.get("DOGZILLA_NAV2_ALLOWED_FRAMES", "map,odom").split(",")
@@ -1034,6 +1035,14 @@ class Nav2NavigateClient:
 
     def send_goal(self, *, frame: str, x: float, y: float, yaw: float) -> dict[str, Any]:
         if self.backend == "docker-rclpy":
+            if not DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED:
+                return {
+                    "executed": False,
+                    "delivery": "nav2-unavailable",
+                    "error": "Docker Nav2 goal backend disabled for hot path; direct bridge must run host rclpy",
+                    "action": self.action_name,
+                    "backend": self.backend,
+                }
             return self._send_goal_via_docker(frame=frame, x=x, y=y, yaw=yaw)
 
         self._refresh_status()

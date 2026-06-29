@@ -62,12 +62,22 @@ green:
    If it times out while the fast probes are green, dispatch proceeds with a
    warning and skips map-identity/pose validation for that request.
 
-`/commands` still re-probes Nav2 action, `/odom`/TF, lifecycle nodes, and
-`/scan_nav2` before sending a goal, and `locomotion.goto` remains async-by-default
+`/commands` no longer uses the Docker ROS backend for normal goal dispatch;
+`DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED` defaults to `0` so the hot path runs
+host `rclpy` only. `locomotion.goto` remains async-by-default
 (`DOGZILLA_ASYNC_HTTP_GOTO=1`): the bridge returns `202` acceptance quickly and
-callers track completion through `/feedback`. Each waypoint dispatch records
+callers track completion through `/feedback`. The background thread updates the
+same `commandId` record and reports `no-motion` when no gait adapter command or
+odom delta is observed within the bounded window. Each waypoint dispatch records
 stage-level timing and failure attribution for `healthLite`, `scanInfo`,
 `fullHealth`, `readiness`, `preempt`, and `command`.
+
+The direct bridge owns the DOGZILLA navigation-mode state (`idle` / `localize` /
+`navigate` / `sleep`) exposed by `GET/POST /mode`. Only the bridge starts or
+stops Cartographer, Nav2, and the scan filter; other app paths read state via
+`/healthz-lite`. `locomotion.goto` automatically promotes the mode to `navigate`
+when needed, and inactivity demotes it back toward `idle` after
+`DOGZILLA_NAV_MODE_IDLE_DELAY_SEC`.
 
 The `/scan_nav2` scan filter (`scan_self_filter.py`) is supervised by
 `scan_filter_supervisor.py`, which captures stderr from the child process and

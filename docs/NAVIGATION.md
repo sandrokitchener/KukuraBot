@@ -122,6 +122,27 @@ The bridge distinguishes two stop paths:
 - `emergency_stop` (reason `emergency_stop`): latches `/nav2/cmd_vel` blocked until an explicit unlatch path is used. A subsequent `locomotion.goto` does **not** silently clear this safety block.
 - `command_preempt` (reason `command_preempt`): cancels the active Nav2 goal and stops robot motion, but does **not** latch `/nav2/cmd_vel` blocked. A fresh `locomotion.goto` clears any stale command-preempt gate at start.
 
+## Pi load-shed modes
+
+The direct bridge owns a single navigation-mode state to keep Pi load low unless the robot is actively localizing or navigating:
+
+| Mode | Running | Stopped |
+| --- | --- | --- |
+| `idle` | direct bridge, audio, optional camera/YOLO | Cartographer, Nav2, scan filter |
+| `localize` | `idle` + Cartographer/map-pose | Nav2, scan filter |
+| `navigate` | `localize` + Nav2 + scan filter + gait adapter | — |
+| `sleep` | direct bridge only (audio/camera optional) | Cartographer, Nav2, scan filter, YOLO |
+
+Control modes via the bridge:
+
+- `GET /mode` returns current mode and transition history.
+- `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` transitions the stack.
+- `locomotion.goto` automatically requests `navigate` mode if not already in `navigate` or `localize`.
+- After `DOGZILLA_NAV_MODE_IDLE_DELAY_SEC` (default 300 s) of inactivity the bridge demotes toward `idle`.
+- Default at startup is `navigate` for compatibility; set `DOGZILLA_DEFAULT_NAV_MODE=idle` to keep the Pi cool at boot.
+
+`/healthz-lite` and `/healthz` now include compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, and `gaitBlockedReason`. Use `/healthz-lite` for frequent UI polls; full `/healthz` is for diagnostics or failures only.
+
 ## Starting and deploying
 
 `start-map-pose` and `start-navigation` are wrapped in a 3-attempt retry loop (`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s) for startup and command-time repair.
