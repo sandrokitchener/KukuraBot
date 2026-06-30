@@ -137,6 +137,7 @@ def set_nav_mode(mode: str) -> dict[str, Any]:
         if current == mode:
             return {"ok": True, "mode": mode, "changed": False}
         _NAV_MODE_TRANSITIONING = True
+    _cancel_nav_mode_demote()
 
     try:
         if mode == "sleep":
@@ -1308,12 +1309,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/nav2/scan_info":
             nav2 = self.server.runtime.nav2_client
-            refresh_error = None
-            if hasattr(nav2, "_refresh_status"):
-                try:
-                    nav2._refresh_status(force=True)
-                except Exception as exc:
-                    refresh_error = str(exc)
             scan = nav2._scan_snapshot() if hasattr(nav2, "_scan_snapshot") else {}
             checked_at = scan.get("checkedAt")
             age_sec = None
@@ -1330,7 +1325,7 @@ class Handler(BaseHTTPRequestHandler):
                 "available": scan.get("available", False),
                 "checkedAt": checked_at,
                 "ageSec": age_sec,
-                "error": scan.get("error") or refresh_error,
+                "error": scan.get("error"),
             })
             return
         if self.path == "/mode":

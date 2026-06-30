@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  forceDogzillaNavModeViaBridge,
   forceDogzillaWaypointNavigationOnStartup,
+  isDogzillaBridgeModeTransitionPending,
   isDogzillaWaypointNavigationReady,
   shouldForceDogzillaWaypointNavigation,
 } from '../lib/dogzilla-waypoint-navigation-launcher.mjs'
@@ -17,6 +19,110 @@ test('shouldForceDogzillaWaypointNavigation follows DOGZILLA Direct target and l
   assert.equal(shouldForceDogzillaWaypointNavigation(directRuntimeConfig(), { lidar: { enabled: false } }, {
     APP_DOGZILLA_WAYPOINT_NAVIGATION_START: '1',
   }), true)
+})
+
+test('forceDogzillaNavModeViaBridge loads DOGZILLA lidar config before requesting navigate mode', async () => {
+  const modeCalls = []
+  let probeCalls = 0
+
+  const result = await forceDogzillaNavModeViaBridge({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    env: { TEST_ENV: '1' },
+    logger: quietLogger(),
+    loadDogzillaConnectionConfigImpl: async ({ env }) => {
+      assert.equal(env.TEST_ENV, '1')
+      return { lidar: { enabled: true } }
+    },
+    enterDogzillaNavModeImpl: async (runtimeConfig, ros2Config, mode) => {
+      modeCalls.push({ runtimeConfig, ros2Config, mode })
+      return { ok: true, status: 200 }
+    },
+    probeRobotSidecarHealthImpl: async () => {
+      probeCalls += 1
+      return nav2Health()
+    },
+    sleepImpl: async () => {},
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(modeCalls.length, 1)
+  assert.equal(modeCalls[0].mode, 'navigate')
+  assert.equal(modeCalls[0].runtimeConfig.activeTarget.kind, 'dogzilla-direct')
+  assert.equal(modeCalls[0].ros2Config.transport.baseUrl, 'http://10.0.4.32:8893')
+  assert.equal(probeCalls, 1)
+})
+
+test('forceDogzillaNavModeViaBridge treats mode timeout as pending while bridge transitions', async () => {
+  const healthSequence = [
+    nav2Health({ nav2Available: false }),
+    nav2Health(),
+  ]
+  let modeStateCalls = 0
+
+  const result = await forceDogzillaNavModeViaBridge({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    enterDogzillaNavModeImpl: async () => ({
+      ok: false,
+      status: 'error',
+      error: 'The operation was aborted due to timeout',
+      timedOut: true,
+    }),
+    fetchDogzillaNavModeImpl: async () => {
+      modeStateCalls += 1
+      return {
+        ok: true,
+        status: 'ok',
+        navMode: 'idle',
+        body: { ok: true, navMode: 'idle', transitioning: true },
+      }
+    },
+    probeRobotSidecarHealthImpl: async () => healthSequence.shift() || nav2Health(),
+    sleepImpl: async () => {},
+    readyTimeoutMs: 10,
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.modeResult.timedOut, true)
+  assert.equal(result.modeState.body.transitioning, true)
+  assert.equal(modeStateCalls, 1)
+})
+
+test('forceDogzillaNavModeViaBridge reports mode timeout when bridge is not transitioning', async () => {
+  const result = await forceDogzillaNavModeViaBridge({
+    runtimeConfig: directRuntimeConfig(),
+    ros2Config: directRos2Config(),
+    dogzillaConfig: { lidar: { enabled: true } },
+    logger: quietLogger(),
+    enterDogzillaNavModeImpl: async () => ({
+      ok: false,
+      status: 'error',
+      error: 'The operation was aborted due to timeout',
+      timedOut: true,
+    }),
+    fetchDogzillaNavModeImpl: async () => ({
+      ok: true,
+      status: 'ok',
+      navMode: 'idle',
+      body: { ok: true, navMode: 'idle', transitioning: false },
+    }),
+    probeRobotSidecarHealthImpl: async () => nav2Health(),
+    sleepImpl: async () => {},
+    readyTimeoutMs: 10,
+  })
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.modeState.body.transitioning, false)
+  assert.equal(result.error, 'The operation was aborted due to timeout')
+})
+
+test('isDogzillaBridgeModeTransitionPending accepts transitioning or target mode', () => {
+  assert.equal(isDogzillaBridgeModeTransitionPending({ body: { navMode: 'idle', transitioning: true } }, 'navigate'), true)
+  assert.equal(isDogzillaBridgeModeTransitionPending({ body: { navMode: 'navigate', transitioning: false } }, 'navigate'), true)
+  assert.equal(isDogzillaBridgeModeTransitionPending({ body: { navMode: 'idle', transitioning: false } }, 'navigate'), false)
 })
 
 test('isDogzillaWaypointNavigationReady accepts Nav2 health only', () => {
@@ -96,6 +202,7 @@ test('forceDogzillaWaypointNavigationOnStartup starts Nav2 and waits for bridge 
     dogzillaConfig: { lidar: { enabled: true } },
     logger: quietLogger(),
     sleepImpl: async () => {},
+    waitForPoseReadyImpl: async () => {},
     existingReadyGraceMs: 0,
     probeRobotSidecarHealthImpl: async () => healthSequence.shift() || nav2Health(),
     runDogzillaConnectionActionImpl: async (action) => {
@@ -156,6 +263,7 @@ test('forceDogzillaWaypointNavigationOnStartup reports start-navigation failure 
     ros2Config: directRos2Config(),
     dogzillaConfig: { lidar: { enabled: true } },
     logger: quietLogger(),
+    waitForPoseReadyImpl: async () => {},
     probeRobotSidecarHealthImpl: async () => nav2Health({ nav2Available: false }),
     runDogzillaConnectionActionImpl: async (action) => action === 'start-map-pose'
       ? {

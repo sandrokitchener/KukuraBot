@@ -49,7 +49,7 @@ test('buildRobotStartupGesturePreview maps startup shake to handshake action', (
   assert.equal(preview.canonicalPlan.params.actionId, 19)
 })
 
-test('runRobotStartupSequence barks then dispatches handshake gesture', async () => {
+test('runRobotStartupSequence skips direct bridge startup gesture by default', async () => {
   const calls = []
   const result = await runRobotStartupSequence({
     runtimeConfig: runtimeConfig(),
@@ -57,9 +57,9 @@ test('runRobotStartupSequence barks then dispatches handshake gesture', async ()
     waypointConfig: emptyWaypointConfig(),
     actionConfig: handshakeActionConfig(),
     motionConfig: emptyMotionConfig(),
-    env: {
-      ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
-    },
+  env: {
+    ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
+  },
     logger: quietLogger(),
     requiredServicesReady: Promise.resolve({ status: 'ok' }),
     probeRobotSidecarHealthImpl: async () => ({
@@ -95,16 +95,9 @@ test('runRobotStartupSequence barks then dispatches handshake gesture', async ()
   })
 
   assert.equal(result.status, 'ok')
+  assert.equal(result.gesture.status, 'skipped')
   assert.deepEqual(calls, [
     ['audio', 'bark'],
-    ['gesture', {
-      kind: 'action.once',
-      params: {
-        trick: 'handshake',
-        actionId: 19,
-        verified: true,
-      },
-    }],
   ])
 })
 
@@ -143,9 +136,10 @@ test('runRobotStartupSequence restarts dry-run direct bridge live before gesture
     waypointConfig: emptyWaypointConfig(),
     actionConfig: handshakeActionConfig(),
     motionConfig: emptyMotionConfig(),
-    env: {
-      ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
-    },
+  env: {
+    ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
+    ROBOT_STARTUP_GESTURE: '1',
+  },
     logger: quietLogger(),
     sendDogzillaAudioCueImpl: async (cue) => {
       calls.push(['audio', cue])
@@ -190,9 +184,10 @@ test('runRobotStartupSequence skips redundant bridge probe when existingDirectBr
     waypointConfig: emptyWaypointConfig(),
     actionConfig: handshakeActionConfig(),
     motionConfig: emptyMotionConfig(),
-    env: {
-      ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
-    },
+  env: {
+    ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
+    ROBOT_STARTUP_GESTURE: '1',
+  },
     logger: quietLogger(),
     existingDirectBridgeHealth: {
       status: 'ok',
@@ -261,9 +256,10 @@ test('runRobotStartupSequence retries transient live bridge restart failures', a
     waypointConfig: emptyWaypointConfig(),
     actionConfig: handshakeActionConfig(),
     motionConfig: emptyMotionConfig(),
-    env: {
-      ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
-    },
+  env: {
+    ROBOT_STARTUP_GESTURE_DELAY_MS: '0',
+    ROBOT_STARTUP_GESTURE: '1',
+  },
     logger: quietLogger(),
     sendDogzillaAudioCueImpl: async (cue) => {
       calls.push(['audio', cue])

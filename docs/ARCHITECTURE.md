@@ -18,14 +18,14 @@ public/ UI or packaged shell
 -> sidecar or robot bridge
 ```
 
-`run.mjs` managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge process ports, then imports `run.mjs`. `server.mjs` serves HTTP/WebSocket, monitors rosbridge reconnects, and runs a low-frequency Nav2 repair watchdog for DOGZILLA direct mode after startup. `run.mjs` still triggers initial Nav2 startup via `startNav2Background()`; UI Connection Center and `npm run dogzilla:start-navigation` remain manual repair paths.
+`run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge process ports, then imports `run.mjs`. `server.mjs` serves HTTP/WebSocket, monitors rosbridge reconnects, and runs the low-frequency Nav2 repair watchdog after startup. In default DOGZILLA direct mode, the Pi direct bridge owns Nav2/map-pose stack start and stop; `run.mjs` and the watchdog request bridge mode `navigate` via `/mode` and observe readiness. UI Connection Center and `npm run dogzilla:start-navigation` remain explicit legacy SSH repair paths.
 
 ## Key entrypoints
 
 | File | Role |
 | --- | --- |
 | `server.mjs` | HTTP server, static files, CORS, `/healthz`, DOGZILLA/runtime/recon routes, WebSocket upgrade |
-| `run.mjs` | Managed startup: required DOGZILLA services, direct bridge, waypoint navigation, Isaac, ROS2 bridge, speech sidecar |
+| `run.mjs` | Managed startup: required DOGZILLA services, direct bridge, bridge-owned navigation mode request, Isaac, ROS2 bridge, speech sidecar |
 | `public/` | Shared browser UI used by web, Android Tauri, and Electron-loaded backend app |
 | `lib/app-service.mjs` | App-facing command/config orchestration |
 | `lib/robot-command-compiler.mjs` | Real robot command preview and waypoint pose resolution |

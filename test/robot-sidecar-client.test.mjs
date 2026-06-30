@@ -1114,6 +1114,33 @@ test('enterDogzillaNavMode posts mode to bridge and reports ok', async () => {
   )
 })
 
+test('enterDogzillaNavMode uses Nav2 transition timeout instead of short transport timeout', async () => {
+  const originalTimeout = AbortSignal.timeout
+  const timeoutCalls = []
+  AbortSignal.timeout = (ms) => {
+    timeoutCalls.push(ms)
+    return new AbortController().signal
+  }
+
+  try {
+    await withMockedFetch(
+      async () => jsonResponse({ ok: true, mode: 'navigate', previousMode: 'idle' }, { status: 200 }),
+      async () => {
+        const result = await enterDogzillaNavMode(
+          dogzillaDirectRuntime(),
+          dogzillaTransportConfig({ timeoutMs: 30000 }),
+          'navigate',
+        )
+
+        assert.equal(result.ok, true)
+        assert.equal(timeoutCalls.at(-1), 120000)
+      },
+    )
+  } finally {
+    AbortSignal.timeout = originalTimeout
+  }
+})
+
 test('enterDogzillaNavMode reports error on bridge failure', async () => {
   await withMockedFetch(
     async () => jsonResponse({ ok: false, error: 'invalid_nav_mode:dance' }, { status: 400 }),

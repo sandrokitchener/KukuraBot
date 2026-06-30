@@ -84,6 +84,7 @@ Direct bridge runtime truth distinguishes action discovery from waypoint-ready s
 - `navigation.actionServerDiscovered` reports whether `/navigate_to_pose` was visible in the ROS graph during the latest discovery check.
 - `navigation.waypointReady` / `navigation.available` require `can_send_goal()` to be true — the active backend must be able to actually send goals. If Docker goal sending is disabled or the host action client is missing, `waypointReady` is `false` even when lifecycle nodes, `/odom`, and `/scan_nav2` are live.
 - `send_goal` still waits for the real `NavigateToPose` action server before accepting a waypoint command. Do not remove that send-time wait.
+- App command preflight keeps full `/healthz` lifecycle status diagnostic when direct bridge command path is usable (`canSendGoal=true`, action server visible, `/odom` live with TF, `/scan_nav2` available). In that state dispatch proceeds and bridge `send_goal` is authority.
 
 When startup or preflight says the action server is blocked but lifecycle, `/odom`, and `/scan_nav2` are green in `/healthz`, treat action discovery as diagnostic evidence, not automatic proof that Nav2 is down.
 
@@ -176,9 +177,11 @@ Control modes via the bridge:
 - After `DOGZILLA_NAV_MODE_IDLE_DELAY_SEC` (default 300 s) of inactivity the bridge demotes toward `idle`.
 - Default at startup is `idle`. Bridge does not start Nav2 stack until `locomotion.goto` or explicit `/mode navigate` is issued.
 
-App defaults bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and `server.mjs` Nav2 repair watchdog call `POST /mode navigate` on the bridge instead of independently launching SSH scripts. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center "Restart Nav" remains an explicit SSH repair path.
+App defaults bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and `server.mjs` Nav2 repair watchdog request `POST /mode navigate` on the bridge instead of independently launching SSH scripts. The Pi direct bridge owns map-pose/Nav2 container start and stop. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center Restart Nav remains an explicit SSH repair path. Bridge `navigate` transitions can exceed 120 s on a loaded Pi; app-side `/mode` calls use a 120 s minimum request timeout and bridge-owned startup waits up to 240 s for readiness while treating `transitioning:true` as pending, not failed.
 
 Bridge-owned map-pose startup runs the map-pose container in one-shot Docker exec mode and seeds Cartographer localization from `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` when present. Deploy that origin file with Pi-side startup changes; otherwise Nav2 topics can be alive while localization starts from a stale or wrong physical pose.
+`npm start` waits for the bridge-owned Nav2 startup attempt before spawning `server.mjs`, preventing browser polling and server watchdog repair from sending competing commands into in-flight Nav2 startup. Direct-bridge startup gestures are disabled by default; set `ROBOT_STARTUP_GESTURE=1` only when explicit startup trick is wanted.
+
 ## Velocity smoother bypass
 
 If Nav2 accepts a goal but `/cmd_vel` stays silent (dog does not move), the velocity smoother may be stalling. Bypass it by pointing the gait adapter at the raw controller output:

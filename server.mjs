@@ -35,7 +35,7 @@ import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile } from './lib/model-profile-config.mjs'
-import { fetchRobotBridgeState, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
+import { fetchDogzillaNavMode, fetchRobotBridgeState, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,
@@ -308,6 +308,17 @@ function startDogzillaNav2RepairWatchdog({
     const runtime = health.body?.runtime && typeof health.body.runtime === 'object' ? health.body.runtime : null
     const readiness = getDogzillaWaypointNavigationReadiness(runtime)
     if (readiness.ready || readiness.discovering) return
+    const modeState = await fetchDogzillaNavMode(runtimeConfig, withRobotStateProbeTimeout(ros2Config, 4000))
+    const modeBody = modeState?.body && typeof modeState.body === 'object' ? modeState.body : {}
+    if (modeBody.transitioning === true || modeState?.transitioning === true) {
+      logger.log?.('DOGZILLA Nav2 watchdog skipped: bridge navigate transition still running.')
+      return
+    }
+    const navMode = modeBody.navMode || modeBody.mode || modeState?.navMode || modeState?.mode || ''
+    if (navMode === 'navigate' && isDogzillaDirectGoalPathUsable(runtime)) {
+      logger.warn?.(`DOGZILLA Nav2 watchdog skipped repair: command path is usable; diagnostic blocker was ${readiness.reason || 'unknown readiness issue'}.`)
+      return
+    }
 
     repairing = true
     if (isNav2StabilityTrackerEnabled()) {
@@ -359,6 +370,25 @@ function startDogzillaNav2RepairWatchdog({
   interval.unref?.()
   return { interval }
 }
+
+function isDogzillaDirectGoalPathUsable(runtime = {}) {
+  const navigation = runtime?.navigation && typeof runtime.navigation === 'object' ? runtime.navigation : null
+  const nav2FromNavigation = navigation?.nav2 && typeof navigation.nav2 === 'object' ? navigation.nav2 : null
+  const nav2 = nav2FromNavigation || (runtime?.nav2 && typeof runtime.nav2 === 'object' ? runtime.nav2 : null)
+  if (!nav2) {
+    return false
+  }
+
+  const odom = nav2.odom && typeof nav2.odom === 'object' ? nav2.odom : {}
+  const scan = nav2.scan && typeof nav2.scan === 'object' ? nav2.scan : {}
+  const actionReady = nav2.canSendGoal === true
+    && (nav2.serverAvailable === true || nav2.actionServerDiscovered === true || nav2.available === true)
+  const odomReady = odom.available === true || (odom.messageAvailable === true && odom.tfAvailable === true)
+  const scanReady = scan.available === true
+
+  return actionReady && odomReady && scanReady
+}
+
 function startRosbridgeConnectionMonitor({
   env = process.env,
   logger = console,
