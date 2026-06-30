@@ -146,6 +146,8 @@ The original internal delivery name (e.g. `"Nav2 NavigateToPose"`) is preserved 
 | `"cancelled"` | Navigation cancel event was set. |
 | `"failed"` | Background monitor threw an exception. `monitorError` field contains the detail. |
 
+Live acceptance proof is `delivery: "accepted"` plus `goalAccepted: true` and then `motionStatus: "moving"` from gait/odom evidence. That proves Nav2 dispatch and motion start, not full arrival. If the robot starts walking then loses battery/current, stop the test and treat arrival quality as unverified until charged.
+
 The motion monitor uses lightweight cached state only — `runtime.nav2_gait_adapter_count` (in-memory counter) and `nav2_client._odom_snapshot()` (reads cached fields). It does NOT call `_refresh_status(force=True)` or Docker probes in a loop.
 
 **Readiness invariant:** `waypointReady=true` requires `can_send_goal()` to be true. If Docker goal sending is disabled or the host action client is missing, `waypointReady` is `false` even if the lifecycle/odom/scan stack is otherwise active.

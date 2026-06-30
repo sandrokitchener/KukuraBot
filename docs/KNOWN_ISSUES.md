@@ -17,7 +17,7 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 - **TF chain blocker:** If no physical `odom->base_link/base_footprint` TF exists, startup may use repo synthetic `/odom` anchored from `map->base_link`. This is a DOGZILLA compatibility shim, not wheel odometry. If physical odom is restored later, prefer real odom and retest Nav2 motion.
 - **ROS2 daemon hangs:** `ros2 topic info`, `ros2 topic list`, or `ros2 action list` can hang under Pi DDS/daemon load. Startup scripts should use bounded calls and restart the daemon before probing.
 - **No auto-retry for stuck route:** `stuck` nav status in UI is inspection-only. Per user direction, do not add auto-retry stuck behavior without explicit instruction.
-- **Battery hard stop:** Unhealthy or low battery robot state should stop live motion validation. Local tests can still prove plumbing.
+- **Battery hard stop:** Unhealthy or low battery robot state should stop live motion validation. Plugged in is not enough proof if the pack sags under gait load; stop live navigation tests when motion starts then dies from battery/current loss. Local tests can still prove plumbing.
 - **UART split:** Direct DOGZILLALib bridge uses robot control UART `/dev/ttyAMA0`; LiDAR/rosbridge stays on HAT UART `/dev/ttyAMA1`. If battery is unavailable while isolated `DOGZILLA().read_battery()` works, check `/etc/robodoge/dogzilla.env` for `DOGZILLA_ROBOT_SERIAL_PORT=/dev/ttyAMA0` and `DOGZILLA_SERIAL_PORT=/dev/ttyAMA1`.
 
 ## Waypoint Data
