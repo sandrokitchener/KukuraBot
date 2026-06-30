@@ -5,11 +5,6 @@ import path from 'node:path'
 import { forceDogzillaDirectBridgeOnStartup } from './lib/dogzilla-direct-bridge-launcher.mjs'
 import { forceDogzillaRequiredServicesOnStartup } from './lib/dogzilla-required-services-launcher.mjs'
 import {
-  forceDogzillaNavModeViaBridge,
-  forceDogzillaWaypointNavigationOnStartup,
-  shouldUseBridgeNavOwner,
-} from './lib/dogzilla-waypoint-navigation-launcher.mjs'
-import {
   getDogzillaLidarHealth,
   startDogzillaLidarClient,
 } from './lib/dogzilla-lidar-client.mjs'
@@ -20,7 +15,6 @@ import {
   runExistingAppRobotStartupSequence,
   runRobotStartupSequence,
 } from './lib/robot-startup-sequence.mjs'
-import { fetchRobotBridgeState } from './lib/robot-sidecar-client.mjs'
 import { stopManagedProcessOnPort } from './lib/managed-process-cleanup.mjs'
 import { startManagedRobotEnvironment } from './lib/robot-sidecar-launcher.mjs'
 import { resolveActiveSpeechProfile } from './lib/speech-profile-config.mjs'
@@ -159,11 +153,7 @@ if (existingAppConfig && reuseExistingApp) {
     })
 
     startupStatus.stop('Starting Questing Beast server')
-  await startNav2Background({
-    runtimeConfig: robotRuntimeConfig,
-    ros2Config: robotRos2Config,
-  })
-    const server = spawn(process.execPath, ['server.mjs'], {
+  const server = spawn(process.execPath, ['server.mjs'], {
       cwd: __dirname,
       stdio: 'inherit',
       env: {
@@ -562,52 +552,6 @@ function pickFreshDirectBridgeHealth(candidates = []) {
     }
   }
   return null
-}
-
-async function startNav2Background({ runtimeConfig, ros2Config }) {
-  const minBatteryPct = Number(process.env.APP_DOGZILLA_NAV2_START_MIN_BATTERY_PCT || 25)
-
-  try {
-    const state = await fetchRobotBridgeState(runtimeConfig, ros2Config).catch(() => null)
-    const battery = Number(state?.state?.battery)
-    let nav2Result
-    if (Number.isFinite(battery) && Number.isFinite(minBatteryPct) && battery <= minBatteryPct) {
-      nav2Result = {
-        enabled: false,
-        status: 'skipped',
-        reason: `battery ${battery}% <= ${minBatteryPct}%`,
-      }
-    } else if (shouldUseBridgeNavOwner(process.env)) {
-      nav2Result = await forceDogzillaNavModeViaBridge({
-        runtimeConfig,
-        ros2Config,
-        logger: console,
-      })
-    } else {
-      nav2Result = await forceDogzillaWaypointNavigationOnStartup({
-        runtimeConfig,
-        ros2Config,
-        logger: console,
-      })
-    }
-
-    if (nav2Result.status === 'ok') {
-      console.log(green('DOGZILLA Nav2 waypoint navigation ready.'))
-    } else if (nav2Result.enabled !== false) {
-      console.warn(`DOGZILLA Nav2 startup: ${nav2Result.reason || nav2Result.error || nav2Result.status || 'unknown'}`)
-    } else if (nav2Result.status === 'skipped') {
-      console.warn(`DOGZILLA Nav2 startup skipped: ${nav2Result.reason}`)
-    }
-    return nav2Result
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.warn(`DOGZILLA Nav2 startup error: ${message}`)
-    return {
-      enabled: true,
-      status: 'error',
-      error: message,
-    }
-  }
 }
 
 async function verifySimplifiedDogzillaEndpoints({ robotRuntimeConfig, ros2Config, directBridgeStartup }) {

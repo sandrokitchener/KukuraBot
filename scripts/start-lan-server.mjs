@@ -4,7 +4,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { forceDogzillaDirectBridgeOnStartup } from '../lib/dogzilla-direct-bridge-launcher.mjs'
 import { forceDogzillaRequiredServicesOnStartup } from '../lib/dogzilla-required-services-launcher.mjs'
-import { forceDogzillaWaypointNavigationOnStartup } from '../lib/dogzilla-waypoint-navigation-launcher.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,
@@ -46,14 +45,6 @@ async function startRobotNetworkDependencies() {
     logger: console,
   }).catch((error) => {
     console.warn(`DOGZILLA direct bridge startup failed: ${error instanceof Error ? error.message : String(error)}`)
-  })
-
-  await forceDogzillaWaypointNavigationOnStartup({
-    runtimeConfig: robotRuntimeConfig,
-    ros2Config: robotRos2Config,
-    logger: console,
-  }).catch((error) => {
-    console.warn(`DOGZILLA waypoint navigator startup failed: ${error instanceof Error ? error.message : String(error)}`)
   })
 
   return requiredServices

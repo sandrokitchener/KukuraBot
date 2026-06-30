@@ -607,7 +607,7 @@ test('sendRobotCommand blocks waypoint unverified by config before Nav2', async 
   )
 })
 
-test('sendRobotCommand starts missing direct waypoint navigator before posting goto', async () => {
+test('sendRobotCommand does not start missing direct waypoint navigator before posting goto', async () => {
   const requests = []
   const actions = []
   let started = false
@@ -650,15 +650,16 @@ test('sendRobotCommand starts missing direct waypoint navigator before posting g
         },
       )
 
-      assert.equal(result.status, 'sent')
-      assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
-      assert.ok(requests.filter((request) => request.url.endsWith('/healthz')).length >= 1)
-      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+      assert.equal(result.status, 'navigation-unavailable')
+      assert.equal(result.attempted, false)
+      assert.deepEqual(actions, [])
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
     },
   )
 })
 
-test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', async () => {
+test('sendRobotCommand does not repair failed Nav2 prerequisites before posting goto', async () => {
   const requests = []
   const actions = []
   let started = false
@@ -701,10 +702,11 @@ test('sendRobotCommand repairs failed Nav2 prerequisites before posting goto', a
         },
       )
 
-      assert.equal(result.status, 'sent')
-      assert.deepEqual(actions, ['start-map-pose', 'start-navigation'])
-      assert.ok(requests.filter((request) => request.url.endsWith('/healthz')).length >= 1)
-      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+      assert.equal(result.status, 'navigation-unavailable')
+      assert.equal(result.attempted, false)
+      assert.deepEqual(actions, [])
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
     },
   )
 })

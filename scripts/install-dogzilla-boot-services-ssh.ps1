@@ -198,9 +198,9 @@ Type=simple
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
 TimeoutStartSec=180
-ExecStartPre=-/usr/bin/docker rm -f robodoge-rosbridge
-ExecStart=/usr/bin/docker run --rm --name robodoge-rosbridge --privileged --network host -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_SERIAL_PORT=$SERIAL_PORT -e DOGZILLA_LIDAR_BAUDRATE=230400 -e DOGZILLA_LIDAR_TOPIC=/scan -e DOGZILLA_ROSBRIDGE_PORT=9090 -e DOGZILLA_MAP_TOPIC=/map_cartographer -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh'
-ExecStop=-/usr/bin/docker rm -f robodoge-rosbridge
+ExecStartPre=/bin/bash -lc '/usr/bin/docker inspect robodoge-rosbridge >/dev/null 2>&1 || /usr/bin/docker create --name robodoge-rosbridge --privileged --network host -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_SERIAL_PORT=$SERIAL_PORT -e DOGZILLA_LIDAR_BAUDRATE=230400 -e DOGZILLA_LIDAR_TOPIC=/scan -e DOGZILLA_ROSBRIDGE_PORT=9090 -e DOGZILLA_MAP_TOPIC=/map_cartographer -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc '"'"'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh'"'"''
+ExecStart=/usr/bin/docker start -a robodoge-rosbridge
+ExecStop=-/usr/bin/docker stop -t 20 robodoge-rosbridge
 Restart=always
 RestartSec=5
 StandardOutput=append:$REMOTE_ROOT/logs/rosbridge-systemd.log

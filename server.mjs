@@ -35,7 +35,7 @@ import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile } from './lib/model-profile-config.mjs'
-import { fetchDogzillaNavMode, fetchRobotBridgeState, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
+import { fetchRobotBridgeState } from './lib/robot-sidecar-client.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,
@@ -50,18 +50,10 @@ import {
 } from './lib/robot-state-stream.mjs'
 import { deriveNavigationStatus } from './lib/dogzilla-navigation-status.mjs'
 import { getDogzillaRepairState } from './lib/dogzilla-repair-state.mjs'
-import { getDogzillaWaypointNavigationReadiness } from './lib/dogzilla-navigation-readiness.mjs'
-import {
-  forceDogzillaNavModeViaBridge,
-  forceDogzillaWaypointNavigationOnStartup,
-  shouldUseBridgeNavOwner,
-} from './lib/dogzilla-waypoint-navigation-launcher.mjs'
 import {
   deriveNav2StabilityFromHealth,
   getNav2Stability,
   isNav2StabilityTrackerEnabled,
-  recordNav2RepairStart,
-  recordNav2RepairResult,
 } from './lib/dogzilla-nav2-stability.mjs'
 import { buildSystemHealthz } from './lib/system-healthz.mjs'
 import { green, printStartupBanner } from './lib/startup-banner.mjs'
@@ -253,9 +245,8 @@ server.listen(PORT, HOST, async () => {
   console.log(green(`     |               \`--' |`))
   console.log(green(` ____|_       ___|   |___.'`))
   console.log(green(`/_/_____/____/_______|`))
-  startRosbridgeConnectionMonitor()
-  startDogzillaNav2RepairWatchdog()
-  void warmActiveModel(profileConfig.activeProfile)
+startRosbridgeConnectionMonitor()
+void warmActiveModel(profileConfig.activeProfile)
 })
 
 async function startSimplifiedDogzillaStack({ logger = console } = {}) {
@@ -274,119 +265,6 @@ async function startSimplifiedDogzillaStack({ logger = console } = {}) {
   }
 
   return { blocked: false }
-}
-
-function startDogzillaNav2RepairWatchdog({
-  env = process.env,
-  logger = console,
-  intervalMs = Number(env.APP_DOGZILLA_NAV2_WATCHDOG_INTERVAL_MS || 60_000),
-  minBatteryPct = Number(env.APP_DOGZILLA_NAV2_WATCHDOG_MIN_BATTERY_PCT || 25),
-} = {}) {
-  const override = String(env.APP_DOGZILLA_NAV2_WATCHDOG ?? env.DOGZILLA_NAV2_WATCHDOG ?? '').trim().toLowerCase()
-  if (['0', 'false', 'no', 'off'].includes(override)) {
-    return null
-  }
-
-  let repairing = false
-  const tick = async () => {
-    if (repairing) return
-
-    const runtimeConfig = await loadRobotRuntimeConfig()
-    if (runtimeConfig.enabled === false || runtimeConfig.activeTarget?.kind !== 'dogzilla-direct') return
-
-    const ros2Config = await loadRobotRos2Config()
-    const health = await probeRobotSidecarHealth(runtimeConfig, withRobotStateProbeMinimumTimeout(ros2Config, 4000))
-    if (health.status !== 'ok') return
-
-    const bridgeState = await fetchRobotBridgeState(runtimeConfig, withRobotStateProbeTimeout(ros2Config, 4000))
-    const battery = normalizeFiniteNumber(bridgeState?.state?.battery)
-    if (Number.isFinite(battery) && Number.isFinite(minBatteryPct) && battery <= minBatteryPct) {
-      logger.warn?.(`DOGZILLA Nav2 watchdog skipped: battery ${battery}% <= ${minBatteryPct}%.`)
-      return
-    }
-
-    const runtime = health.body?.runtime && typeof health.body.runtime === 'object' ? health.body.runtime : null
-    const readiness = getDogzillaWaypointNavigationReadiness(runtime)
-    if (readiness.ready || readiness.discovering) return
-    const modeState = await fetchDogzillaNavMode(runtimeConfig, withRobotStateProbeTimeout(ros2Config, 4000))
-    const modeBody = modeState?.body && typeof modeState.body === 'object' ? modeState.body : {}
-    if (modeBody.transitioning === true || modeState?.transitioning === true) {
-      logger.log?.('DOGZILLA Nav2 watchdog skipped: bridge navigate transition still running.')
-      return
-    }
-    const navMode = modeBody.navMode || modeBody.mode || modeState?.navMode || modeState?.mode || ''
-    if (navMode === 'navigate' && isDogzillaDirectGoalPathUsable(runtime)) {
-      logger.warn?.(`DOGZILLA Nav2 watchdog skipped repair: command path is usable; diagnostic blocker was ${readiness.reason || 'unknown readiness issue'}.`)
-      return
-    }
-
-    repairing = true
-    if (isNav2StabilityTrackerEnabled()) {
-      recordNav2RepairStart({
-        source: 'server-watchdog',
-        repairAction: 'watchdog-nav2-repair',
-        bridgeDestination: health.destination || null,
-      })
-    }
-
-    try {
-      const navRepairFn = shouldUseBridgeNavOwner(env)
-        ? forceDogzillaNavModeViaBridge
-        : forceDogzillaWaypointNavigationOnStartup
-      const result = await navRepairFn({
-        runtimeConfig,
-        ros2Config,
-        logger,
-      })
-      const ok = result?.status === 'ok'
-      if (isNav2StabilityTrackerEnabled()) {
-        recordNav2RepairResult(ok, {
-          source: 'server-watchdog',
-          repairAction: 'watchdog-nav2-repair',
-          bridgeDestination: health.destination || null,
-          error: ok ? undefined : (result?.error || result?.reason || result?.status),
-        })
-      }
-    } catch (error) {
-      if (isNav2StabilityTrackerEnabled()) {
-        recordNav2RepairResult(false, {
-          source: 'server-watchdog',
-          repairAction: 'watchdog-nav2-repair',
-          bridgeDestination: health.destination || null,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-      logger.warn?.(`DOGZILLA Nav2 watchdog repair failed: ${error instanceof Error ? error.message : String(error)}`)
-    } finally {
-      repairing = false
-    }
-  }
-
-  const interval = setInterval(() => {
-    tick().catch((error) => {
-      logger.warn?.(`DOGZILLA Nav2 watchdog check failed: ${error instanceof Error ? error.message : String(error)}`)
-    })
-  }, Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 60_000)
-  interval.unref?.()
-  return { interval }
-}
-
-function isDogzillaDirectGoalPathUsable(runtime = {}) {
-  const navigation = runtime?.navigation && typeof runtime.navigation === 'object' ? runtime.navigation : null
-  const nav2FromNavigation = navigation?.nav2 && typeof navigation.nav2 === 'object' ? navigation.nav2 : null
-  const nav2 = nav2FromNavigation || (runtime?.nav2 && typeof runtime.nav2 === 'object' ? runtime.nav2 : null)
-  if (!nav2) {
-    return false
-  }
-
-  const odom = nav2.odom && typeof nav2.odom === 'object' ? nav2.odom : {}
-  const scan = nav2.scan && typeof nav2.scan === 'object' ? nav2.scan : {}
-  const actionReady = nav2.canSendGoal === true
-    && (nav2.serverAvailable === true || nav2.actionServerDiscovered === true || nav2.available === true)
-  const odomReady = odom.available === true || (odom.messageAvailable === true && odom.tfAvailable === true)
-  const scanReady = scan.available === true
-
-  return actionReady && odomReady && scanReady
 }
 
 function startRosbridgeConnectionMonitor({

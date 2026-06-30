@@ -13,7 +13,7 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 - **Nav2 action discovery can be a false startup blocker.** The direct bridge reports `navigation.actionServerDiscovered` separately from `navigation.waypointReady`. If lifecycle nodes are active and `/odom` plus `/scan_nav2` are live, bridge readiness may be waypoint-ready even when Pi DDS action discovery briefly misses `/navigate_to_pose`. `send_goal` still waits for the real action server before accepting a command. See `docs/NAVIGATION.md`.
 - **Resolved startup blocker: `/odom` and `/scan_nav2` did not stay ready long enough for waypoint commands.** repo `/odom` and `/scan_nav2` helpers now run under supervisors. `/odom` uses `odom->base_link` when available, otherwise synthetic relative odom anchored at first `map->base_link`. Nav2 startup tolerates Pi DDS discovery lag on `/scan_nav2`; startup gate accepts either publisher discovery or one-message sample before launching lifecycle nodes.
 - **Bridge-owned Nav2 startup needs deployed map origin.** `POST /mode navigate` starts map-pose in Docker exec mode and seeds localization from `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` when present. If that file is missing or stale, startup may localize at the wrong physical pose while ROS topics still look alive.
-- **Single-shot start failure:** One SSH hiccup in `start-map-pose` or `start-navigation` could leave Nav2 down for the session. `lib/dogzilla-start-retry.mjs` wraps both actions in a 3-attempt loop.
+- **No app-side Nav2 repair loop:** Nav2/map-pose lifetime belongs to Pi boot/systemd. App startup, server health polling, and waypoint dispatch must not auto-run `start-map-pose`, `start-navigation`, reinstall Nav2, recreate containers, or tear containers down on timeout. Use manual repair controls only when an operator asks.
 - **TF chain blocker:** If no physical `odom->base_link/base_footprint` TF exists, startup may use repo synthetic `/odom` anchored from `map->base_link`. This is a DOGZILLA compatibility shim, not wheel odometry. If physical odom is restored later, prefer real odom and retest Nav2 motion.
 - **ROS2 daemon hangs:** `ros2 topic info`, `ros2 topic list`, or `ros2 action list` can hang under Pi DDS/daemon load. Startup scripts should use bounded calls and restart the daemon before probing.
 - **No auto-retry for stuck route:** `stuck` nav status in UI is inspection-only. Per user direction, do not add auto-retry stuck behavior without explicit instruction.
@@ -37,7 +37,7 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 - `npm start` runs `scripts/start-clean.mjs`, stops local processes/listeners on Robo-Doge ports, then imports `run.mjs`.
 - Port conflicts around `3037`, `8891`-`8895`, `9090`, and `5037` can be stale Node/Python/ADB processes.
 
-- Direct-bridge startup gestures are disabled by default because startup tricks/preempt commands can collide with bridge-owned Nav2 startup. Use `ROBOT_STARTUP_GESTURE=1` only for intentional startup gesture tests.
+- Direct-bridge startup gestures are disabled by default because startup tricks/preempt commands can collide with Pi-owned Nav2 readiness. Use `ROBOT_STARTUP_GESTURE=1` only for intentional startup gesture tests.
 
 ## Android / Tauri
 

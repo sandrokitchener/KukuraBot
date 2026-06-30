@@ -18,20 +18,20 @@ public/ UI or packaged shell
 -> sidecar or robot bridge
 ```
 
-`run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge process ports, then imports `run.mjs`. `server.mjs` serves HTTP/WebSocket, monitors rosbridge reconnects, and runs the low-frequency Nav2 repair watchdog after startup. In default DOGZILLA direct mode, the Pi direct bridge owns Nav2/map-pose stack start and stop; `run.mjs` and the watchdog request bridge mode `navigate` via `/mode` and observe readiness. UI Connection Center and `npm run dogzilla:start-navigation` remain explicit legacy SSH repair paths.
+`run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge process ports, then imports `run.mjs`. `server.mjs` serves HTTP/WebSocket, monitors rosbridge reconnects, and reports Nav2 readiness without starting, restarting, reinstalling, or deleting Nav2. In DOGZILLA direct mode, Pi boot/systemd owns map-pose/Nav2 lifetime; the app is a client that reads health, sends goals, cancels goals, and reports blockers. UI Connection Center and `npm run dogzilla:start-navigation` remain explicit manual repair paths only.
 
 ## Key entrypoints
 
 | File | Role |
 | --- | --- |
 | `server.mjs` | HTTP server, static files, CORS, `/healthz`, DOGZILLA/runtime/recon routes, WebSocket upgrade |
-| `run.mjs` | Managed startup: required DOGZILLA services, direct bridge, bridge-owned navigation mode request, Isaac, ROS2 bridge, speech sidecar |
+| `run.mjs` | Managed startup: support services, direct bridge, Isaac, ROS2 bridge, speech sidecar; does not start Nav2 |
 | `public/` | Shared browser UI used by web, Android Tauri, and Electron-loaded backend app |
 | `lib/app-service.mjs` | App-facing command/config orchestration |
 | `lib/robot-command-compiler.mjs` | Real robot command preview and waypoint pose resolution |
 | `lib/isaacsim-command-compiler.mjs` | Isaac Sim preview construction |
 | `lib/dogzilla-connection-center.mjs` | In-app DOGZILLA service actions and SSH script wiring |
-| `lib/dogzilla-startup-watchdog.mjs` | App-up DOGZILLA self-heal loop for YOLO/audio/lidar/map-pose, direct bridge, and Nav2 |
+| `lib/dogzilla-startup-watchdog.mjs` | Optional app-up support-service/direct-bridge check; does not start Nav2 |
 | `sidecars/` | Python/ROS/DOGZILLA support services |
 
 ## Runtime targets
@@ -76,12 +76,11 @@ completion through `/feedback`. The background thread updates the same
 stage-level timing and failure attribution for `healthLite`, `scanInfo`,
 `fullHealth`, `readiness`, `preempt`, and `command`.
 
-The direct bridge owns the DOGZILLA navigation-mode state (`idle` / `localize` /
-`navigate` / `sleep`) exposed by `GET/POST /mode`. Only the bridge starts or
-stops Cartographer, Nav2, and the scan filter; other app paths read state via
-`/healthz-lite`. `locomotion.goto` automatically promotes the mode to `navigate`
-when needed, and inactivity demotes it back toward `idle` after
-`DOGZILLA_NAV_MODE_IDLE_DELAY_SEC`.
+direct bridge owns DOGZILLA navigation-mode state (`idle` / `localize` /
+`navigate` / `sleep`) exposed by `GET/POST /mode`, but those modes are
+logical app state. Pi boot/systemd owns Cartographer/Nav2/scan-filter
+process lifetime. Other app paths read state via `/healthz-lite`; waypoint
+dispatch reports blockers when the Pi-owned stack is unavailable.
 
 The `/scan_nav2` scan filter (`scan_self_filter.py`) is supervised by
 `scan_filter_supervisor.py`, which captures stderr from the child process and

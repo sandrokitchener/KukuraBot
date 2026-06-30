@@ -40,7 +40,7 @@ Key files:
 | `lib/dogzilla-map-frame.mjs` | `mapPoseToAppPose()` and `appPoseToMapPose()` |
 | `scripts/capture-dogzilla-map-pose.mjs` | Captures current pose into `config/robot-waypoints.json` |
 | `scripts/set-dogzilla-map-origin.mjs` | Saves current pose as map origin |
-| `lib/dogzilla-waypoint-navigation-launcher.mjs` | Starts/checks waypoint navigation and auto-saves origin |
+| `lib/dogzilla-waypoint-navigation-launcher.mjs` | Manual waypoint-navigation repair helper; normal app/server startup does not call it |
 | `lib/robot-command-compiler.mjs` | Resolves waypoint pose and builds dispatch plan |
 | `lib/app-service.mjs` | Uses the same resolved runtime/ROS2 config for chat preview and robot dispatch |
 | `lib/dogzilla-navigation-readiness.mjs` | App-side readiness evaluation |
@@ -170,17 +170,13 @@ The direct bridge owns a single navigation-mode state to keep Pi load low unless
 
 Control modes via the bridge:
 
-- `GET /mode` returns current mode and transition history.
-- `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` transitions the stack.
-- `locomotion.goto` automatically promotes from `idle`/`localize` to `navigate` mode, waits for bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), then sends the goal synchronously.
-- `locomotion.goto` from `sleep` is rejected; call `POST /mode navigate` first.
-- After `DOGZILLA_NAV_MODE_IDLE_DELAY_SEC` (default 300 s) of inactivity the bridge demotes toward `idle`.
-- Default at startup is `idle`. Bridge does not start Nav2 stack until `locomotion.goto` or explicit `/mode navigate` is issued.
+- `GET /mode` returns current mode transition history.
+- `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` updates bridge logical mode only. It must not start, stop, reinstall, recreate, or delete Nav2/map-pose services.
+- `locomotion.goto` talks to already-running Pi-owned Nav2, waits bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), sends goal synchronously.
+- If Nav2 is unavailable, app/server reports blockers. It does not auto-repair or auto-start navigation.
+- Default startup mode is `navigate`, matching the Pi boot contract: Nav2 should already be running before the app starts.
 
-App defaults bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and `server.mjs` Nav2 repair watchdog request `POST /mode navigate` on the bridge instead of independently launching SSH scripts. The Pi direct bridge owns map-pose/Nav2 container start and stop. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center Restart Nav remains an explicit SSH repair path. Bridge `navigate` transitions can exceed 120 s on a loaded Pi; app-side `/mode` calls use a 120 s minimum request timeout and bridge-owned startup waits up to 240 s for readiness while treating `transitioning:true` as pending, not failed.
-
-Bridge-owned map-pose startup runs the map-pose container in one-shot Docker exec mode and seeds Cartographer localization from `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` when present. Deploy that origin file with Pi-side startup changes; otherwise Nav2 topics can be alive while localization starts from a stale or wrong physical pose.
-`npm start` waits for the bridge-owned Nav2 startup attempt before spawning `server.mjs`, preventing browser polling and server watchdog repair from sending competing commands into in-flight Nav2 startup. Direct-bridge startup gestures are disabled by default; set `ROBOT_STARTUP_GESTURE=1` only when explicit startup trick is wanted.
+Pi boot/systemd owns map-pose/Nav2 lifetime. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`. UI Connection Center Restart Nav and `npm run dogzilla:start-navigation` remain explicit manual repair tools.
 
 ## Velocity smoother bypass
 
@@ -196,13 +192,13 @@ This sets `DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC=/cmd_vel_nav` (raw controller 
 
 ## Starting and deploying
 
-`start-map-pose` and `start-navigation` are wrapped in a 3-attempt retry loop (`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s) for startup and command-time repair.
+Manual repair scripts still use bounded retry (`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s), but normal app/server startup does not call them.
 
 ```powershell
 npm run dogzilla:start-navigation
 ```
 
-App startup and command-time waypoint repair start map-pose localization before Nav2. `lib/dogzilla-waypoint-navigation-launcher.mjs` and `lib/robot-sidecar-client.mjs` use `start-map-pose` first because Nav2 launch needs live Cartographer map pose.
+Normal app startup and command-time waypoint dispatch do not start map-pose or Nav2. `lib/robot-sidecar-client.mjs` reports readiness blockers when the Pi-owned stack is down. Use the manual scripts below only for explicit operator repair.
 
 `scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar, reads saved origin, and runs `docker exec robodoge-map-pose` to publish initial pose. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge`.
 

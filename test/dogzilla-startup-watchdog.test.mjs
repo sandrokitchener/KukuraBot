@@ -15,32 +15,7 @@ test('shouldRunDogzillaStartupWatchdog follows direct DOGZILLA target and opt-ou
   }), false)
 })
 
-test('runDogzillaStartupWatchdog repairs support services before direct bridge and Nav2', async () => {
-  const calls = []
-  const result = await runDogzillaStartupWatchdog({
-    env: { APP_DOGZILLA_NAV_OWNER: 'ssh' },
-    logger: quietLogger(),
-    loadRobotRuntimeConfigImpl: async () => directRuntimeConfig(),
-    loadRobotRos2ConfigImpl: async () => directRos2Config(),
-    forceDogzillaRequiredServicesOnStartupImpl: async () => {
-      calls.push('required-services')
-      return { status: 'ok' }
-    },
-    forceDogzillaDirectBridgeOnStartupImpl: async () => {
-      calls.push('direct-bridge')
-      return { status: 'ok' }
-    },
-    forceDogzillaWaypointNavigationOnStartupImpl: async () => {
-      calls.push('waypoint-navigation')
-      return { status: 'ok' }
-    },
-  })
-
-  assert.equal(result.status, 'ok')
-  assert.deepEqual(calls, ['required-services', 'direct-bridge', 'waypoint-navigation'])
-})
-
-test('runDogzillaStartupWatchdog uses bridge nav owner by default', async () => {
+test('runDogzillaStartupWatchdog checks support services and direct bridge only', async () => {
   const calls = []
   const result = await runDogzillaStartupWatchdog({
     logger: quietLogger(),
@@ -54,47 +29,21 @@ test('runDogzillaStartupWatchdog uses bridge nav owner by default', async () => 
       calls.push('direct-bridge')
       return { status: 'ok' }
     },
-    forceDogzillaWaypointNavigationOnStartupImpl: async () => {
-      calls.push('ssh-waypoint-navigation')
-      return { status: 'ok' }
-    },
-    forceDogzillaNavModeViaBridgeImpl: async () => {
-      calls.push('bridge-nav-mode')
-      return { status: 'ok' }
-    },
   })
 
   assert.equal(result.status, 'ok')
-  assert.deepEqual(calls, ['required-services', 'direct-bridge', 'bridge-nav-mode'])
+  assert.equal(result.nav2Ownership, 'pi-owned')
+  assert.deepEqual(calls, ['required-services', 'direct-bridge'])
 })
 
-test('shouldBlockDogzillaAppLaunchForNavigation blocks failed Nav2 readiness by default', () => {
+test('shouldBlockDogzillaAppLaunchForNavigation never blocks Pi-owned Nav2 startup', () => {
   assert.equal(shouldBlockDogzillaAppLaunchForNavigation({
     status: 'degraded',
     waypointNavigation: {
       enabled: true,
       status: 'error',
-      error: '/odom publishes samples, but odom->base_link/base_footprint TF is unavailable.',
-    },
-  }, {}), true)
-
-  assert.equal(shouldBlockDogzillaAppLaunchForNavigation({
-    status: 'ok',
-    waypointNavigation: {
-      enabled: true,
-      status: 'ok',
     },
   }, {}), false)
-
-  assert.equal(shouldBlockDogzillaAppLaunchForNavigation({
-    status: 'degraded',
-    waypointNavigation: {
-      enabled: true,
-      status: 'error',
-    },
-  }, {
-    APP_DOGZILLA_STARTUP_REQUIRE_NAV: '0',
-  }), false)
 })
 
 function directRuntimeConfig() {

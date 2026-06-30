@@ -4,7 +4,6 @@ import argparse
 import json
 import math
 import os
-import shlex
 import subprocess
 import sys
 import threading
@@ -23,22 +22,13 @@ _NAV_MODE_LOCK = threading.Lock()
 # localize: one Cartographer localization process only.
 # navigate: one Cartographer + Nav2 + scan filter + gait adapter.
 # sleep: stop map-pose/Nav2/rosbridge-heavy work.
-_NAV_MODE: str = os.environ.get("DOGZILLA_DEFAULT_NAV_MODE", "idle")
+_NAV_MODE: str = os.environ.get("DOGZILLA_DEFAULT_NAV_MODE", "navigate")
 _NAV_MODE_HISTORY: deque[dict[str, Any]] = deque(maxlen=20)
 _NAV_MODE_TRANSITIONING = False
 _NAV_MODE_AUTO_DEMOTE_TIMER: threading.Timer | None = None
 _NAV_MODE_IDLE_DELAY_SEC = float(os.environ.get("DOGZILLA_NAV_MODE_IDLE_DELAY_SEC", "300.0"))
 CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
-MAP_POSE_CONTAINER = os.environ.get("DOGZILLA_MAP_POSE_CONTAINER", "robodoge-map-pose")
 REMOTE_ROOT = os.environ.get("REMOTE_ROOT", "/home/pi/robodoge")
-MAP_ORIGIN_FILE = Path(os.environ.get(
-    "DOGZILLA_MAP_ORIGIN_FILE",
-    f"{REMOTE_ROOT}/output/app-cache/dogzilla-map-origin.json",
-))
-YOLO_SERVICE = "robodoge-yolo-vision.service"
-NAV2_LIFECYCLE_NODE = "lifecycle_manager_navigation"
-CARTOGRAPHER_NODE = "cartographer_node"
-SCAN_FILTER_PROCESSES = ["scan_filter_supervisor", "scan_self_filter"]
 
 
 def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
@@ -49,46 +39,6 @@ def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
         return -1, f"timed out after {timeout}s: {e.output or ''} {e.stderr or ''}"
     except OSError as e:
         return -1, str(e)
-
-
-def _docker_env_args(env: dict[str, Any]) -> str:
-    parts: list[str] = []
-    for key, value in env.items():
-        if value is None:
-            continue
-        parts.extend(["-e", f"{key}={value}"])
-    return " ".join(shlex.quote(part) for part in parts)
-
-
-def _load_saved_initial_pose_env() -> dict[str, str]:
-    env = {
-        "DOGZILLA_DOCKER_EXEC": "1",
-        "REMOTE_ROOT": REMOTE_ROOT,
-        "POSE_PORT": os.environ.get("POSE_PORT", "9090"),
-        "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "16"),
-        "DOGZILLA_MAP_POSE_MODE": "localization",
-    }
-    try:
-        origin = json.loads(MAP_ORIGIN_FILE.read_text(encoding="utf-8"))
-        x = float(origin["x"])
-        y = float(origin["y"])
-        yaw = float(origin["yaw"])
-        if not all(math.isfinite(value) for value in (x, y, yaw)):
-            raise ValueError("saved map origin contains non-finite pose")
-        env.update({
-            "DOGZILLA_FORCE_RESTART": "1",
-            "DOGZILLA_INITIAL_POSE_X": str(x),
-            "DOGZILLA_INITIAL_POSE_Y": str(y),
-            "DOGZILLA_INITIAL_POSE_YAW": str(yaw),
-        })
-    except Exception as exc:
-        env["DOGZILLA_INITIAL_POSE_SKIP"] = "1"
-        env["DOGZILLA_INITIAL_POSE_ERROR"] = str(exc)[:120]
-    return env
-
-
-def _valid_nav_mode(mode: str) -> bool:
-    return mode in ("idle", "localize", "navigate", "sleep")
 
 
 def get_nav_mode() -> str:
@@ -153,8 +103,6 @@ def set_nav_mode(mode: str) -> dict[str, Any]:
 
         if result.get("ok"):
             _set_nav_mode(mode, result)
-            # After any explicit mode set, schedule demotion to idle after inactivity.
-            _schedule_nav_mode_demote(target_mode="idle")
         return {**result, "mode": get_nav_mode(), "previousMode": current, "changed": result.get("ok")}
     finally:
         with _NAV_MODE_LOCK:
@@ -162,117 +110,41 @@ def set_nav_mode(mode: str) -> dict[str, Any]:
 
 
 def _enter_sleep_mode() -> dict[str, Any]:
-    stopped: list[dict[str, Any]] = []
-
-    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f imu_publisher")
-    stopped.append({"service": "imu_publisher", "stopped": code == 0 or code == 1, "output": out.strip()})
-
-    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {CARTOGRAPHER_NODE}")
-    stopped.append({"service": "cartographer", "stopped": code == 0 or code == 1, "output": out.strip()})
-
-    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {NAV2_LIFECYCLE_NODE}")
-    stopped.append({"service": "nav2", "stopped": code == 0 or code == 1, "output": out.strip()})
-
-    for proc in SCAN_FILTER_PROCESSES:
-        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {proc}")
-        stopped.append({"service": proc, "stopped": code == 0 or code == 1, "output": out.strip()})
-
-    code, out = _run(f"sudo systemctl stop {YOLO_SERVICE}")
-    stopped.append({"service": "yolo-vision", "stopped": code == 0, "output": out.strip()})
-
     _cancel_nav_mode_demote()
-    return {"ok": True, "stopped": stopped, "stoppedCount": len([s for s in stopped if s["stopped"]])}
+    return {
+        "ok": True,
+        "note": "logical sleep mode only; Pi-owned Nav2 services are left running",
+        "piOwnedNav2": True,
+    }
 
 
 def _enter_idle_mode() -> dict[str, Any]:
-    # Keep direct bridge, audio, camera optional. Stop heavy nav work.
-    result = _enter_sleep_mode()
-    return {"ok": True, **result, "note": "idle keeps bridge/audio/camera; nav stack stopped"}
+    return {
+        "ok": True,
+        "note": "logical idle mode only; Pi-owned Nav2 services are left running",
+        "piOwnedNav2": True,
+    }
 
 
 def _enter_localize_mode() -> dict[str, Any]:
-    # Ensure nav2 is not running, then start cartographer/map-pose only.
-    nav2_stop = _stop_nav2()
-    scan_stop = _stop_scan_filter()
-    carto_start = _start_map_pose()
-    yolo_start = _start_yolo()
     return {
         "ok": True,
-        "started": [carto_start, yolo_start],
-        "stopped": [nav2_stop, scan_stop],
+        "note": "logical localize mode only; Pi-owned Nav2 services are left running",
+        "piOwnedNav2": True,
     }
 
 
 def _enter_navigate_mode() -> dict[str, Any]:
-    # Full navigation stack: cartographer + Nav2 + scan filter.
-    carto_start = _start_map_pose()
-    nav2_start = _start_nav2()
-    yolo_start = _start_yolo()
-    started = [carto_start, nav2_start, yolo_start]
-    required_failures = [
-        service
-        for service in (carto_start, nav2_start)
-        if not service.get("started")
-    ]
-    result = {"ok": not required_failures, "started": started}
-    if required_failures:
-        result["error"] = "navigation_stack_start_failed"
-        result["failed"] = required_failures
-    return result
-
-
-def _start_map_pose() -> dict[str, Any]:
-    env_args = _docker_env_args(_load_saved_initial_pose_env())
-    script_path = f"{REMOTE_ROOT}/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
-    primary_cmd = f"docker exec {env_args} {shlex.quote(MAP_POSE_CONTAINER)} bash {shlex.quote(script_path)}"
-    code, out = _run(primary_cmd, timeout=180.0)
-    container = MAP_POSE_CONTAINER
-    if code != 0 and ("No such container" in out or "is not running" in out):
-        fallback_cmd = f"docker exec {env_args} {shlex.quote(CONTAINER_NAME)} bash {shlex.quote(script_path)}"
-        code, out = _run(fallback_cmd, timeout=180.0)
-        container = CONTAINER_NAME
     return {
-        "service": "cartographer",
-        "started": code == 0,
-        "container": container,
-        "originFile": str(MAP_ORIGIN_FILE),
-        "output": out.strip()[:200],
+        "ok": True,
+        "note": "using Pi-owned Nav2 services; bridge did not start or restart navigation",
+        "piOwnedNav2": True,
     }
 
 
-def _start_nav2() -> dict[str, Any]:
-    code, out = _run(
-        f"docker exec {CONTAINER_NAME} bash /home/pi/robodoge/sidecars/dogzilla_navigation/start-navigation-in-container.sh",
-        timeout=180.0,
-    )
-    return {"service": "nav2", "started": code == 0, "output": out.strip()[:200]}
-
-
-def _start_yolo() -> dict[str, Any]:
-    code, out = _run(f"sudo systemctl start {YOLO_SERVICE}")
-    return {"service": "yolo-vision", "started": code == 0, "output": out.strip()}
-
-
-def _stop_nav2() -> dict[str, Any]:
-    code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {NAV2_LIFECYCLE_NODE}")
-    return {"service": "nav2", "stopped": code == 0 or code == 1, "output": out.strip()}
-
-
-def _stop_scan_filter() -> dict[str, Any]:
-    stopped: list[dict[str, Any]] = []
-    for proc in SCAN_FILTER_PROCESSES:
-        code, out = _run(f"docker exec {CONTAINER_NAME} pkill -f {proc}")
-        stopped.append({"service": proc, "stopped": code == 0 or code == 1, "output": out.strip()})
-    return {"service": "scan-filter", "stopped": all(s["stopped"] for s in stopped), "details": stopped}
-
-
 def _schedule_nav_mode_demote(target_mode: str = "idle") -> None:
-    global _NAV_MODE_AUTO_DEMOTE_TIMER
-    _cancel_nav_mode_demote()
-    if _NAV_MODE_IDLE_DELAY_SEC > 0:
-        _NAV_MODE_AUTO_DEMOTE_TIMER = threading.Timer(_NAV_MODE_IDLE_DELAY_SEC, _nav_mode_demote_callback, args=(target_mode,))
-        _NAV_MODE_AUTO_DEMOTE_TIMER.daemon = True
-        _NAV_MODE_AUTO_DEMOTE_TIMER.start()
+    # Pi-owned Nav2 stays up until an explicit service-level operator action.
+    return None
 
 
 def _cancel_nav_mode_demote() -> None:
@@ -283,8 +155,7 @@ def _cancel_nav_mode_demote() -> None:
 
 
 def _nav_mode_demote_callback(target_mode: str) -> None:
-    result = set_nav_mode(target_mode)
-    print(f"[auto-nav-mode] {json.dumps(result)}")
+    return None
 
 
 # Legacy sleep/wake helpers now expressed as mode transitions.
