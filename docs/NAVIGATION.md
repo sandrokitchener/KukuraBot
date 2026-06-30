@@ -111,6 +111,8 @@ The repo odom helper first uses `odom->base_link`; if absent, it anchors the fir
 
 The scan filter and odom helpers are supervised because child `rclpy` processes can exit or stop publishing while the process still exists. ROS2 CLI readiness calls are bounded because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
 
+Nav2 startup must not fail solely on a short `ros2 topic info /scan_nav2` miss. The scan filter gate waits up to 45 seconds and accepts either publisher discovery or a one-message `/scan_nav2` sample before launching Nav2; otherwise DDS discovery lag can leave only partial helpers running and no lifecycle nodes.
+
 ## Direct bridge hardware ownership and stop semantics
 
 The direct bridge must own `/dev/ttyAMA0` exclusively during live navigation. Yahboom's `app_dogzilla.py` and `oled_dogzilla.py` (including the `yahboom_oled.service` unit) must be stopped before the bridge starts. `scripts/stop-dogzilla-vendor-app-ssh.ps1` stops the service, kills both processes, and fails if either still holds `/dev/ttyAMA0` open. `scripts/install-dogzilla-boot-services-ssh.ps1` adds `Conflicts=yahboom_oled.service` to `robodoge-direct-bridge.service`, runs an equivalent privileged `ExecStartPre=+` vendor-stop flow, and disables `yahboom_oled.service` after enable.
@@ -170,10 +172,11 @@ Control modes via the bridge:
 - `locomotion.goto` automatically promotes from `idle`/`localize` to `navigate` mode, waits for bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), then sends the goal synchronously.
 - `locomotion.goto` from `sleep` is rejected; call `POST /mode navigate` first.
 - After `DOGZILLA_NAV_MODE_IDLE_DELAY_SEC` (default 300 s) of inactivity the bridge demotes toward `idle`.
-- Default at startup is `idle`. The bridge does not start the Nav2 stack until a goto or explicit `/mode navigate` is issued.
+- Default at startup is `idle`. Bridge does not start Nav2 stack until `locomotion.goto` or explicit `/mode navigate` is issued.
 
-The app defaults to bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and the `server.mjs` Nav2 repair watchdog call `POST /mode navigate` on the bridge instead of independently launching SSH scripts. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center "Restart Nav" remains an explicit SSH repair path.
+App defaults bridge-owned navigation (`APP_DOGZILLA_NAV_OWNER=bridge`): `run.mjs` startup and `server.mjs` Nav2 repair watchdog call `POST /mode navigate` on the bridge instead of independently launching SSH scripts. Set `APP_DOGZILLA_NAV_OWNER=ssh` to fall back to the legacy SSH `start-map-pose` + `start-navigation` path. UI Connection Center "Restart Nav" remains an explicit SSH repair path.
 
+Bridge-owned map-pose startup runs the map-pose container in one-shot Docker exec mode and seeds Cartographer localization from `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` when present. Deploy that origin file with Pi-side startup changes; otherwise Nav2 topics can be alive while localization starts from a stale or wrong physical pose.
 ## Velocity smoother bypass
 
 If Nav2 accepts a goal but `/cmd_vel` stays silent (dog does not move), the velocity smoother may be stalling. Bypass it by pointing the gait adapter at the raw controller output:
@@ -229,7 +232,7 @@ In UI Mini Map > Navigation Setup:
 
 For a new map, expand "Map a new space": New Map -> drive -> Save Map. Save Map restarts localization against the new map.
 
-`Localize on Map` seeds Cartographer localization from the saved charger origin (`output/app-cache/dogzilla-map-origin.json`), defaulting to `(0, 0, 0)` when no origin exists. It is local refinement, not global relocalization.
+`Localize on Map` seeds Cartographer localization from the saved charger origin (`output/app-cache/dogzilla-map-origin.json` locally, deployed to `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` on the Pi), defaulting to no initial pose when no origin exists. It is local refinement, not global relocalization.
 
 ## Waypoint recapture
 

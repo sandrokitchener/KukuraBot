@@ -113,6 +113,7 @@ For COMPLEX tasks:
 - Active DOGZILLA map identity is authoritative for dispatch readiness. If saved origin or waypoint fingerprints are missing or differ from the active map fingerprint, treat origin/waypoints as stale for navigation while preserving `config/robot-waypoints.json`.
 - If a DOGZILLA waypoint command reports `Nav2 lifecycle nodes are not active: controller_server, planner_server, bt_navigator, behavior_server`, do not assume Nav2 is stopped. First read `docs/NAVIGATION.md` and `docs/KNOWN_ISSUES.md`, then compare live `/healthz`, command log, and lifecycle services. The direct bridge uses longer lifecycle/status timeouts intentionally because Pi lifecycle services can answer slowly under load.
 - DOGZILLA SSH startup scripts are launched from Windows PowerShell. Do not send PowerShell here-string heredocs through SSH for Python/Bash snippets; CRLF can break remote delimiters. Prefer `python3 -c`, checked-in scripts, or one-line shell loops, and make background stop loops skip `$$`/`$PPID` so they do not kill their own SSH launcher.
+- When a change affects Pi-side runtime code, sidecars, startup scripts, ROS/Nav2 behavior, or systemd services, local edits/tests are not enough. After the user approves the change as good, deploy the changed files to the Pi, restart only the affected service/container, and verify the live Pi state before calling the task complete.
 - For app/operator UI work, prefer existing panels and services before adding new surfaces.
 - Use repo-local evidence before generic ROS, GitHub, or web explanations.
 

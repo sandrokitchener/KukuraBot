@@ -1032,6 +1032,59 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         # Restore navigate to avoid affecting other tests.
         dogzilla_lib_bridge.set_nav_mode("navigate")
 
+    def test_enter_navigate_mode_fails_when_required_nav2_start_fails(self):
+        old_start_map_pose = dogzilla_lib_bridge._start_map_pose
+        old_start_nav2 = dogzilla_lib_bridge._start_nav2
+        old_start_yolo = dogzilla_lib_bridge._start_yolo
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_start_map_pose", old_start_map_pose))
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_start_nav2", old_start_nav2))
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_start_yolo", old_start_yolo))
+
+        dogzilla_lib_bridge._start_map_pose = lambda: {"service": "cartographer", "started": True}
+        dogzilla_lib_bridge._start_nav2 = lambda: {"service": "nav2", "started": False, "output": "timeout"}
+        dogzilla_lib_bridge._start_yolo = lambda: {"service": "yolo-vision", "started": False}
+
+        result = dogzilla_lib_bridge._enter_navigate_mode()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "navigation_stack_start_failed")
+        self.assertEqual(result["failed"], [{"service": "nav2", "started": False, "output": "timeout"}])
+
+    def test_start_map_pose_allows_full_startup_lock_timeout(self):
+        calls = []
+        old_run = dogzilla_lib_bridge._run
+        old_origin_file = dogzilla_lib_bridge.MAP_ORIGIN_FILE
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_run", old_run))
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "MAP_ORIGIN_FILE", old_origin_file))
+        origin_file = Path(self.map_tmp.name) / "dogzilla-map-origin.json"
+        origin_file.write_text(json.dumps({"x": -0.82237, "y": -0.45429, "yaw": 3.02537}), encoding="utf-8")
+        dogzilla_lib_bridge.MAP_ORIGIN_FILE = origin_file
+
+        def fake_run(command, timeout=None):
+            calls.append({"command": command, "timeout": timeout})
+            return 0, "started"
+
+        dogzilla_lib_bridge._run = fake_run
+
+        result = dogzilla_lib_bridge._start_map_pose()
+
+        self.assertTrue(result["started"])
+        self.assertEqual(calls[0]["timeout"], 180.0)
+        self.assertIn("robodoge-map-pose", calls[0]["command"])
+        self.assertIn("DOGZILLA_DOCKER_EXEC=1", calls[0]["command"])
+        self.assertIn("DOGZILLA_FORCE_RESTART=1", calls[0]["command"])
+        self.assertIn("DOGZILLA_INITIAL_POSE_X=-0.82237", calls[0]["command"])
+
+    def test_auto_sleep_demotes_to_idle_not_sleep(self):
+        calls = []
+        old_schedule = dogzilla_lib_bridge._schedule_nav_mode_demote
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_schedule_nav_mode_demote", old_schedule))
+        dogzilla_lib_bridge._schedule_nav_mode_demote = lambda target_mode="idle": calls.append(target_mode)
+
+        dogzilla_lib_bridge._schedule_auto_sleep(restart=True)
+
+        self.assertEqual(calls, ["idle"])
+
     def test_healthz_lite_includes_compact_feedback(self):
         # Ensure the expected compact-feedback keys are present in the handler.
         handler = dogzilla_lib_bridge.Handler

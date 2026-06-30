@@ -463,17 +463,21 @@ if [ "$DOGZILLA_NAV2_SCAN_FILTER_ENABLED" = "1" ]; then
       > "$REMOTE_ROOT/logs/scan-filter-supervisor.log" 2>&1 &
   )
 
-    scan_filter_ready=0
-    for _ in $(seq 1 30); do
-      if timeout 7 ros2 topic info "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" 2>/dev/null | grep -q "Publisher count: [1-9]"; then
-        scan_filter_ready=1
-        break
-      fi
-      sleep 0.5
-    done
+  scan_filter_ready=0
+  for _ in $(seq 1 90); do
+    if timeout --kill-after=2 7 ros2 topic info "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" 2>/dev/null | grep -q "Publisher count: [1-9]"; then
+      scan_filter_ready=1
+      break
+    fi
+    if timeout --kill-after=2 4 ros2 topic echo --once "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" >/dev/null 2>&1; then
+      scan_filter_ready=1
+      break
+    fi
+    sleep 0.5
+  done
 
-    if [ "$scan_filter_ready" != "1" ]; then
-      echo "DOGZILLA scan filter did not publish on $DOGZILLA_NAV2_SCAN_FILTER_TOPIC within 15s startup window." >&2
+  if [ "$scan_filter_ready" != "1" ]; then
+    echo "DOGZILLA scan filter did not publish on $DOGZILLA_NAV2_SCAN_FILTER_TOPIC within 45s startup window." >&2
       tail -40 "$REMOTE_ROOT/logs/scan-filter-supervisor.log" >&2 2>/dev/null || true
       tail -40 "$REMOTE_ROOT/logs/scan-self-filter.log" >&2 2>/dev/null || true
       if [ "$DOGZILLA_NAV2_SCAN_FILTER_REQUIRED" = "1" ]; then

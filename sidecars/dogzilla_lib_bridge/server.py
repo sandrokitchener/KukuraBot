@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -28,6 +29,12 @@ _NAV_MODE_TRANSITIONING = False
 _NAV_MODE_AUTO_DEMOTE_TIMER: threading.Timer | None = None
 _NAV_MODE_IDLE_DELAY_SEC = float(os.environ.get("DOGZILLA_NAV_MODE_IDLE_DELAY_SEC", "300.0"))
 CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
+MAP_POSE_CONTAINER = os.environ.get("DOGZILLA_MAP_POSE_CONTAINER", "robodoge-map-pose")
+REMOTE_ROOT = os.environ.get("REMOTE_ROOT", "/home/pi/robodoge")
+MAP_ORIGIN_FILE = Path(os.environ.get(
+    "DOGZILLA_MAP_ORIGIN_FILE",
+    f"{REMOTE_ROOT}/output/app-cache/dogzilla-map-origin.json",
+))
 YOLO_SERVICE = "robodoge-yolo-vision.service"
 NAV2_LIFECYCLE_NODE = "lifecycle_manager_navigation"
 CARTOGRAPHER_NODE = "cartographer_node"
@@ -42,6 +49,42 @@ def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
         return -1, f"timed out after {timeout}s: {e.output or ''} {e.stderr or ''}"
     except OSError as e:
         return -1, str(e)
+
+
+def _docker_env_args(env: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, value in env.items():
+        if value is None:
+            continue
+        parts.extend(["-e", f"{key}={value}"])
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _load_saved_initial_pose_env() -> dict[str, str]:
+    env = {
+        "DOGZILLA_DOCKER_EXEC": "1",
+        "REMOTE_ROOT": REMOTE_ROOT,
+        "POSE_PORT": os.environ.get("POSE_PORT", "9090"),
+        "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "16"),
+        "DOGZILLA_MAP_POSE_MODE": "localization",
+    }
+    try:
+        origin = json.loads(MAP_ORIGIN_FILE.read_text(encoding="utf-8"))
+        x = float(origin["x"])
+        y = float(origin["y"])
+        yaw = float(origin["yaw"])
+        if not all(math.isfinite(value) for value in (x, y, yaw)):
+            raise ValueError("saved map origin contains non-finite pose")
+        env.update({
+            "DOGZILLA_FORCE_RESTART": "1",
+            "DOGZILLA_INITIAL_POSE_X": str(x),
+            "DOGZILLA_INITIAL_POSE_Y": str(y),
+            "DOGZILLA_INITIAL_POSE_YAW": str(yaw),
+        })
+    except Exception as exc:
+        env["DOGZILLA_INITIAL_POSE_SKIP"] = "1"
+        env["DOGZILLA_INITIAL_POSE_ERROR"] = str(exc)[:120]
+    return env
 
 
 def _valid_nav_mode(mode: str) -> bool:
@@ -164,18 +207,36 @@ def _enter_navigate_mode() -> dict[str, Any]:
     carto_start = _start_map_pose()
     nav2_start = _start_nav2()
     yolo_start = _start_yolo()
-    return {
-        "ok": True,
-        "started": [carto_start, nav2_start, yolo_start],
-    }
+    started = [carto_start, nav2_start, yolo_start]
+    required_failures = [
+        service
+        for service in (carto_start, nav2_start)
+        if not service.get("started")
+    ]
+    result = {"ok": not required_failures, "started": started}
+    if required_failures:
+        result["error"] = "navigation_stack_start_failed"
+        result["failed"] = required_failures
+    return result
 
 
 def _start_map_pose() -> dict[str, Any]:
-    code, out = _run(
-        f"docker exec {CONTAINER_NAME} bash /home/pi/robodoge/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh",
-        timeout=30.0,
-    )
-    return {"service": "cartographer", "started": code == 0, "output": out.strip()[:200]}
+    env_args = _docker_env_args(_load_saved_initial_pose_env())
+    script_path = f"{REMOTE_ROOT}/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
+    primary_cmd = f"docker exec {env_args} {shlex.quote(MAP_POSE_CONTAINER)} bash {shlex.quote(script_path)}"
+    code, out = _run(primary_cmd, timeout=180.0)
+    container = MAP_POSE_CONTAINER
+    if code != 0 and ("No such container" in out or "is not running" in out):
+        fallback_cmd = f"docker exec {env_args} {shlex.quote(CONTAINER_NAME)} bash {shlex.quote(script_path)}"
+        code, out = _run(fallback_cmd, timeout=180.0)
+        container = CONTAINER_NAME
+    return {
+        "service": "cartographer",
+        "started": code == 0,
+        "container": container,
+        "originFile": str(MAP_ORIGIN_FILE),
+        "output": out.strip()[:200],
+    }
 
 
 def _start_nav2() -> dict[str, Any]:
@@ -240,7 +301,7 @@ def sleep_status() -> dict[str, Any]:
 
 
 def _schedule_auto_sleep(restart: bool = False) -> None:
-    _schedule_nav_mode_demote(target_mode="sleep" if get_nav_mode() != "idle" else "idle")
+    _schedule_nav_mode_demote(target_mode="idle")
 
 
 def _cancel_auto_sleep() -> None:
