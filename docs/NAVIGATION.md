@@ -157,39 +157,33 @@ The motion monitor uses lightweight cached state only — `runtime.nav2_gait_ada
 
 `/healthz-lite` exposes: `navMode`, `loadAverage`, `gaitBlocked`, `gaitBlockedReason`, `nav2Ready`, `waypointReady`, `nav2Backend`, `canSendGoal`. Use `/healthz-lite` for frequent UI polls; full `/healthz` is for diagnostics or failures only.
 
-## Pi load-shed modes
+## Navigation Modes And SLAM Ownership
 
-The direct bridge owns a single navigation-mode state to keep Pi load low unless the robot is actively localizing or navigating:
+The direct bridge exposes navigation-mode state (`idle` / `localize` / `navigate` / `sleep`) for UI and command gating. These modes are logical state in the app/bridge layer; Pi boot/systemd owns the running Cartographer/Nav2/scan-filter processes.
 
-| Mode | Running | Stopped |
-| --- | --- | --- |
-| `idle` | direct bridge, audio, optional camera/YOLO | Cartographer, Nav2, scan filter |
-| `localize` | `idle` + Cartographer/map-pose | Nav2, scan filter |
-| `navigate` | `localize` + Nav2 + scan filter + gait adapter | — |
-| `sleep` | direct bridge only (audio/camera optional) | Cartographer, Nav2, scan filter, YOLO |
-
-Control modes via the bridge:
+Control modes via bridge:
 
 - `GET /mode` returns current mode transition history.
 - `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` updates bridge logical mode only. It must not start, stop, reinstall, recreate, or delete Nav2/map-pose services.
-- `locomotion.goto` talks to already-running Pi-owned Nav2, waits bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), sends goal synchronously.
+- `locomotion.goto` talks to already-running Pi-owned Nav2, waits bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), and sends goal synchronously.
 - If Nav2 is unavailable, app/server reports blockers. It does not auto-repair or auto-start navigation.
 - Default startup mode is `navigate`, matching the Pi boot contract: Nav2 should already be running before the app starts.
 
-Pi boot/systemd owns map-pose/Nav2 lifetime. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`. UI Connection Center Restart Nav and `npm run dogzilla:start-navigation` remain explicit manual repair tools.
+Pi boot/systemd owns normal map-pose/Nav2 lifetime. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`.
+
+SLAM is the explicit exception: the operator-owned New Map / Save Map workflow uses `start-map-pose-mapping` and `save-map-pose` to switch Cartographer into mapping mode, save the new map, then restart localization against that map. That flow is intentional and separate from normal app startup or waypoint dispatch.
 
 ## Velocity smoother bypass
 
-If Nav2 accepts a goal but `/cmd_vel` stays silent (dog does not move), the velocity smoother may be stalling. Bypass it by pointing the gait adapter at the raw controller output:
+If Nav2 accepts a goal but `/cmd_vel` stays silent (dog does not move), the velocity smoother may be stalling. Bypass it by pointing the gait adapter at raw controller output:
 
 ```bash
 export DOGZILLA_NAV2_GAIT_SMOOTHER_BYPASS=1
 ```
 
-This sets `DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC=/cmd_vel_nav` (raw controller output) instead of `/cmd_vel` (smoothed output). Only enable after confirming Nav2 accepts goals; tune the smoother after movement is restored.
+This sets `DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC=/cmd_vel_nav` (raw controller output) instead of `/cmd_vel` (smoothed output). Only enable this after confirming Nav2 accepts goals; tune the smoother after movement is restored.
 
-`/healthz-lite` includes compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, `gaitBlockedReason`, `nav2Ready`, `waypointReady`, `nav2Backend`, `canSendGoal`. Full `/healthz` is for diagnostics or failures only. The UI slows state/map polling when `navMode` is `idle` or `sleep`.
-
+`/healthz-lite` includes compact feedback: `navMode`, `loadAverage`, `gaitBlocked`, `gaitBlockedReason`, `nav2Ready`, `waypointReady`, `nav2Backend`, `canSendGoal`. Full `/healthz` is for diagnostics or failures only.
 ## Starting and deploying
 
 Manual repair scripts still use bounded retry (`lib/dogzilla-start-retry.mjs`, backoff 0/2s/5s), but normal app/server startup does not call them.
@@ -203,6 +197,8 @@ Normal app startup and command-time waypoint dispatch do not start map-pose or N
 `scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar, reads saved origin, and runs `docker exec robodoge-map-pose` to publish initial pose. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge`.
 
 Startup scripts are Windows PowerShell-driven SSH launchers. Avoid PowerShell heredocs sent through SSH, serialize apt work through startup locks, and use parent-safe `pgrep` stop loops for background services.
+
+Normal app startup and command-time waypoint dispatch do not start map-pose or Nav2. `lib/robot-sidecar-client.mjs` reports readiness blockers when the Pi-owned stack is down. Use the manual scripts below only for explicit operator repair or SLAM mapping workflows.
 
 ## Cartographer/Nav2 Docker image
 
@@ -265,3 +261,4 @@ Chat command handling must use the same resolved runtime and ROS2 config for pre
 - `docs/archive/dogzilla-real-map-pose.md`
 - `docs/archive/waypoint-mapping-guide.md`
 - `docs/archive/dogzilla-waypoint-navigation-evaluation.md`
+
