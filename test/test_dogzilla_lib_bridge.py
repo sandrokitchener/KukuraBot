@@ -696,6 +696,8 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertIn("dogzilla_direct_nav2_docker_client", calls[0]["script"])
         self.assertIn('\\"x\\": 1.25', calls[0]["script"])
         self.assertIn("probe_live_odom", calls[0]["script"])
+        self.assertIn("lifecycle_warning", calls[0]["script"])
+        self.assertIn("Lifecycle state probe timed out", calls[0]["script"])
 
     def test_docker_nav2_goal_timeout_returns_structured_error(self):
         previous = dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED

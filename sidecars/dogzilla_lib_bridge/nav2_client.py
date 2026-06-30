@@ -1690,15 +1690,32 @@ try:
         nodes=tuple(request["lifecycleNodes"]),
         timeout_sec=request["lifecycleWaitTimeout"],
     )
+    lifecycle_warning = None
     if lifecycle.get("active") is not True:
-        print(json.dumps({{
-            "executed": False,
-            "delivery": "nav2-prerequisite-unavailable",
-            "error": lifecycle.get("error") or "Nav2 lifecycle state was not proven active.",
-            "action": request["action"],
-            "lifecycle": lifecycle,
-        }}))
-        raise SystemExit(6)
+        lifecycle_nodes = lifecycle.get("nodes") if isinstance(lifecycle.get("nodes"), list) else []
+        lifecycle_only_timeouts = bool(lifecycle_nodes) and all(
+            isinstance(item, dict)
+            and (
+                item.get("active") is True
+                or "timed out" in str(item.get("error") or "").lower()
+            )
+            for item in lifecycle_nodes
+        )
+        if lifecycle_only_timeouts:
+            lifecycle_warning = lifecycle
+            lifecycle_warning["warning"] = (
+                "Lifecycle state probe timed out after NavigateToPose action "
+                "server and odom were available; attempting goal."
+            )
+        else:
+            print(json.dumps({{
+                "executed": False,
+                "delivery": "nav2-prerequisite-unavailable",
+                "error": lifecycle.get("error") or "Nav2 lifecycle state was not proven active.",
+                "action": request["action"],
+                "lifecycle": lifecycle,
+            }}))
+            raise SystemExit(6)
 
     scan = probe_scan_topic(
         node,
@@ -1755,6 +1772,7 @@ try:
         "x": float(request["x"]),
         "y": float(request["y"]),
         "yaw": yaw,
+        "lifecycleWarning": lifecycle_warning,
     }}))
 finally:
     node.destroy_node()
