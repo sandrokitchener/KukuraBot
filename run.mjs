@@ -312,7 +312,7 @@ async function ensureExistingAppDogzillaDirectBridge(appUrl, appConfig) {
       return
     }
   } catch {
-    // Fall through to startup repair.
+    // Existing app is up, but direct bridge is not ready yet.
   }
 
   console.log('App is already open, but DOGZILLA direct bridge is not ready. Starting it now.')

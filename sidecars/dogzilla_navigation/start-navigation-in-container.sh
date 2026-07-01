@@ -244,9 +244,8 @@ for costmap_name in ("local_costmap", "global_costmap"):
             if scan_filter_enabled:
                 for source_name in str(layer.get("observation_sources", "")).split():
                     source = layer.get(source_name)
-                    if isinstance(source, dict) and source.get("topic") == "/scan":
-                        source["topic"] = scan_topic
                     if isinstance(source, dict):
+                        source["topic"] = scan_topic
                         source["obstacle_min_range"] = obstacle_min_range
                         source["obstacle_max_range"] = obstacle_max_range
                         source["raytrace_min_range"] = obstacle_min_range
@@ -642,222 +641,26 @@ ensure_odom_tf() {
   exit 2
 }
 
-odom_publishers="$(odom_publisher_count)"
-if [ "$odom_publishers" -gt 1 ] && pgrep -f "[t]f_odom_publisher.py" >/dev/null 2>&1; then
-  echo "/odom has $odom_publishers publishers; restarting Robo-Doge TF odom helper to avoid duplicates." >&2
-  pkill -f "[t]f_odom_publisher.py" 2>/dev/null || true
-  sleep 2
-fi
-
-odom_publishers="$(odom_publisher_count)"
-if [ "$odom_publishers" -gt 0 ] && ! odom_has_live_sample; then
-  echo "/odom has $odom_publishers publisher(s), but no live Odometry sample arrived. Treating the publisher as stale." >&2
-  cat /tmp/robodoge-odom-sample.err >&2 2>/dev/null || true
-  if pgrep -f "[t]f_odom_publisher.py" >/dev/null 2>&1; then
-    echo "Repo-owned TF odom helper is running; waiting for discovery before restart." >&2
-    if wait_for_odom_sample 20 1; then
-      echo "Live /odom sample arrived; keeping the existing TF odom helper." >&2
-    else
-      echo "Repo-owned TF odom helper did not emit during startup probe; keeping it running and letting app readiness wait." >&2
-    fi
-  fi
-
-  if ! odom_has_live_sample && ! pgrep -f "[t]f_odom_publisher.py" >/dev/null 2>&1; then
-        tf_target="$(ensure_odom_tf)"
-        start_tf_odom_helper "$tf_target"
-    wait_for_odom_sample 20 1 || true
-  fi
-fi
-
-if test "$(topic_publisher_count /odom)" = "0"; then
-  echo "No /odom publisher is running. Checking for TF odom->base_link so Nav2 can receive TF-derived odometry." >&2
-  tf_target="$(ensure_odom_tf)"
-
-  start_tf_odom_helper "$tf_target"
-
-  wait_for_odom_sample 20 1 || true
-  if ! pgrep -f "[t]f_odom_publisher.py" >/dev/null 2>&1; then
-    echo "TF-derived /odom publisher exited. See $REMOTE_ROOT/logs/tf-odom-publisher.log" >&2
-    tail -80 "$REMOTE_ROOT/logs/tf-odom-publisher.log" >&2 || true
-    exit 2
-  fi
-
-  if test "$(topic_publisher_count /odom)" = "0"; then
-    echo "TF-derived /odom publisher is running, but /odom discovery is not visible yet. Continuing; app readiness will wait before sending waypoints." >&2
-  fi
-fi
-
 if ! odom_has_live_sample; then
-  if pgrep -f "[t]f_odom_publisher.py" >/dev/null 2>&1; then
-    echo "/odom is advertised, but no live Odometry sample arrived during startup. Continuing; app readiness will block waypoint dispatch until /odom is live." >&2
-  else
-    echo "/odom is advertised, but no live Odometry sample arrived. Nav2 waypoint startup is blocked because controller progress feedback would be unsafe." >&2
+  echo "No live /odom sample; starting Pi-owned TF-derived /odom helper before Nav2 launch." >&2
+  odom_base_frame="$(ensure_odom_tf)"
+  start_tf_odom_helper "$odom_base_frame"
+  if ! wait_for_odom_sample 20 1; then
+    echo "TF-derived /odom helper did not publish a live sample before Nav2 launch. App readiness will keep waypoint dispatch blocked until /odom is live." >&2
     cat /tmp/robodoge-odom-sample.err >&2 2>/dev/null || true
-    tail -80 "$REMOTE_ROOT/logs/tf-odom-publisher.log" >&2 2>/dev/null || true
-    exit 2
   fi
 fi
 
-if odom_has_live_sample; then
-  ensure_odom_tf >/dev/null
-else
-  cat /tmp/robodoge-odom-sample.err >&2 2>/dev/null || true
-  tail -80 "$REMOTE_ROOT/logs/tf-odom-publisher.log" >&2 2>/dev/null || true
-fi
-
-try_graceful_nav2_recovery() {
-  # Attempt per-node lifecycle recovery before doing a full kill/restart.
-  # Returns 0 if all nodes are active after recovery, 1 if full restart needed.
-  local nodes="controller_server planner_server bt_navigator behavior_server"
-  local all_active=true
-  local inactive_nodes=""
-
-  for node_name in $nodes; do
-    local state_label
-    state_label=$(timeout 3 ros2 service call "/${node_name}/get_state" lifecycle_msgs/srv/GetState 2>/dev/null \
-      | grep -oP "label: ['\"]?\K[^'\"]*") || true
-    if [ "$state_label" != "active" ] && [ "$state_label" != "Active" ]; then
-      all_active=false
-      inactive_nodes="$inactive_nodes $node_name"
-    fi
-  done
-
-  if [ "$all_active" = true ]; then
-    echo "All Nav2 lifecycle nodes already active; no recovery needed." >&2
-    return 0
-  fi
-
-  echo "Inactive Nav2 nodes detected:$inactive_nodes — attempting graceful lifecycle recovery." >&2
-
-  for node_name in $inactive_nodes; do
-    echo "  Deactivating $node_name..." >&2
-    timeout 3 ros2 service call "/${node_name}/change_state" lifecycle_msgs/srv/ChangeState \
-      "{transition: {id: 2}}" >/dev/null 2>&1 || true
-  done
-
-  # Wait for lifecycle manager to reactivate nodes
-  echo "  Waiting for lifecycle manager to reactivate nodes..." >&2
-  local recovered=true
-  for _ in $(seq 1 10); do
-    sleep 1
-    recovered=true
-    for node_name in $inactive_nodes; do
-      local state_label
-      state_label=$(timeout 3 ros2 service call "/${node_name}/get_state" lifecycle_msgs/srv/GetState 2>/dev/null \
-        | grep -oP "label: ['\"]?\K[^'\"]*") || true
-      if [ "$state_label" != "active" ] && [ "$state_label" != "Active" ]; then
-        recovered=false
-        break
-      fi
-    done
-    if [ "$recovered" = true ]; then
-      echo "  Graceful recovery succeeded: all nodes active." >&2
-      return 0
-    fi
-  done
-
-  echo "  Graceful recovery failed: some nodes still inactive after 10s." >&2
-  return 1
-}
-
-# First try graceful per-node recovery; only do full restart if that fails
-if timeout 8 ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$"; then
-  if try_graceful_nav2_recovery; then
-    echo "Nav2 recovered via graceful lifecycle restart." >&2
-  else
-    echo "Graceful recovery insufficient; performing full Nav2 restart." >&2
-    pkill -f "[r]obodoge_nav2_navigation_launch.py" 2>/dev/null || true
-    pkill -f "[l]ifecycle_manager_navigation" 2>/dev/null || true
-    pkill -f "[b]t_navigator" 2>/dev/null || true
-    pkill -f "[c]ontroller_server" 2>/dev/null || true
-    pkill -f "[s]moother_server" 2>/dev/null || true
-    pkill -f "[p]lanner_server" 2>/dev/null || true
-    pkill -f "[b]ehavior_server" 2>/dev/null || true
-    pkill -f "[w]aypoint_follower" 2>/dev/null || true
-    pkill -f "[v]elocity_smoother" 2>/dev/null || true
-    pkill -f "[m]ap_server" 2>/dev/null || true
-
-    (
-      exec 8>&- 2>/dev/null || true
-      nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
-        map:="$DOGZILLA_NAV2_MAP" \
-        params_file:="$DOGZILLA_NAV2_PARAMS" \
-        use_sim_time:=false \
-        autostart:=true \
-        use_respawn:=true \
-        > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
-    )
-
-    nav_ready=0
-    for _ in $(seq 1 120); do
-      if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$" \
-        && grep -q "Managed nodes are active" "$REMOTE_ROOT/logs/nav2-navigation.log" 2>/dev/null; then
-        nav_ready=1
-        break
-      fi
-      sleep 1
-    done
-
-    if [ "$nav_ready" != "1" ]; then
-      echo "Nav2 NavigateToPose did not become fully active after restart. Log tail:" >&2
-      tail -120 "$REMOTE_ROOT/logs/nav2-navigation.log" >&2 || true
-      exit 1
-    fi
-  fi
-else
-  pkill -f "[r]obodoge_nav2_navigation_launch.py" 2>/dev/null || true
-  pkill -f "[l]ifecycle_manager_navigation" 2>/dev/null || true
-  pkill -f "[b]t_navigator" 2>/dev/null || true
-  pkill -f "[c]ontroller_server" 2>/dev/null || true
-  pkill -f "[s]moother_server" 2>/dev/null || true
-  pkill -f "[p]lanner_server" 2>/dev/null || true
-  pkill -f "[b]ehavior_server" 2>/dev/null || true
-  pkill -f "[w]aypoint_follower" 2>/dev/null || true
-  pkill -f "[v]elocity_smoother" 2>/dev/null || true
-  pkill -f "[m]ap_server" 2>/dev/null || true
-
-  (
-    exec 8>&- 2>/dev/null || true
-    nohup ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
-      map:="$DOGZILLA_NAV2_MAP" \
-      params_file:="$DOGZILLA_NAV2_PARAMS" \
-      use_sim_time:=false \
-      autostart:=true \
-      use_respawn:=true \
-      > "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
-  )
-
-  nav_ready=0
-  for _ in $(seq 1 120); do
-    if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$" \
-      && grep -q "Managed nodes are active" "$REMOTE_ROOT/logs/nav2-navigation.log" 2>/dev/null; then
-      nav_ready=1
-      break
-    fi
-    sleep 1
-  done
-
-  if [ "$nav_ready" != "1" ]; then
-    echo "Nav2 NavigateToPose did not become fully active. Log tail:" >&2
-    tail -120 "$REMOTE_ROOT/logs/nav2-navigation.log" >&2 || true
-    exit 1
-  fi
-fi
-
-python3 - <<'PY'
-import json
-import subprocess
-
-def run(args):
-    try:
-        return subprocess.run(args, capture_output=True, text=True, check=False, timeout=5).stdout.strip()
-    except subprocess.TimeoutExpired:
-        return f"timed out: {' '.join(args)}"
-
-print(json.dumps({
-    "ok": True,
-    "actionList": run(["ros2", "action", "list", "-t"]).splitlines(),
-    "cmdVel": run(["ros2", "topic", "info", "/cmd_vel"]),
-    "map": run(["ros2", "topic", "info", "/map"]),
-}, sort_keys=True))
-PY
+echo "Starting Pi-owned Nav2 under systemd." >&2
+pkill -TERM -f "/opt/ros/humble/lib/nav2_" 2>/dev/null || true
+pkill -TERM -f "ros2 launch .*robodoge_nav2_navigation_launch.py" 2>/dev/null || true
+pkill -f "[r]obodoge_nav2_navigation_launch.py" 2>/dev/null || true
+sleep 2
+: > "$REMOTE_ROOT/logs/nav2-navigation.log"
+exec ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
+  map:="$DOGZILLA_NAV2_MAP" \
+  params_file:="$DOGZILLA_NAV2_PARAMS" \
+  use_sim_time:=false \
+  autostart:=true \
+  use_respawn:=true \
+  >> "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1

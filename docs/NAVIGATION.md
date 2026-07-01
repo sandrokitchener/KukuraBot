@@ -40,7 +40,6 @@ Key files:
 | `lib/dogzilla-map-frame.mjs` | `mapPoseToAppPose()` and `appPoseToMapPose()` |
 | `scripts/capture-dogzilla-map-pose.mjs` | Captures current pose into `config/robot-waypoints.json` |
 | `scripts/set-dogzilla-map-origin.mjs` | Saves current pose as map origin |
-| `lib/dogzilla-waypoint-navigation-launcher.mjs` | Manual waypoint-navigation repair helper; normal app/server startup does not call it |
 | `lib/robot-command-compiler.mjs` | Resolves waypoint pose and builds dispatch plan |
 | `lib/app-service.mjs` | Uses the same resolved runtime/ROS2 config for chat preview and robot dispatch |
 | `lib/dogzilla-navigation-readiness.mjs` | App-side readiness evaluation |

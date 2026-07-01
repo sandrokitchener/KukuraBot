@@ -49,7 +49,6 @@ import {
   ROBOT_STATE_STREAM_PATH,
 } from './lib/robot-state-stream.mjs'
 import { deriveNavigationStatus } from './lib/dogzilla-navigation-status.mjs'
-import { getDogzillaRepairState } from './lib/dogzilla-repair-state.mjs'
 import {
   deriveNav2StabilityFromHealth,
   getNav2Stability,
@@ -492,7 +491,6 @@ const bridgeHealth = cachedBridgeHealth
       bridgeRuntime,
       poseState,
       dogzillaWaypointReadiness,
-      repairState: getDogzillaRepairState(),
     }),
     nav2Stability: isNav2StabilityTrackerEnabled() ? getNav2Stability() : null,
   }

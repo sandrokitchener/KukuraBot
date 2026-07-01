@@ -98,9 +98,6 @@ export function deriveOperatorLastCommand(snapshot, lastOperatorCommand) {
   if (nav?.targetWaypoint) {
     return nav.targetWaypoint
   }
-  if (nav?.status === 'repairing') {
-    return 'repairing...'
-  }
   return '-'
 }
 

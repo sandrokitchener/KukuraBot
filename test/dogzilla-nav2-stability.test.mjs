@@ -5,8 +5,7 @@ import {
   deriveNav2StabilityFromHealth,
   getNav2Stability,
   recordNav2CommandFailure,
-  recordNav2RepairResult,
-  recordNav2RepairStart,
+  recordNav2CommandRetryResult,
   resetNav2Stability,
 } from '../lib/dogzilla-nav2-stability.mjs'
 import { nav2HealthBody } from '../test-support/robot-http-fixtures.mjs'
@@ -95,37 +94,25 @@ test('duplicate transition dedupe does not record a new event', () => {
   assert.equal(getNav2Stability().recentEvents.length, eventsAfterFirst)
 })
 
-test('repair start/result events record source, action, and bridge destination', () => {
-  const startEvent = recordNav2RepairStart({
+test('command retry events record source, action, and bridge destination', () => {
+  const successEvent = recordNav2CommandRetryResult(true, {
     source: 'command-dispatch',
-    repairAction: 'command-time-nav2-repair',
-    bridgeDestination: 'http://10.0.4.32:8893/commands',
-  })
-  assert.ok(startEvent)
-  assert.equal(startEvent.nextState, 'repairing')
-  assert.equal(startEvent.source, 'command-dispatch')
-  assert.equal(startEvent.repairAction, 'command-time-nav2-repair')
-  assert.equal(startEvent.bridgeDestination, 'http://10.0.4.32:8893/commands')
-
-  const successEvent = recordNav2RepairResult(true, {
-    source: 'command-dispatch',
-    repairAction: 'command-time-nav2-repair',
+    retryAction: 'command-retry',
     bridgeDestination: 'http://10.0.4.32:8893/commands',
   })
   assert.ok(successEvent)
   assert.equal(successEvent.nextState, 'ready')
   assert.equal(successEvent.source, 'command-dispatch')
-
+  assert.equal(successEvent.retryAction, 'command-retry')
   resetNav2Stability()
-  recordNav2RepairStart({ source: 'startup-monitor', repairAction: 'watchdog' })
-  const failureEvent = recordNav2RepairResult(false, {
-    source: 'startup-monitor',
-    repairAction: 'watchdog',
-    blocker: 'Nav2 did not become ready after repair attempt',
+  const failureEvent = recordNav2CommandRetryResult(false, {
+    source: 'command-dispatch',
+    retryAction: 'command-retry',
+    blocker: 'Nav2 NavigateToPose retry still unavailable',
   })
   assert.ok(failureEvent)
   assert.equal(failureEvent.nextState, 'blocked')
-  assert.match(failureEvent.blocker, /did not become ready/)
+  assert.match(failureEvent.blocker, /retry still unavailable/)
 })
 
 test('recordNav2CommandFailure logs the original blocker text from command dispatch', () => {
@@ -133,7 +120,7 @@ test('recordNav2CommandFailure logs the original blocker text from command dispa
     source: 'command-dispatch',
     blocker: 'Nav2 NavigateToPose action server unavailable after 2.0s',
     bridgeDestination: 'http://10.0.4.32:8893/commands',
-    repairAction: 'command-time-nav2-repair',
+    retryAction: 'command-retry',
   })
   assert.ok(event)
   assert.equal(event.nextState, 'blocked')
@@ -141,5 +128,5 @@ test('recordNav2CommandFailure logs the original blocker text from command dispa
   assert.match(event.blocker, /NavigateToPose action server unavailable/)
   assert.equal(event.readinessStep, 'action_server')
   assert.equal(event.bridgeDestination, 'http://10.0.4.32:8893/commands')
-  assert.equal(event.repairAction, 'command-time-nav2-repair')
+  assert.equal(event.retryAction, 'command-retry')
 })

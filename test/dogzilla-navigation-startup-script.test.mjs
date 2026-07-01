@@ -106,19 +106,16 @@ test('DOGZILLA Nav2 startup allows ROS discovery time for the gait adapter', asy
   assert.match(script, /sleep 0\.5/)
 })
 
-test('DOGZILLA Nav2 startup rejects stale odom publishers before launching Nav2', async () => {
+test('DOGZILLA Nav2 startup leaves odom readiness to app health gates', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
   assert.match(script, /odom_has_live_sample\(\)/)
   assert.match(script, /robodoge_odom_startup_probe/)
-assert.match(script, /create_subscription\(Odometry, "\/odom", on_message, 10\)/)
-  assert.match(script, /no live Odometry sample arrived/)
-  assert.match(script, /probe_odom_tf\(\)/)
-  assert.match(script, /grep -q "Translation:" \/tmp\/robodoge-odom-tf-probe\.txt/)
-  assert.doesNotMatch(script, /tf2_echo odom "\$base_frame" 2>&1 \| tee/)
-assert.match(script, /odom\/map->base_link\/base_footprint/)
-  assert.match(script, /Repo-owned TF odom helper is running; waiting for discovery before restart/)
-  assert.match(script, /letting app readiness wait/)
+  assert.match(script, /create_subscription\(Odometry, "\/odom", on_message, 10\)/)
+  assert.match(script, /No live \/odom sample; starting Pi-owned TF-derived \/odom helper before Nav2 launch\./)
+  assert.match(script, /start_tf_odom_helper "\$odom_base_frame"/)
+  assert.doesNotMatch(script, /Nav2 waypoint startup blocked because controller progress feedback would be unsafe/)
+  assert.doesNotMatch(script, /try_graceful_nav2_recovery\(\)/)
 })
 
 test('DOGZILLA Nav2 startup masks self-hit scan arc before costmaps', async () => {
@@ -128,42 +125,24 @@ test('DOGZILLA Nav2 startup masks self-hit scan arc before costmaps', async () =
   assert.match(script, /DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG="\$\{DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG:-120\}"/)
   assert.match(script, /DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG="\$\{DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG:-260\}"/)
   assert.match(script, /DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M="\$\{DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M:-0\.45\}"/)
+  assert.match(script, /scan_filter_supervisor\.py/)
+  assert.match(script, /--input-topic \/scan/)
+  assert.match(script, /--output-topic "\$DOGZILLA_NAV2_SCAN_FILTER_TOPIC"/)
   assert.match(script, /source\["topic"\] = scan_topic/)
-  assert.match(script, /source\["inf_is_valid"\] = True/)
-  assert.match(script, /scan_self_filter\.py/)
-  assert.match(script, /--mask-start-deg "\$DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG"/)
-  assert.match(script, /--mask-end-deg "\$DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG"/)
-  assert.match(script, /--mask-range-m "\$DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M"/)
+  assert.doesNotMatch(script, /source\.get\("topic"\) == "\/scan"/)
 })
 
-test('DOGZILLA Nav2 startup waits for managed lifecycle activation', async () => {
+test('DOGZILLA Nav2 startup is foreground systemd ownership, not repair loop', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
-assert.match(script, /pkill -f "\[s\]moother_server"/)
-assert.match(script, /timeout 8 ros2 action list/)
-assert.match(script, /grep -q "Managed nodes are active"/)
-assert.match(script, /did not become fully active/)
+  assert.match(script, /Starting Pi-owned Nav2 under systemd/)
+  assert.match(script, /exec ros2 launch "\$DOGZILLA_NAV2_LAUNCH"/)
+  assert.match(script, /autostart:=true/)
+  assert.match(script, /use_respawn:=true/)
+  assert.doesNotMatch(script, /ros2 lifecycle set/)
+  assert.doesNotMatch(script, /try_graceful_nav2_recovery/)
+  assert.doesNotMatch(script, /Managed nodes are active/)
 })
-
-test('DOGZILLA Nav2 startup bounds final ROS CLI summary probes', async () => {
-const script = await readFile(SCRIPT_PATH, 'utf-8')
-
-assert.match(script, /subprocess\.run\(args, capture_output=True, text=True, check=False, timeout=5\)/)
-assert.match(script, /except subprocess\.TimeoutExpired/)
-})
-
-test('DOGZILLA Nav2 startup repairs missing odom TF through map-pose localization', async () => {
-  const script = await readFile(SCRIPT_PATH, 'utf-8')
-
-  assert.match(script, /start_map_pose_localization\(\)/)
-  assert.match(script, /sidecars\/dogzilla_map_pose\/start-map-pose-in-container\.sh/)
-  assert.match(script, /Starting DOGZILLA Cartographer map-pose localization/)
-  assert.match(script, /ensure_odom_tf\(\)/)
-  assert.match(script, /wait_for_odom_tf 30 2/)
-  assert.match(script, /bash "\$map_pose_script" >&2/)
-  assert.match(script, /start_tf_odom_helper "\$tf_target"/)
-})
-
 test('DOGZILLA map-pose startup waits for fresh pose after Cartographer restart', async () => {
   const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
 
@@ -492,10 +471,11 @@ assert.match(script, /"dogzilla_navigation"/)
 assert.match(script, /After=robodoge-rosbridge\.service robodoge-map-pose\.service/)
 assert.match(script, /Wants=robodoge-rosbridge\.service robodoge-map-pose\.service/)
 assert.match(script, /PartOf=robodoge-rosbridge\.service robodoge-map-pose\.service/)
-assert.match(script, /Type=oneshot/)
-assert.match(script, /RemainAfterExit=yes/)
-assert.match(script, /docker exec robodoge-rosbridge bash -lc/)
-assert.match(script, /sidecars\/dogzilla_navigation\/start-navigation-in-container\.sh/)
+  assert.match(script, /Type=simple/)
+  assert.doesNotMatch(script, /RemainAfterExit=yes/)
+  assert.match(script, /docker exec robodoge-rosbridge bash -lc/)
+  assert.doesNotMatch(script, /docker exec -d robodoge-rosbridge/)
+  assert.match(script, /sidecars\/dogzilla_navigation\/start-navigation-in-container\.sh/)
 assert.match(script, /robodoge-navigation\.service/)
 assert.ok(enableIndex > serviceIndex, 'expected service enable after unit write')
 assert.ok(restartIndex > enableIndex, 'expected service restart after enable')

@@ -70,7 +70,6 @@ const NAV_STATUS_ICONS = {
   blocked: '\u26A0',
   ready: '\u25CF',
   idle: '\u25CB',
-  repairing: '\u2699',
   unknown: '',
 }
 
@@ -2688,7 +2687,7 @@ function applyWaypointButtonsToNavStatus(navStatus) {
     setWaypointButtonsEnabled(true, '')
     return
   }
-  if (navStatus.status === 'ready' || navStatus.status === 'idle' || navStatus.status === 'navigating' || navStatus.status === 'arrived' || navStatus.status === 'finding_waypoint' || navStatus.status === 'repairing') {
+  if (navStatus.status === 'ready' || navStatus.status === 'idle' || navStatus.status === 'navigating' || navStatus.status === 'arrived' || navStatus.status === 'finding_waypoint') {
     setWaypointButtonsEnabled(true, '')
     return
   }

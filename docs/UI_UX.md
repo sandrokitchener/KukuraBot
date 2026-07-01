@@ -21,7 +21,7 @@ This is not a visual redesign plan. The priority is operator confidence, state c
 - Critical navigation setup lives behind the collapsed `Mapping` panel, so the required flow is easy to miss.
 - Similar-looking actions have very different consequences: `Localize on Map`, `Mark Origin`, `New Map`, and `Save Map`.
 - Map identity and charger-origin actions can invalidate waypoints, but that consequence is not visible at the button site.
-- `Restart Nav` is now a repair control in the Navigation Setup panel, separated from the normal localize → origin → waypoints → check-ready flow.
+- `Restart Nav` is a manual operator control in the Navigation Setup panel; normal app startup and waypoint dispatch must not invoke it.
 - Dangerous maintenance actions are hidden in a disclosure, but once opened they are still one-click actions.
 - Emergency stop is too buried. It should be visible near robot operation controls, not only under Settings.
 - Runtime feedback and errors live away from the command/map workflow, so the user may not see why a command failed.
@@ -42,7 +42,7 @@ Add a compact status area visible from the main control screens:
 
 - Connection state
 - Current task: `IDLE`, `MOVING`, `SCANNING`, `PATROLLING`, `TALKING`, `THINKING`, `TRICK`, `REPAIRING`, or `ERROR`
-- Navigation phase: ready, finding waypoint, moving, stuck, blocked, repairing, unknown
+- Navigation phase: ready, finding waypoint, moving, stuck, blocked, unknown
 - Battery or power state when available
 - Last telemetry update age
 - Last command sent
@@ -94,14 +94,14 @@ Move Emergency Stop to a persistent robot-operation area. It should remain reach
 - map view
 - manual control
 - robot movement
-- connection/repair states
+- connection and manual recovery states
 - mobile chat/audio views
 
 ## Track 2: Nav2 Stability Evidence
 
 ### Problem
 
-The app already has startup self-heal, command-time repair, and readiness probes. The current weak point is not only whether the app says `ready` or `repairing`; it is knowing which part of the Nav2 chain is flapping.
+Nav2/map-pose ownership belongs to Pi boot services, not app startup or command dispatch. The app should show which part of the Nav2 chain is down or flapping, but normal UI/server paths must not self-heal, repair, restart, or reinstall Nav2.
 
 ### State Transition Capture
 
@@ -117,9 +117,8 @@ Track transitions like:
 - `ready -> scan_nav2_missing`
 - `ready -> map_pose_untrusted`
 - `ready -> waypoint_stale`
-- `blocked -> repairing`
-- `repairing -> ready`
-- `repairing -> failed`
+- `blocked -> ready`
+- `blocked -> degraded`
 
 Each event should include:
 
@@ -164,7 +163,6 @@ Valid states:
 
 - `ready`
 - `degraded`
-- `repairing`
 - `disconnected`
 - `blocked`
 - `unknown`
@@ -246,7 +244,7 @@ Validate:
 
 - UI state matches live readiness evidence.
 - `nav2-events.ndjson` records only transitions.
-- A successful repair shows the failed prerequisite and the recovery path.
+- Manual recovery controls show the failed prerequisite and the operator action path.
 - A waypoint command shows accepted/moving/blocked state in the main operator area.
 - Emergency Stop stays visible while the robot is moving.
 

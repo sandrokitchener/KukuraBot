@@ -240,15 +240,14 @@ Wants=robodoge-rosbridge.service robodoge-map-pose.service
 PartOf=robodoge-rosbridge.service robodoge-map-pose.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
 ExecStartPre=/bin/bash -lc 'for i in \$(seq 1 60); do /usr/bin/docker inspect -f "{{.State.Running}}" robodoge-rosbridge 2>/dev/null | grep -qx true && exit 0; sleep 1; done; echo "robodoge-rosbridge container not running" >&2; exit 1'
+ExecStartPre=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "[s]tart-navigation-in-container.sh" 2>/dev/null || true'
 ExecStart=/usr/bin/docker exec robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
-ExecStop=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null || true'
-Restart=on-failure
-RestartSec=5
+ExecStop=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "/opt/ros/humble/lib/nav2_|[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null || true'
+Restart=no
 TimeoutStartSec=180
 StandardOutput=append:$REMOTE_ROOT/logs/navigation-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/navigation-systemd.log

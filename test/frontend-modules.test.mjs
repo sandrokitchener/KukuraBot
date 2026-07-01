@@ -689,10 +689,6 @@ test('deriveOperatorLastCommand falls back to navigation target only when no dis
     deriveOperatorLastCommand({ navigationStatus: { targetWaypoint: 'kitchen' } }, null),
     'kitchen',
   )
-  assert.equal(
-    deriveOperatorLastCommand({ navigationStatus: { status: 'repairing' } }, null),
-    'repairing...',
-  )
   assert.equal(deriveOperatorLastCommand({}, null), '-')
 })
 
