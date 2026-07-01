@@ -140,10 +140,18 @@ class LidarAvoidanceSupervisor:
         }
 
     def _check_bridge_scan_endpoint(self) -> dict[str, Any]:
+        if not DEFAULT_MAP_SCAN_URL:
+            return {
+                "ok": False,
+                "attempt": "dogzilla-scan-endpoint",
+                "error": "DOGZILLA_MAP_SCAN_URL is not configured.",
+                "url": DEFAULT_MAP_SCAN_URL,
+            }
+
         try:
             with urllib.request.urlopen(DEFAULT_MAP_SCAN_URL, timeout=min(max(self.timeout, 1.0), 3.0)) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        except (OSError, ValueError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
             return {
                 "ok": False,
                 "attempt": "dogzilla-scan-endpoint",

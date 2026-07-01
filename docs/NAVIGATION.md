@@ -169,7 +169,7 @@ Control modes via bridge:
 - If Nav2 is unavailable, app/server reports blockers. It does not auto-repair or auto-start navigation.
 - Default startup mode is `navigate`, matching the Pi boot contract: Nav2 should already be running before the app starts.
 
-Pi boot/systemd owns normal map-pose/Nav2 lifetime. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`.
+Pi boot/systemd owns normal map-pose/Nav2 lifetime. `robodoge-rosbridge.service` keeps the shared ROS container running, `robodoge-map-pose.service` starts Cartographer localization, and `robodoge-navigation.service` runs `sidecars/dogzilla_navigation/start-navigation-in-container.sh` inside `robodoge-rosbridge`. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`.
 
 SLAM is the explicit exception: the operator-owned New Map / Save Map workflow uses `start-map-pose-mapping` and `save-map-pose` to switch Cartographer into mapping mode, save the new map, then restart localization against that map. That flow is intentional and separate from normal app startup or waypoint dispatch.
 

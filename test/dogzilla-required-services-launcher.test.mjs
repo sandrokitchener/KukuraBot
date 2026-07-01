@@ -17,36 +17,35 @@ function disabledLidar() {
   return { ok: false, status: 'disconnected', destination: ROSBRIDGE_URL }
 }
 
-test('shouldForceDogzillaRequiredServices follows required YOLO, audio, and lidar config', () => {
+test('shouldForceDogzillaRequiredServices follows required YOLO and audio config', () => {
   assert.equal(shouldForceDogzillaRequiredServices({}), false)
   assert.equal(shouldForceDogzillaRequiredServices({ vision: { enabled: true } }), true)
   assert.equal(shouldForceDogzillaRequiredServices({ audio: { enabled: true } }), true)
-  assert.equal(shouldForceDogzillaRequiredServices({ lidar: { enabled: true } }), true)
+  assert.equal(shouldForceDogzillaRequiredServices({ lidar: { enabled: true } }), false)
   assert.equal(shouldForceDogzillaRequiredServices({ vision: { enabled: true } }, {
     APP_DOGZILLA_REQUIRED_SERVICES_START: '0',
   }), false)
 })
 
-test('buildRequiredServiceDescriptors maps YOLO, audio, and lidar only', () => {
-  const descriptors = buildRequiredServiceDescriptors({
-    vision: {
-      enabled: true,
-      statusUrl: 'http://dogzilla:8894/healthz',
+test('buildRequiredServiceDescriptors maps YOLO and audio only', () => {
+const descriptors = buildRequiredServiceDescriptors({
+vision: {
+enabled: true,
+statusUrl: 'http://dogzilla:8894/healthz',
     },
     audio: {
       enabled: true,
       healthUrl: 'http://dogzilla:8895/healthz',
     },
-    lidar: {
-      enabled: true,
-      transport: 'rosbridge',
-      rosbridgeUrl: ROSBRIDGE_URL,
-    },
-  })
+lidar: {
+enabled: true,
+transport: 'rosbridge',
+rosbridgeUrl: ROSBRIDGE_URL,
+},
+})
 
-  assert.deepEqual(descriptors.map((descriptor) => descriptor.id), ['audio', 'vision', 'lidar'])
-  assert.deepEqual(descriptors.map((descriptor) => descriptor.action), ['start-audio', 'start-yolo', 'start-lidar'])
-  assert.equal(descriptors[2].destination, ROSBRIDGE_URL)
+assert.deepEqual(descriptors.map((descriptor) => descriptor.id), ['audio', 'vision'])
+assert.deepEqual(descriptors.map((descriptor) => descriptor.action), ['start-audio', 'start-yolo'])
 })
 
 test('forceDogzillaRequiredServicesOnStartup starts support services without map-pose or Nav2', async () => {
@@ -70,13 +69,13 @@ test('forceDogzillaRequiredServicesOnStartup starts support services without map
     sleepImpl: async () => {},
   })
 
-  assert.equal(result.status, 'ok')
-  assert.deepEqual(startedActions, ['start-audio', 'start-yolo', 'start-lidar'])
-  assert.equal(result.results.lidar.status, 'ok')
-  assert.equal(result.results.mapPose, undefined)
+assert.equal(result.status, 'ok')
+assert.deepEqual(startedActions, ['start-audio', 'start-yolo'])
+assert.equal(result.results.lidar, undefined)
+assert.equal(result.results.mapPose, undefined)
 })
 
-test('forceDogzillaRequiredServicesOnStartup reuses healthy lidar service', async () => {
+test('forceDogzillaRequiredServicesOnStartup ignores Pi-owned lidar rosbridge', async () => {
   const startedActions = []
   const result = await forceDogzillaRequiredServicesOnStartup({
     config: {
@@ -90,9 +89,9 @@ test('forceDogzillaRequiredServicesOnStartup reuses healthy lidar service', asyn
     },
   })
 
-  assert.equal(result.status, 'ok')
+assert.equal(result.status, 'skipped')
   assert.deepEqual(startedActions, [])
-  assert.equal(result.results.lidar.reusedService, true)
+  assert.equal(result.results.lidar, undefined)
 })
 
 function jsonResponse(body, { ok = true, status = 200 } = {}) {

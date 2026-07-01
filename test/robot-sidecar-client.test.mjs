@@ -181,20 +181,17 @@ test('sendRobotCommand posts waypoint goto envelope when live dispatch is enable
         { autoStartWaypointNavigation: false },
       )
 
-      assert.equal(result.status, 'accepted')
-      assert.equal(result.preempt.status, 'sent')
-      assert.equal(requestUrl, 'http://10.0.4.32:8893/commands')
-      assert.equal(requests.length, 2)
-      assert.equal(requests[0].action, 'stop')
-      assert.equal(requests[0].envelope.canonicalPlan.kind, 'noop')
-      assert.equal(requests[0].envelope.canonicalPlan.params.reason, 'command_preempt')
-      assert.equal(requests[1].envelope.canonicalPlan.kind, 'locomotion.goto')
-      assert.equal(requests[1].envelope.canonicalPlan.params.waypoint, 'living_room')
-      assert.equal(requests[1].envelope.canonicalPlan.params.frame, 'map')
-      assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.required, true)
-      assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.mode, 'nav2_costmap')
-      assert.equal(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.lidarTopic, '/scan')
-      assert.match(requests[1].envelope.canonicalPlan.params.obstacleAvoidance.command, /Nav2 costmaps/)
+assert.equal(result.status, 'accepted')
+assert.equal(result.preempt, null)
+assert.equal(requestUrl, 'http://10.0.4.32:8893/commands')
+assert.equal(requests.length, 1)
+assert.equal(requests[0].envelope.canonicalPlan.kind, 'locomotion.goto')
+assert.equal(requests[0].envelope.canonicalPlan.params.waypoint, 'living_room')
+assert.equal(requests[0].envelope.canonicalPlan.params.frame, 'map')
+assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.required, true)
+assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.mode, 'nav2_costmap')
+assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.lidarTopic, '/scan')
+assert.match(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.command, /Nav2 costmaps/)
     },
   )
 })
@@ -443,7 +440,7 @@ test('sendRobotCommand sends trusted config waypoint outside active DOGZILLA map
 
       assert.equal(result.status, 'sent')
       assert.equal(result.attempted, true)
-      assert.equal(requests.length, 3)
+assert.equal(requests.length, 2)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
       assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
@@ -867,16 +864,14 @@ test('sendRobotCommand does not timeout waypoint movement response', async () =>
   }
 
   assert.deepEqual(requests, [
-    { kind: 'timeout', timeoutMs: 2000 },
+{ kind: 'timeout', timeoutMs: 8000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz-lite', hasSignal: true },
     { kind: 'timeout', timeoutMs: 4000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/nav2/scan_info', hasSignal: true },
-    { kind: 'timeout', timeoutMs: 6000 },
-    { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true },
-    { kind: 'timeout', timeoutMs: 4000 },
-    { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: true },
-    { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: false },
-  ])
+{ kind: 'timeout', timeoutMs: 6000 },
+{ kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true },
+{ kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: false },
+])
 })
 
 test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', async () => {
@@ -935,16 +930,14 @@ test('sendRobotCommand ignores waypoint timeoutSec for desktop response wait', a
   }
 
   assert.deepEqual(requests, [
-    { kind: 'timeout', timeoutMs: 2000 },
+    { kind: 'timeout', timeoutMs: 8000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz-lite', hasSignal: true, commandParams: undefined },
     { kind: 'timeout', timeoutMs: 4000 },
     { kind: 'fetch', url: 'http://10.0.4.32:8893/nav2/scan_info', hasSignal: true, commandParams: undefined },
-    { kind: 'timeout', timeoutMs: 6000 },
-    { kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true, commandParams: undefined },
-    { kind: 'timeout', timeoutMs: 4000 },
-    { kind: 'fetch', url: 'http://10.0.4.32:8893/commands', hasSignal: true, commandParams: { reason: 'command_preempt', action: 'stop' } },
-    {
-      kind: 'fetch',
+{ kind: 'timeout', timeoutMs: 6000 },
+{ kind: 'fetch', url: 'http://10.0.4.32:8893/healthz', hasSignal: true, commandParams: undefined },
+{
+kind: 'fetch',
       url: 'http://10.0.4.32:8893/commands',
       hasSignal: false,
       commandParams: {
@@ -1022,31 +1015,24 @@ test('sendRobotCommand surfaces DOGZILLA bridge result errors from HTTP 422', as
   )
 })
 
-test('sendRobotCommand surfaces command result errors after successful preempt', async () => {
-  let callCount = 0
-
-  await withMockedFetch(
-    async (url) => {
-      const defaultResponse = defaultBridgeResponse(url)
-      if (defaultResponse) {
-        return defaultResponse
+test('sendRobotCommand surfaces waypoint command result errors without preempt', async () => {
+await withMockedFetch(
+async (url) => {
+const defaultResponse = defaultBridgeResponse(url)
+if (defaultResponse) {
+return defaultResponse
       }
       if (String(url).endsWith('/healthz')) {
         return jsonResponse(nav2HealthBody())
       }
-      if (String(url).endsWith('/pose')) {
-        return jsonResponse(dogzillaMapPoseBody())
-      }
+if (String(url).endsWith('/pose')) {
+return jsonResponse(dogzillaMapPoseBody())
+}
 
-      callCount += 1
-      if (callCount === 1) {
-        return jsonResponse({ accepted: true }, { status: 202 })
-      }
-
-      return jsonResponse({
-        accepted: false,
-        result: {
-          executed: false,
+return jsonResponse({
+accepted: false,
+result: {
+executed: false,
           delivery: 'lidar-avoidance-unavailable',
           error: 'LiDAR obstacle avoidance unavailable',
           kind: 'locomotion.goto',
@@ -1060,11 +1046,11 @@ test('sendRobotCommand surfaces command result errors after successful preempt',
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'rejected')
-      assert.equal(result.preempt.status, 'sent')
-      assert.equal(result.error, 'LiDAR obstacle avoidance unavailable (locomotion.goto)')
-    },
-  )
+assert.equal(result.status, 'rejected')
+assert.equal(result.preempt, null)
+assert.equal(result.error, 'LiDAR obstacle avoidance unavailable (locomotion.goto)')
+},
+)
 })
 
 test('sendRobotCommand does not preempt manual relative motion updates', async () => {

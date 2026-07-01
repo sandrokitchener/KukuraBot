@@ -35,7 +35,7 @@ import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile } from './lib/model-profile-config.mjs'
-import { fetchRobotBridgeState } from './lib/robot-sidecar-client.mjs'
+import { fetchRobotBridgeState, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,

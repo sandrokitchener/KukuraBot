@@ -44,10 +44,11 @@ if ($LASTEXITCODE -ne 0) {
 
 $sidecars = @(
   "dogzilla_lib_bridge",
-  "dogzilla_audio_cue",
-  "dogzilla_yolo_vision",
-  "dogzilla_rosbridge",
-  "dogzilla_map_pose"
+"dogzilla_audio_cue",
+"dogzilla_yolo_vision",
+"dogzilla_rosbridge",
+"dogzilla_map_pose",
+"dogzilla_navigation"
 )
 
 foreach ($sidecar in $sidecars) {
@@ -231,12 +232,37 @@ StandardError=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 WantedBy=multi-user.target
 SERVICE
 
+sudo tee /etc/systemd/system/robodoge-navigation.service >/dev/null <<SERVICE
+[Unit]
+Description=Robo-Doge DOGZILLA Nav2 Navigation
+After=robodoge-rosbridge.service robodoge-map-pose.service
+Wants=robodoge-rosbridge.service robodoge-map-pose.service
+PartOf=robodoge-rosbridge.service robodoge-map-pose.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$REMOTE_ROOT
+EnvironmentFile=/etc/robodoge/dogzilla.env
+ExecStartPre=/bin/bash -lc 'for i in \$(seq 1 60); do /usr/bin/docker inspect -f "{{.State.Running}}" robodoge-rosbridge 2>/dev/null | grep -qx true && exit 0; sleep 1; done; echo "robodoge-rosbridge container not running" >&2; exit 1'
+ExecStart=/usr/bin/docker exec robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
+ExecStop=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null || true'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+StandardOutput=append:$REMOTE_ROOT/logs/navigation-systemd.log
+StandardError=append:$REMOTE_ROOT/logs/navigation-systemd.log
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
 sudo systemctl daemon-reload
 # Retire the old HTTP lidar bridge service so it does not steal port 9090.
 sudo systemctl stop robodoge-lidar-bridge.service 2>/dev/null || true
 sudo systemctl disable robodoge-lidar-bridge.service 2>/dev/null || true
 sudo docker rm -f robodoge-lidar-bridge 2>/dev/null || true
-sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service
+sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service robodoge-navigation.service
 # Prevent the Yahboom OLED vendor app from respawning and reclaiming /dev/ttyAMA0 on live navigation machines.
 sudo systemctl disable --now yahboom_oled.service 2>/dev/null || true
 sudo systemctl restart robodoge-audio-cue.service || true
@@ -245,8 +271,10 @@ sudo systemctl restart robodoge-rosbridge.service || true
 sudo systemctl restart robodoge-direct-bridge.service || true
 sleep 4
 sudo systemctl restart robodoge-map-pose.service || true
+sleep 4
+sudo systemctl restart robodoge-navigation.service || true
 
-systemctl --no-pager --full status robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service || true
+systemctl --no-pager --full status robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service robodoge-navigation.service || true
 '@
 
 $remoteScript = $remoteScript.

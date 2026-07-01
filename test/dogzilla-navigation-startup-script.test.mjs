@@ -111,12 +111,12 @@ test('DOGZILLA Nav2 startup rejects stale odom publishers before launching Nav2'
 
   assert.match(script, /odom_has_live_sample\(\)/)
   assert.match(script, /robodoge_odom_startup_probe/)
-  assert.match(script, /create_subscription\(Odometry, "\/odom"/)
+assert.match(script, /create_subscription\(Odometry, "\/odom", on_message, 10\)/)
   assert.match(script, /no live Odometry sample arrived/)
   assert.match(script, /probe_odom_tf\(\)/)
   assert.match(script, /grep -q "Translation:" \/tmp\/robodoge-odom-tf-probe\.txt/)
   assert.doesNotMatch(script, /tf2_echo odom "\$base_frame" 2>&1 \| tee/)
-  assert.match(script, /odom->base_link\/base_footprint/)
+assert.match(script, /odom\/map->base_link\/base_footprint/)
   assert.match(script, /Repo-owned TF odom helper is running; waiting for discovery before restart/)
   assert.match(script, /letting app readiness wait/)
 })
@@ -139,9 +139,17 @@ test('DOGZILLA Nav2 startup masks self-hit scan arc before costmaps', async () =
 test('DOGZILLA Nav2 startup waits for managed lifecycle activation', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /pkill -f "\[s\]moother_server"/)
-  assert.match(script, /grep -q "Managed nodes are active"/)
-  assert.match(script, /did not become fully active/)
+assert.match(script, /pkill -f "\[s\]moother_server"/)
+assert.match(script, /timeout 8 ros2 action list/)
+assert.match(script, /grep -q "Managed nodes are active"/)
+assert.match(script, /did not become fully active/)
+})
+
+test('DOGZILLA Nav2 startup bounds final ROS CLI summary probes', async () => {
+const script = await readFile(SCRIPT_PATH, 'utf-8')
+
+assert.match(script, /subprocess\.run\(args, capture_output=True, text=True, check=False, timeout=5\)/)
+assert.match(script, /except subprocess\.TimeoutExpired/)
 })
 
 test('DOGZILLA Nav2 startup repairs missing odom TF through map-pose localization', async () => {
@@ -456,19 +464,47 @@ test('DOGZILLA boot service install defaults to pre-baked Cartographer/Nav2 imag
 })
 
 test('DOGZILLA boot service install runs map-pose in its own container', async () => {
-  const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+const mapPoseUnit = script.slice(
+script.indexOf('/etc/systemd/system/robodoge-map-pose.service'),
+script.indexOf('/etc/systemd/system/robodoge-navigation.service'),
+)
 
-  assert.doesNotMatch(script, /ExecStart=\/usr\/bin\/docker exec .* robodoge-lidar-bridge bash .*start-map-pose-in-container\.sh/)
-  assert.match(script, /ExecStartPre=-\/usr\/bin\/docker rm -f robodoge-map-pose/)
-  assert.match(script, /ExecStart=\/usr\/bin\/docker run --rm --name robodoge-map-pose/)
-  assert.match(script, /ExecStop=-\/usr\/bin\/docker rm -f robodoge-map-pose/)
-  assert.match(script, /Type=simple/)
-  assert.doesNotMatch(script, /RemainAfterExit=yes/)
-  assert.match(script, /bash sidecars\/dogzilla_map_pose\/start-map-pose-in-container\.sh/)
+assert.doesNotMatch(mapPoseUnit, /ExecStart=\/usr\/bin\/docker exec .* robodoge-lidar-bridge bash .*start-map-pose-in-container\.sh/)
+assert.match(mapPoseUnit, /ExecStartPre=-\/usr\/bin\/docker rm -f robodoge-map-pose/)
+assert.match(mapPoseUnit, /ExecStart=\/usr\/bin\/docker run --rm --name robodoge-map-pose/)
+assert.match(mapPoseUnit, /ExecStop=-\/usr\/bin\/docker rm -f robodoge-map-pose/)
+assert.match(mapPoseUnit, /Type=simple/)
+assert.doesNotMatch(mapPoseUnit, /RemainAfterExit=yes/)
+assert.match(mapPoseUnit, /bash sidecars\/dogzilla_map_pose\/start-map-pose-in-container\.sh/)
+})
+
+test('DOGZILLA boot service install makes Pi systemd own Nav2 startup', async () => {
+const script = await readFile(INSTALL_SCRIPT_PATH, 'utf-8')
+const serviceIndex = script.indexOf('/etc/systemd/system/robodoge-navigation.service')
+const enableIndex = script.indexOf('systemctl enable robodoge-direct-bridge.service')
+const restartIndex = script.indexOf('systemctl restart robodoge-navigation.service')
+const statusIndex = script.indexOf('status robodoge-direct-bridge.service')
+
+assert.ok(serviceIndex > 0, 'expected robodoge-navigation.service unit')
+assert.match(script, /Description=Robo-Doge DOGZILLA Nav2 Navigation/)
+assert.match(script, /"dogzilla_navigation"/)
+assert.match(script, /After=robodoge-rosbridge\.service robodoge-map-pose\.service/)
+assert.match(script, /Wants=robodoge-rosbridge\.service robodoge-map-pose\.service/)
+assert.match(script, /PartOf=robodoge-rosbridge\.service robodoge-map-pose\.service/)
+assert.match(script, /Type=oneshot/)
+assert.match(script, /RemainAfterExit=yes/)
+assert.match(script, /docker exec robodoge-rosbridge bash -lc/)
+assert.match(script, /sidecars\/dogzilla_navigation\/start-navigation-in-container\.sh/)
+assert.match(script, /robodoge-navigation\.service/)
+assert.ok(enableIndex > serviceIndex, 'expected service enable after unit write')
+assert.ok(restartIndex > enableIndex, 'expected service restart after enable')
+assert.ok(statusIndex > restartIndex, 'expected service status after restart')
+assert.doesNotMatch(script, /docker rm -f robodoge-navigation/)
 })
 
 test('DOGZILLA direct bridge SSH startup stops vendor app before launching bridge', async () => {
-  const script = await readFile(BRIDGE_SSH_SCRIPT_PATH, 'utf-8')
+const script = await readFile(BRIDGE_SSH_SCRIPT_PATH, 'utf-8')
 
   assert.match(script, /stop-dogzilla-vendor-app-ssh\.ps1/)
   assert.match(script, /stopVendorArgs/)

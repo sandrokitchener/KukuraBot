@@ -569,10 +569,7 @@ async function verifySimplifiedDogzillaEndpoints({ robotRuntimeConfig, ros2Confi
     }))
 
   if (!lidarHealth.ok) {
-    return {
-      ok: false,
-      error: `DOGZILLA rosbridge is not reachable: ${lidarHealth.error || lidarHealth.status || 'unknown'}`,
-    }
+    console.warn(`DOGZILLA rosbridge not ready at app startup: ${lidarHealth.error || lidarHealth.status || 'unknown'}`)
   }
 
   const directHealth = directBridgeStartup?.health

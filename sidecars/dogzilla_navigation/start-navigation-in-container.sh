@@ -761,7 +761,7 @@ try_graceful_nav2_recovery() {
 }
 
 # First try graceful per-node recovery; only do full restart if that fails
-if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$"; then
+if timeout 8 ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$"; then
   if try_graceful_nav2_recovery; then
     echo "Nav2 recovered via graceful lifecycle restart." >&2
   else
@@ -849,7 +849,10 @@ import json
 import subprocess
 
 def run(args):
-    return subprocess.run(args, capture_output=True, text=True, check=False).stdout.strip()
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=False, timeout=5).stdout.strip()
+    except subprocess.TimeoutExpired:
+        return f"timed out: {' '.join(args)}"
 
 print(json.dumps({
     "ok": True,

@@ -158,6 +158,15 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(calls[0], ("bridge-scan",))
         self.assertEqual(calls[1], ("scan", "/scan"))
 
+    def test_nav2_costmap_scan_endpoint_handles_missing_url(self):
+        supervisor = dogzilla_lib_bridge.LidarAvoidanceSupervisor()
+
+        result = supervisor._check_bridge_scan_endpoint()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["attempt"], "dogzilla-scan-endpoint")
+        self.assertIn("DOGZILLA_MAP_SCAN_URL", result["error"])
+
     def test_nav2_costmap_lidar_mode_accepts_live_bridge_scan_endpoint(self):
         supervisor = dogzilla_lib_bridge.LidarAvoidanceSupervisor()
         calls = []

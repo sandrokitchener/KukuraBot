@@ -26,5 +26,12 @@ test('npm start binds the desktop app for tailnet access by default', async () =
 
   assert.match(run, /process\.env\.KUKURA_HOST \|\| '0\.0\.0\.0'/)
   assert.match(run, /const APP_URL = `http:\/\/\$\{resolveProbeHost\(HOST\)\}:\$\{PORT\}`/)
-  assert.match(server, /process\.env\.KUKURA_HOST \|\| '0\.0\.0\.0'/)
+assert.match(server, /process\.env\.KUKURA_HOST \|\| '0\.0\.0\.0'/)
+})
+
+test('npm start does not hard-block on Pi-owned rosbridge probe misses', async () => {
+const run = await readFile('run.mjs', 'utf-8')
+
+assert.match(run, /DOGZILLA rosbridge not ready at app startup/)
+assert.doesNotMatch(run, /DOGZILLA rosbridge is not reachable/)
 })
