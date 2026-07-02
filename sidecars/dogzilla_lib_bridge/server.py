@@ -29,6 +29,7 @@ _NAV_MODE_AUTO_DEMOTE_TIMER: threading.Timer | None = None
 _NAV_MODE_IDLE_DELAY_SEC = float(os.environ.get("DOGZILLA_NAV_MODE_IDLE_DELAY_SEC", "300.0"))
 CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
 REMOTE_ROOT = os.environ.get("REMOTE_ROOT", "/home/pi/robodoge")
+VALID_NAV_MODES = {"idle", "localize", "navigate", "sleep"}
 
 
 def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
@@ -39,6 +40,10 @@ def _run(cmd: str, timeout: float = 15.0) -> tuple[int, str]:
         return -1, f"timed out after {timeout}s: {e.output or ''} {e.stderr or ''}"
     except OSError as e:
         return -1, str(e)
+
+
+def _valid_nav_mode(mode: str) -> bool:
+    return mode in VALID_NAV_MODES
 
 
 def get_nav_mode() -> str:
@@ -445,6 +450,15 @@ class DogzillaRuntime:
         if kind == "noop" and params.get("reason") == "emergency_stop":
             return self._execute_emergency_stop(reason="emergency_stop")
 
+        if kind == "noop" and params.get("reason") == "clear_emergency_stop":
+            self.cancel_active_navigation()
+            self._clear_nav2_cmd_vel_block()
+            return {
+                "executed": True,
+                "delivery": "emergency-stop-cleared",
+                "nav2CmdVelBlocked": False,
+            }
+
         if kind == "noop" and params.get("reason") == "command_preempt":
             return self._execute_command_preempt()
 
@@ -751,6 +765,18 @@ class DogzillaRuntime:
         # emergency_stop safety block. Clear preempt BEFORE readiness checks so
         # a stale block cannot mask a fresh navigation attempt.
         self._clear_command_preempt_nav2_cmd_vel_block()
+        if self._nav2_cmd_vel_is_blocked():
+            blocked_reason = getattr(self, "nav2_cmd_vel_blocked_reason", None) or "unknown"
+            return {
+                "executed": False,
+                "delivery": "rejected",
+                "kind": "locomotion.goto",
+                "waypoint": params.get("waypoint") or "",
+                "waypointSafe": False,
+                "error": f"Nav2 gait adapter is blocked by {blocked_reason}; clear emergency stop before waypoint navigation.",
+                "blockedReason": blocked_reason,
+                "nav2CmdVelBlocked": True,
+            }
 
         current_mode = get_nav_mode()
         mode_transition: dict[str, Any] | None = None
@@ -878,6 +904,12 @@ class DogzillaRuntime:
                         "ok": False,
                         "error": "LiDAR avoidance supervisor not configured",
                     },
+                }
+
+            if avoidance_request.get("mode") == NAV2_COSTMAP_LIDAR_MODE:
+                avoidance_request = {
+                    **avoidance_request,
+                    "scanStatus": self.nav2_client._scan_snapshot(),
                 }
 
             avoidance_result = supervisor.ensure_running(avoidance_request)

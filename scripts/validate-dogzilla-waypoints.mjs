@@ -361,12 +361,49 @@ async function loadActiveMapMetadata(bridgeHealthUrl, fetchImpl) {
   try {
     const response = await fetchImpl(bridgeHealthUrl)
     const body = await response.json()
+    const lite = await loadBridgeHealthLite(bridgeHealthUrl, fetchImpl)
+    applyBridgeHealthLite(body, lite)
     if (!response.ok || body.ok === false) {
       return { map: null, health: body, error: body.error || body.message || `bridge health failed: ${response.status}` }
     }
     return { map: body.runtime?.map || null, health: body, error: '' }
   } catch (error) {
     return { map: null, health: null, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function loadBridgeHealthLite(bridgeHealthUrl, fetchImpl) {
+  try {
+    const liteUrl = new URL('/healthz-lite', bridgeHealthUrl).toString()
+    const response = await fetchImpl(liteUrl)
+    const body = await response.json()
+    return response.ok && body?.ok !== false ? body : null
+  } catch {
+    return null
+  }
+}
+
+function applyBridgeHealthLite(health, lite) {
+  if (!health || typeof health !== 'object' || !lite || typeof lite !== 'object') {
+    return
+  }
+  health.runtime = health.runtime && typeof health.runtime === 'object' ? health.runtime : {}
+  health.runtime.nav2 = health.runtime.nav2 && typeof health.runtime.nav2 === 'object' ? health.runtime.nav2 : {}
+  health.runtime.navigation = health.runtime.navigation && typeof health.runtime.navigation === 'object' ? health.runtime.navigation : {}
+  if (typeof lite.waypointReady === 'boolean') {
+    health.runtime.nav2.waypointReady = lite.waypointReady
+    health.runtime.navigation.waypointReady = lite.waypointReady
+  }
+  if (typeof lite.nav2Ready === 'boolean') {
+    health.runtime.nav2.available = lite.nav2Ready
+    health.runtime.navigation.available = lite.nav2Ready
+  }
+  if (typeof lite.canSendGoal === 'boolean') {
+    health.runtime.nav2.canSendGoal = lite.canSendGoal
+    health.runtime.navigation.canSendGoal = lite.canSendGoal
+  }
+  if (lite.nav2Backend) {
+    health.runtime.nav2.backend = lite.nav2Backend
   }
 }
 

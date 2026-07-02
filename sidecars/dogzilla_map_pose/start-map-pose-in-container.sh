@@ -8,9 +8,9 @@ DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-}"
 DOGZILLA_IMU_AVAILABLE="${DOGZILLA_IMU_AVAILABLE:-false}"
-DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-0}"
-DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-0}"
-DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-0}"
+DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-}"
+DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-}"
+DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-}"
 DOGZILLA_INITIAL_POSE_SKIP="${DOGZILLA_INITIAL_POSE_SKIP:-0}"
 export ROS_DOMAIN_ID
 export REMOTE_ROOT
@@ -64,62 +64,21 @@ source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1091
 source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true
 
-run_apt_get_once() {
-  local lock_timeout="${DOGZILLA_APT_LOCK_TIMEOUT_SEC:-300}"
-  if command -v flock >/dev/null 2>&1; then
-    flock -w "$lock_timeout" /tmp/robodoge-apt.lock bash -c '
-      dpkg --configure -a >/dev/null 2>&1 || true
-      apt-get "$@"
-    ' bash "$@"
-    return $?
-  fi
-
-  dpkg --configure -a >/dev/null 2>&1 || true
-  apt-get "$@"
-}
-
-run_apt_get() {
-  local attempt=1
-  local max_attempts="${DOGZILLA_APT_MAX_ATTEMPTS:-40}"
-  local delay_sec="${DOGZILLA_APT_RETRY_DELAY_SEC:-3}"
-
-  while true; do
-    if run_apt_get_once "$@"; then
-      return 0
-    fi
-
-    local status=$?
-    if [ "$attempt" -ge "$max_attempts" ]; then
-      return "$status"
-    fi
-
-    echo "apt-get $* failed (attempt $attempt/$max_attempts); waiting for apt/dpkg lock." >&2
-    sleep "$delay_sec"
-    attempt=$((attempt + 1))
-  done
-}
-
 missing_packages=()
 if ! ros2 pkg prefix cartographer_ros >/dev/null 2>&1; then
-  missing_packages+=(ros-humble-cartographer-ros ros-humble-cartographer-ros-msgs)
+  missing_packages+=(cartographer_ros)
 fi
 if ! python3 - <<'PY' >/dev/null 2>&1
-from nav2_msgs.action import NavigateToPose  # noqa: F401
+from nav2_msgs.action import NavigateToPose # noqa: F401
 PY
 then
-  missing_packages+=(ros-humble-nav2-msgs)
+  missing_packages+=(nav2_msgs)
 fi
 
 if [ "${#missing_packages[@]}" -gt 0 ]; then
-  export DEBIAN_FRONTEND=noninteractive
-  rm -f /etc/apt/sources.list.d/ros2.list 2>/dev/null || true
-  run_apt_get update
-  run_apt_get install -y --no-install-recommends curl ca-certificates gnupg >/dev/null
-  curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-  ubuntu_codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME}}")"
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${ubuntu_codename} main" > /etc/apt/sources.list.d/ros2.list
-  run_apt_get update
-  run_apt_get install -y --no-install-recommends "${missing_packages[@]}"
+  echo "Required map-pose/SLAM ROS packages missing in Pi-owned runtime: ${missing_packages[*]}." >&2
+  echo "Refusing startup-time install. Rebuild/deploy the pre-baked DOGZILLA ROS image or run an explicit operator setup step." >&2
+  exit 2
 fi
 
 if [ -z "$DOGZILLA_MAP_PBSTREAM" ] && [ -s "$DOGZILLA_MAP_METADATA" ]; then
@@ -231,6 +190,39 @@ case "$mode" in
     exit 2
     ;;
 esac
+
+if [ "$mode" = "localization" ] && [ "$DOGZILLA_INITIAL_POSE_SKIP" != "1" ]; then
+  if [ -z "$DOGZILLA_INITIAL_POSE_X" ] || [ -z "$DOGZILLA_INITIAL_POSE_Y" ] || [ -z "$DOGZILLA_INITIAL_POSE_YAW" ]; then
+    origin_file="$REMOTE_ROOT/output/app-cache/dogzilla-map-origin.json"
+    if [ -s "$origin_file" ]; then
+      eval "$(
+        python3 - "$origin_file" <<'PY'
+import json
+import shlex
+import sys
+
+try:
+    origin = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+def emit(name, value):
+    if value is not None:
+        print(f"{name}={shlex.quote(str(value))}")
+
+emit("DOGZILLA_INITIAL_POSE_X", origin.get("x"))
+emit("DOGZILLA_INITIAL_POSE_Y", origin.get("y"))
+emit("DOGZILLA_INITIAL_POSE_YAW", origin.get("yaw"))
+PY
+      )"
+      echo "Loaded saved DOGZILLA initial pose from $origin_file: x=${DOGZILLA_INITIAL_POSE_X:-0} y=${DOGZILLA_INITIAL_POSE_Y:-0} yaw=${DOGZILLA_INITIAL_POSE_YAW:-0}" >&2
+    fi
+  fi
+fi
+DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-0}"
+DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-0}"
+DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-0}"
+export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
 
 MODE_FILE="$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
 SHOULD_RESTART=false
@@ -373,7 +365,7 @@ if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
   )
 fi
 
-python3 - <<'PY'
+python3 - <<'PY' || echo "Map-pose TF not ready after startup probe; keeping Cartographer alive for recovery." >&2
 import json
 import math
 import os

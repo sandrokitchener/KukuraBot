@@ -82,13 +82,10 @@ logical app state. Pi boot/systemd owns Cartographer/Nav2/scan-filter
 process lifetime. Other app paths read state via `/healthz-lite`; waypoint
 dispatch reports blockers when the Pi-owned stack is unavailable.
 
-The `/scan_nav2` scan filter (`scan_self_filter.py`) is supervised by
-`scan_filter_supervisor.py`, which captures stderr from the child process and
-treats "alive but not publishing" as a hard failure triggering restart. After
-repeated failures the supervisor keeps running with capped exponential backoff,
-because it is launched inside the rosbridge container rather than managed by a
-dedicated restart unit. The filter prints traceback before exiting nonzero on
-rclpy context errors so the supervisor logs the fault reason.
+The `/scan_nav2` scan filter (`scan_self_filter.py`) reads `/scan`, masks the
+dog's own rear body (120-260 deg under 0.45 m), and publishes to `/scan_nav2`.
+It runs as a direct background process inside the rosbridge container without a
+supervisor wrapper.
 
 HTTP `locomotion.goto` commands now default to async acceptance on the direct
 bridge (`DOGZILLA_ASYNC_HTTP_GOTO=1` by default). The bridge sends the goal
@@ -125,7 +122,7 @@ DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists onl
 | `8893` | DOGZILLA direct bridge |
 | `8894` | DOGZILLA YOLO vision |
 | `8895` | DOGZILLA audio cue (keeps live volume state via `/volume`; direct callers like YOLO use it as fallback) |
-| `9090` | DOGZILLA rosbridge (Pi-hosted; scan/TF/map over WebSocket) |
+| `9090` | DOGZILLA rosbridge (Pi-hosted; throttled scan/TF/odom over WebSocket) |
 
 ## Tests
 

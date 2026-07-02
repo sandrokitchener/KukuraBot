@@ -5,11 +5,11 @@ export const DANGEROUS_CONNECTION_ACTIONS = Object.freeze({
   },
   'start-map-pose-mapping': {
     title: 'Start New SLAM Map',
-    message: 'This starts a new map. Old waypoints won\'t work until re-saved.',
+    message: 'This switches Cartographer into live mapping. Drive slowly, save only when the map is stable, then recapture waypoints that no longer align.',
   },
   'save-map-pose': {
-    title: 'Save New Map Identity',
-    message: 'This saves the map. Old waypoints and home position won\'t work until re-saved.',
+    title: 'Save SLAM Map',
+    message: 'This commits the current SLAM map and restarts localization against it. Existing waypoints may need recapture if the map origin or walls shifted.',
   },
   'sync-bridges': {
     title: 'Deploy Bridge Code',

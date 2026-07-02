@@ -30,6 +30,7 @@ import {
   hasDogzillaMapOriginIdentity,
   loadDogzillaMapOrigin,
 } from './lib/dogzilla-map-frame.mjs'
+import { resolveRobotPoseFromBridgeState } from './lib/dogzilla-robot-state.mjs'
 import { tryHandleDogzillaRoute } from './lib/http-dogzilla-routes.mjs'
 import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
@@ -720,7 +721,7 @@ function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState = 
   const pitch = normalizeFiniteNumber(state.pitch)
   const batterySample = normalizeDogzillaBatterySample(state.battery)
   const batteryState = dogzillaBatteryStateTracker.resolve(batterySample, timestamp)
-  const mapPose = normalizePoseFromBridge(poseState?.mapPose)
+  const mapPose = resolveRobotPoseFromBridgeState(poseState)
   const poseDiagnostics = Array.isArray(poseState?.diagnostics)
     ? poseState.diagnostics.map((item) => normalizeString(item)).filter(Boolean)
     : []
@@ -771,29 +772,6 @@ function summarizePoseTopicPublishers(rosGraph) {
   return ['/tf', '/tf_static', '/odom']
     .map((topic) => `${topic}:${Number(topics[topic]?.publisherCount ?? 0)}`)
     .join(', ')
-}
-
-function normalizePoseFromBridge(value) {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const pose = {
-    x: normalizeFiniteNumber(value.x),
-    y: normalizeFiniteNumber(value.y),
-    theta: normalizeFiniteNumber(value.theta),
-  }
-
-  if (!Number.isFinite(pose.x) || !Number.isFinite(pose.y) || !Number.isFinite(pose.theta)) {
-    return null
-  }
-
-  return {
-    ...pose,
-    frame: normalizeFrameId(value.frame),
-    childFrame: normalizeFrameId(value.childFrame),
-    source: normalizeString(value.source),
-  }
 }
 
 function normalizeFiniteNumber(value) {

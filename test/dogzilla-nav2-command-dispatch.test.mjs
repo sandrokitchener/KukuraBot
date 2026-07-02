@@ -77,7 +77,7 @@ test('first waypoint command failure is recorded in nav2 event log even after re
         (event) => event.source === 'command-dispatch' && event.nextState === 'blocked' && event.blocker === originalBlocker,
       )
       assert.ok(failureEvent, 'event log records the original command-dispatch blocker')
-      assert.equal(failureEvent.repairAction, 'command-retry')
+      assert.equal(failureEvent.retryAction, 'command-retry')
       assert.equal(failureEvent.readinessStep, 'action_server')
 
       const failureIndex = events.indexOf(failureEvent)
@@ -85,7 +85,7 @@ test('first waypoint command failure is recorded in nav2 event log even after re
         .slice(failureIndex + 1)
         .find((event) => event.source === 'command-dispatch' && event.nextState === 'ready')
       assert.ok(retrySuccess, 'retry success logged after the original blocker')
-      assert.equal(retrySuccess.repairAction, 'command-retry')
+      assert.equal(retrySuccess.retryAction, 'command-retry')
     },
   )
 

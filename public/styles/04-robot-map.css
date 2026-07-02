@@ -201,9 +201,8 @@
 }
 
 .map-workflow-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  gap: 8px;
   padding: 8px 10px;
 }
 
@@ -213,11 +212,12 @@
 }
 
 .map-workflow-step {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 20px minmax(96px, 0.35fr) minmax(0, 1fr) minmax(128px, auto);
   align-items: center;
-  gap: 8px;
-  min-height: 30px;
+  gap: 6px 8px;
+  min-height: 34px;
+  padding: 6px 0;
 }
 
 .map-step-number {
@@ -235,17 +235,18 @@
 }
 
 .map-step-label {
+  min-width: 0;
   color: #6f675f;
   font-size: 0.72rem;
   font-weight: 800;
+  line-height: 1.2;
   text-transform: uppercase;
-  min-width: 110px;
-  flex-shrink: 0;
 }
 
 .map-workflow-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   min-width: 0;
 }
@@ -286,11 +287,12 @@
 }
 
 .map-step-hint {
-  flex-basis: 100%;
-  margin-left: 28px;
-  color: #9a958f;
-  font-size: 0.68rem;
+  min-width: 0;
+  color: #7f7871;
+  font-size: 0.7rem;
   font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
   text-transform: none;
 }
 
@@ -342,7 +344,51 @@
 .map-new-space-note {
   color: #9a958f;
   font-size: 0.7rem;
+  line-height: 1.35;
   margin: 0;
+}
+
+.map-workflow-step .waypoint-capture-row,
+.map-workflow-step .stale-waypoints-panel {
+  grid-column: 4;
+}
+
+.map-workflow-step .stale-waypoints-panel {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .map-workflow-head {
+    align-items: flex-start;
+  }
+
+  .map-workflow-status {
+    white-space: normal;
+  }
+
+  .map-workflow-step {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .map-step-hint,
+  .map-workflow-step > .map-workflow-actions,
+  .map-workflow-step .waypoint-capture-row,
+  .map-workflow-step .stale-waypoints-panel {
+    grid-column: 2;
+  }
+
+  .map-workflow-actions {
+    justify-content: flex-start;
+  }
+
+  .waypoint-capture-row {
+    width: 100%;
+  }
+
+  .waypoint-capture-input {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
 }
 
 .robot-map-meta-row {

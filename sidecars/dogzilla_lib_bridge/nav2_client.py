@@ -1241,41 +1241,8 @@ class Nav2NavigateClient:
             self.docker_import_error = None
             return
 
-        self._try_install_docker_nav2_msgs()
-
-        try:
-            completed = self._run_docker_python(
-                "import rclpy\nfrom nav2_msgs.action import NavigateToPose\nfrom rclpy.action import ActionClient\nprint('ok')\n",
-                timeout=6,
-            )
-        except subprocess.TimeoutExpired:
-            self.docker_import_error = "docker import probe timed out after 6.0s"
-            self.import_error = f"{self.host_import_error}; docker:{self.docker_import_error}"
-            return
-        if completed.returncode == 0:
-            self.backend = "docker-rclpy"
-            self.client_available = True
-            self.import_error = None
-            self.docker_import_error = None
-            return
-
         self.docker_import_error = summarize_process_text(completed.stderr) or summarize_process_text(completed.stdout) or f"docker exec returned {completed.returncode}"
         self.import_error = f"{self.host_import_error}; docker:{self.docker_import_error}"
-
-    def _try_install_docker_nav2_msgs(self) -> None:
-        try:
-            subprocess.run(
-                [
-                    "docker", "exec", self.docker_container,
-                    "bash", "-c",
-                    "apt-get update -qq 2>/dev/null && apt-get install -y --no-install-recommends -qq ros-humble-nav2-msgs 2>/dev/null",
-                ],
-                timeout=30,
-                capture_output=True,
-                check=False,
-            )
-        except Exception:
-            pass
 
     def _refresh_status(self, *, force: bool = False) -> None:
         now = time.monotonic()

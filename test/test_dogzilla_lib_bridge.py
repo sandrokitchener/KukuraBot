@@ -147,16 +147,16 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         result = supervisor.ensure_running({
             "required": True,
             "mode": "nav2_costmap",
-            "lidarTopic": "/scan",
         })
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["mode"], "nav2_costmap")
+        self.assertEqual(result["lidarTopic"], "/scan_nav2")
         self.assertEqual(result["publisherCount"], 1)
         self.assertEqual(result["subscriptionCount"], 2)
         self.assertIn("not started", result["safety"])
         self.assertEqual(calls[0], ("bridge-scan",))
-        self.assertEqual(calls[1], ("scan", "/scan"))
+        self.assertEqual(calls[1], ("scan", "/scan_nav2"))
 
     def test_nav2_costmap_scan_endpoint_handles_missing_url(self):
         supervisor = dogzilla_lib_bridge.LidarAvoidanceSupervisor()
@@ -189,13 +189,58 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         result = supervisor.ensure_running({
             "required": True,
             "mode": "nav2_costmap",
-            "lidarTopic": "/scan",
         })
 
         self.assertTrue(result["ok"])
+        self.assertEqual(result["lidarTopic"], "/scan_nav2")
         self.assertEqual(result["attempt"], "dogzilla-scan-endpoint")
         self.assertEqual(result["validRanges"], 438)
         self.assertEqual(calls, [])
+
+    def test_nav2_costmap_lidar_mode_trusts_provided_scan_status(self):
+        supervisor = dogzilla_lib_bridge.LidarAvoidanceSupervisor()
+        calls = []
+
+        def fake_bridge_scan_endpoint():
+            calls.append(("bridge-scan",))
+            return {"ok": False, "attempt": "dogzilla-scan-endpoint", "error": "scan endpoint unavailable"}
+
+        supervisor._check_bridge_scan_endpoint = fake_bridge_scan_endpoint
+
+        result = supervisor.ensure_running({
+            "required": True,
+            "mode": "nav2_costmap",
+            "scanStatus": {
+                "topic": "/scan_nav2",
+                "publisherCount": 1,
+                "subscriptionCount": 2,
+                "available": True,
+                "checkedAt": 123.0,
+            },
+        })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["attempt"], "nav2-scan-status")
+        self.assertEqual(result["lidarTopic"], "/scan_nav2")
+        self.assertEqual(calls, [])
+
+    def test_non_nav2_lidar_mode_defaults_to_raw_scan_topic(self):
+        supervisor = dogzilla_lib_bridge.LidarAvoidanceSupervisor()
+        seen = []
+
+        def fake_run_candidate(label, command, shell):
+            seen.append((label, command, shell))
+            return {"ok": True, "stdout": "", "stderr": ""}
+
+        supervisor._run_candidate = fake_run_candidate
+        result = supervisor.ensure_running({
+            "required": True,
+            "mode": "yahboom_laser",
+        })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["lidarTopic"], "/scan")
+        self.assertTrue(seen)
 
     def test_parse_ros_topic_count(self):
         self.assertEqual(dogzilla_lib_bridge.parse_ros_topic_count("Publisher count: 3", "Publisher count"), 3)
@@ -350,6 +395,34 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["lidarAvoidance"]["mode"], "yahboom_laser")
         self.assertEqual(runtime.lidar_avoidance.requests[0]["lidarTopic"], "/scan")
         self.assertEqual(runtime.nav2_client.goal["frame"], "map")
+
+    def test_goto_passes_cached_scan_status_to_nav2_costmap_avoidance(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = "serial lib unavailable"
+        runtime.dry_run = False
+        runtime.nav2_client = FakeNav2Client()
+        runtime.lidar_avoidance = FakeLidarAvoidance()
+
+        result = runtime.execute({
+            "kind": "locomotion.goto",
+            "params": {
+                "frame": "map",
+                "x": 1,
+                "y": -2,
+                "yaw": 0.2,
+                "waypoint": "living_room",
+                "obstacleAvoidance": {
+                    "required": True,
+                    "mode": "nav2_costmap",
+                    "lidarTopic": "/scan_nav2",
+                },
+            },
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertEqual(runtime.lidar_avoidance.requests[0]["mode"], "nav2_costmap")
+        self.assertEqual(runtime.lidar_avoidance.requests[0]["scanStatus"]["topic"], "/scan_nav2")
+        self.assertTrue(runtime.lidar_avoidance.requests[0]["scanStatus"]["available"])
 
     def test_goto_blocks_nav2_when_required_lidar_avoidance_fails(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -944,18 +1017,24 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             },
         })
 
-        self.assertTrue(goto["executed"])
+        self.assertFalse(goto["executed"])
+        self.assertEqual(goto["delivery"], "rejected")
+        self.assertEqual(goto["blockedReason"], "emergency_stop")
         self.assertTrue(runtime.nav2_cmd_vel_blocked)
         self.assertEqual(runtime.nav2_cmd_vel_blocked_reason, "emergency_stop")
+
+        cleared = runtime.execute({"kind": "noop", "params": {"reason": "clear_emergency_stop"}})
+        self.assertTrue(cleared["executed"])
+        self.assertEqual(cleared["delivery"], "emergency-stop-cleared")
+        self.assertFalse(runtime.nav2_cmd_vel_blocked)
+        self.assertIsNone(runtime.nav2_cmd_vel_blocked_reason)
 
         resumed = runtime.execute_nav2_cmd_vel({
             "linear": {"x": 0.13, "y": 0.0},
             "angular": {"z": 0.0},
         })
 
-        self.assertFalse(resumed["executed"])
-        self.assertEqual(resumed["delivery"], "nav2-gait-adapter-blocked")
-        self.assertEqual(resumed["blockedReason"], "emergency_stop")
+        self.assertTrue(resumed["executed"])
 
     def test_command_preempt_cancels_nav2_without_blocking_gait_adapter(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -1043,48 +1122,25 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         # Restore navigate to avoid affecting other tests.
         dogzilla_lib_bridge.set_nav_mode("navigate")
 
-    def test_enter_navigate_mode_fails_when_required_nav2_start_fails(self):
-        old_start_map_pose = dogzilla_lib_bridge._start_map_pose
-        old_start_nav2 = dogzilla_lib_bridge._start_nav2
-        old_start_yolo = dogzilla_lib_bridge._start_yolo
-        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_start_map_pose", old_start_map_pose))
-        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_start_nav2", old_start_nav2))
-        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_start_yolo", old_start_yolo))
-
-        dogzilla_lib_bridge._start_map_pose = lambda: {"service": "cartographer", "started": True}
-        dogzilla_lib_bridge._start_nav2 = lambda: {"service": "nav2", "started": False, "output": "timeout"}
-        dogzilla_lib_bridge._start_yolo = lambda: {"service": "yolo-vision", "started": False}
-
+    def test_enter_navigate_mode_is_logical_only(self):
         result = dogzilla_lib_bridge._enter_navigate_mode()
 
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"], "navigation_stack_start_failed")
-        self.assertEqual(result["failed"], [{"service": "nav2", "started": False, "output": "timeout"}])
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["piOwnedNav2"])
+        self.assertIn("did not start or restart navigation", result["note"])
 
-    def test_start_map_pose_allows_full_startup_lock_timeout(self):
-        calls = []
-        old_run = dogzilla_lib_bridge._run
-        old_origin_file = dogzilla_lib_bridge.MAP_ORIGIN_FILE
-        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_run", old_run))
-        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "MAP_ORIGIN_FILE", old_origin_file))
-        origin_file = Path(self.map_tmp.name) / "dogzilla-map-origin.json"
-        origin_file.write_text(json.dumps({"x": -0.82237, "y": -0.45429, "yaw": 3.02537}), encoding="utf-8")
-        dogzilla_lib_bridge.MAP_ORIGIN_FILE = origin_file
-
-        def fake_run(command, timeout=None):
-            calls.append({"command": command, "timeout": timeout})
-            return 0, "started"
-
-        dogzilla_lib_bridge._run = fake_run
-
-        result = dogzilla_lib_bridge._start_map_pose()
-
-        self.assertTrue(result["started"])
-        self.assertEqual(calls[0]["timeout"], 180.0)
-        self.assertIn("robodoge-map-pose", calls[0]["command"])
-        self.assertIn("DOGZILLA_DOCKER_EXEC=1", calls[0]["command"])
-        self.assertIn("DOGZILLA_FORCE_RESTART=1", calls[0]["command"])
-        self.assertIn("DOGZILLA_INITIAL_POSE_X=-0.82237", calls[0]["command"])
+    def test_nav_modes_do_not_start_or_restart_pi_services(self):
+        for mode_func in (
+            dogzilla_lib_bridge._enter_sleep_mode,
+            dogzilla_lib_bridge._enter_idle_mode,
+            dogzilla_lib_bridge._enter_localize_mode,
+            dogzilla_lib_bridge._enter_navigate_mode,
+        ):
+            with self.subTest(mode=mode_func.__name__):
+                result = mode_func()
+                self.assertTrue(result["ok"])
+                self.assertTrue(result["piOwnedNav2"])
+                self.assertIn("Pi-owned", result["note"])
 
     def test_auto_sleep_demotes_to_idle_not_sleep(self):
         calls = []
@@ -1202,6 +1258,15 @@ class FakeActionRobot:
 
 
 class FakeNav2Client:
+    def _scan_snapshot(self):
+        return {
+            "topic": "/scan_nav2",
+            "publisherCount": 1,
+            "subscriptionCount": 2,
+            "available": True,
+            "checkedAt": 123.0,
+        }
+
     def send_goal(self, *, frame, x, y, yaw):
         self.goal = {"frame": frame, "x": x, "y": y, "yaw": yaw}
         return {
@@ -1266,7 +1331,7 @@ class FakeLidarAvoidance:
             "required": True,
             "ok": True,
             "mode": request.get("mode", "yahboom_laser"),
-            "lidarTopic": request.get("lidarTopic", "/scan"),
+            "lidarTopic": request.get("lidarTopic", "/scan_nav2"),
         }
 
     def snapshot(self):

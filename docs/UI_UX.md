@@ -41,7 +41,7 @@ The interface should show evidence from the real readiness chain and preserve lo
 Add a compact status area visible from the main control screens:
 
 - Connection state
-- Current task: `IDLE`, `MOVING`, `SCANNING`, `PATROLLING`, `TALKING`, `THINKING`, `TRICK`, `REPAIRING`, or `ERROR`
+- Current task: `IDLE`, `MOVING`, `SCANNING`, `PATROLLING`, `TALKING`, `THINKING`, `TRICK`, `BLOCKED`, or `ERROR`
 - Navigation phase: ready, finding waypoint, moving, stuck, blocked, unknown
 - Battery or power state when available
 - Last telemetry update age
@@ -130,7 +130,7 @@ Each event should include:
 - readiness step that failed
 - probe duration when available
 - bridge destination URL
-- repair action attempted when available
+- command retry action when available
 
 Persist transition events to:
 
@@ -140,7 +140,7 @@ output/app-cache/nav2-events.ndjson
 
 Only write when state changes or the blocker changes. Do not log every poll.
 
-State-snapshot stability should use cached bridge health for display continuity and require two consecutive failing /api/robot/state samples before leaving eady; command dispatch and repair failures still record immediately.
+State-snapshot stability should use cached bridge health for display continuity and require two consecutive failing /api/robot/state samples before leaving ready; command dispatch failures still record immediately.
 
 ### API Shape
 
@@ -174,7 +174,6 @@ Show Nav2 stability near the map/status area:
 - Current state
 - Last ready time
 - Last failure time
-- Last repair time
 - Current blocker
 - Recent transition summary
 

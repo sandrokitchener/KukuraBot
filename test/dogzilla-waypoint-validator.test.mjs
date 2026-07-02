@@ -311,3 +311,53 @@ test('validateDogzillaWaypointsFromFiles does not modify robot-waypoints source'
   assert.deepEqual(report.blockers, [])
   assert.equal(await readFile(waypointFile, 'utf-8'), originalConfig)
 })
+
+test('validateDogzillaWaypointsFromFiles trusts healthz-lite waypoint readiness over stale full lifecycle probes', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-validate-'))
+  const waypointFile = path.join(tempDir, 'robot-waypoints.json')
+  const originFile = path.join(tempDir, 'origin.json')
+  const health = nav2HealthBody()
+  health.runtime.nav2.lifecycle = {
+    active: false,
+    nodes: [{ name: 'controller_server', active: false, error: 'timeout' }],
+  }
+  health.runtime.nav2.scan = {
+    topic: '/scan_nav2',
+    publisherCount: 1,
+    subscriptionCount: 0,
+    available: false,
+  }
+  health.runtime.navigation = {
+    nav2: health.runtime.nav2,
+  }
+
+  await writeFile(waypointFile, `${JSON.stringify(waypointConfig({
+    kitchen: mapWaypoint({ x: 1.2, y: -0.4, yaw: 0.75 }),
+  }), null, 2)}\n`, 'utf-8')
+  await writeFile(originFile, `${JSON.stringify({
+    frame: 'app_map',
+    sourceFrame: 'map',
+    label: 'charger_origin',
+    x: 0,
+    y: 0,
+    yaw: 0,
+    map: health.runtime.map,
+  }, null, 2)}\n`, 'utf-8')
+
+  const report = await validateDogzillaWaypointsFromFiles({
+    waypointFile,
+    originFile,
+    bridgeHealthUrl: 'http://dog.test/healthz',
+    fetchImpl: async (url) => ({
+      ok: true,
+      json: async () => String(url).endsWith('/healthz-lite')
+        ? { ok: true, waypointReady: true, nav2Ready: true, canSendGoal: true, nav2Backend: 'docker-rclpy' }
+        : health,
+    }),
+  })
+
+  assert.equal(report.readyForMapWaypoints, true)
+  assert.equal(report.navigation.ready, true)
+  assert.equal(report.navigation.lifecycleActive, false)
+  assert.deepEqual(report.blockers, [])
+})

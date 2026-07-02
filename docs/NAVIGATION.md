@@ -44,10 +44,9 @@ Key files:
 | `lib/app-service.mjs` | Uses the same resolved runtime/ROS2 config for chat preview and robot dispatch |
 | `lib/dogzilla-navigation-readiness.mjs` | App-side readiness evaluation |
 | `sidecars/dogzilla_lib_bridge/nav2_client.py` | Direct bridge Nav2 client and runtime truth |
-| `sidecars/dogzilla_navigation/start-navigation-in-container.sh` | Container-side Nav2 install/param/filter/launch script |
+| `sidecars/dogzilla_navigation/start-navigation-in-container.sh` | Container-side Nav2 param/filter/launch script; waits for Pi-owned map-pose TF before Nav2 |
 | `sidecars/dogzilla_navigation/tf_odom_publisher.py` | Publishes `/odom`; falls back to synthetic relative odom anchored at first `map->base_link` pose when no `odom` frame exists |
-| `sidecars/dogzilla_navigation/odom_publisher_supervisor.py` | Keeps the repo `/odom` helper alive |
-| `sidecars/dogzilla_navigation/scan_filter_supervisor.py` | Keeps `/scan_nav2` alive |
+| `sidecars/dogzilla_navigation/scan_self_filter.py` | Masks LiDAR self-hits and publishes `/scan_nav2` |
 | `sidecars/dogzilla_navigation/wait-nav2-ready.sh` | Bounded in-container readiness check for `/navigate_to_pose`, `/odom`, and `/scan_nav2` |
 
 ## Map and waypoint authority
@@ -97,6 +96,8 @@ If Nav2 cannot drive to a spot, use manual controls. If the robot was carried, r
 
 ## Readiness checks
 
+`robodoge-rosbridge.service` must prove at least one live `/scan` `LaserScan` sample at startup and continue watchdog checks. Process ownership of `/dev/ttyAMA1` or a visible `/scan` publisher is not enough, because Cartographer can advertise dependencies yet never produce `map->base_link` without real scan samples.
+
 Fast commands live in `docs/COMMANDS.md`.
 
 Startup/preflight readiness is based on:
@@ -107,9 +108,13 @@ Startup/preflight readiness is based on:
 4. `/scan_nav2` has a live publisher and costmap subscribers.
 5. `/navigate_to_pose` action discovery is reported, but Pi DDS discovery misses are tolerated at bridge readiness if the rest of the stack is proven.
 
+For direct-bridge `locomotion.goto`, `obstacleAvoidance.mode = "nav2_costmap"` must validate `/scan_nav2`, not raw `/scan`. Raw `/scan` remains for rosbridge/LiDAR transport and non-Nav2 avoidance flows only.
+
+The app rosbridge client intentionally subscribes only to throttled `/scan`, `/tf`, `/tf_static`, and `/odom` by default. Do not add `/map_cartographer` back to default `rosbridgeTopics`; full occupancy grids are large JSON payloads and can make `rosbridge_websocket` memory climb on the Pi.
+
 The repo odom helper first uses `odom->base_link`; if absent, it anchors the first live `map->base_link` pose and publishes synthetic relative `/odom`. Do not publish raw global map pose as odom.
 
-The scan filter and odom helpers are supervised because child `rclpy` processes can exit or stop publishing while the process still exists. ROS2 CLI readiness calls are bounded because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
+The scan filter and odom helper run as direct background processes inside the rosbridge container. ROS2 CLI calls are bounded because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
 
 Nav2 startup must not fail solely on a short `ros2 topic info /scan_nav2` miss. The scan filter gate waits up to 45 seconds and accepts either publisher discovery or a one-message `/scan_nav2` sample before launching Nav2; otherwise DDS discovery lag can leave only partial helpers running and no lifecycle nodes.
 
@@ -170,6 +175,8 @@ Control modes via bridge:
 
 Pi boot/systemd owns normal map-pose/Nav2 lifetime. `robodoge-rosbridge.service` keeps the shared ROS container running, `robodoge-map-pose.service` starts Cartographer localization, and `robodoge-navigation.service` runs `sidecars/dogzilla_navigation/start-navigation-in-container.sh` inside `robodoge-rosbridge`. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`.
 
+Startup scripts must not install ROS packages during normal boot. If Nav2, Cartographer, or `nav2_msgs` dependencies are missing, the Pi-owned service should fail loud so the image/setup can be fixed explicitly.
+
 SLAM is the explicit exception: the operator-owned New Map / Save Map workflow uses `start-map-pose-mapping` and `save-map-pose` to switch Cartographer into mapping mode, save the new map, then restart localization against that map. That flow is intentional and separate from normal app startup or waypoint dispatch.
 
 ## Velocity smoother bypass
@@ -219,14 +226,11 @@ npm run dogzilla:set-origin
 npm run dogzilla:validate-waypoints
 ```
 
-In UI Mini Map > Navigation Setup:
+In UI Mini Map > Map Controls:
 
-1. Localize on Map.
-2. Mark Origin.
-3. Save Spot, then Check Ready.
-4. Restart Nav when repair is needed.
+Primary mapping row: Start New Map, then Save Map. Advanced Setup contains Localize Saved Map, Mark Origin, Save Spot, Check Ready, and Restart Nav.
 
-For a new map, expand "Map a new space": New Map -> drive -> Save Map. Save Map restarts localization against the new map.
+Use the primary Build / Save Map row for SLAM: Start New Map -> drive slow overlapping loops -> Save Map. Save Map promotes the new default only after Cartographer writes `.pbstream` and conversion produces Nav2 `.yaml`/`.pgm`; otherwise the previous default stays active. Successful Save Map restarts localization against the saved map.
 
 `Localize on Map` seeds Cartographer localization from the saved charger origin (`output/app-cache/dogzilla-map-origin.json` locally, deployed to `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` on the Pi), defaulting to no initial pose when no origin exists. It is local refinement, not global relocalization.
 

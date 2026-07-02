@@ -100,6 +100,52 @@ describe('deriveNavigationStatus', () => {
     assert.match(result.text, /NavigateToPose/)
   })
 
+  it('keeps Nav2 ready when bridge waypointReady overrides stale action discovery miss', () => {
+    const result = deriveNavigationStatus({
+      bridgeRuntime: {
+        navigation: {
+          ready: true,
+          waypointReady: true,
+          blockers: ['Nav2 NavigateToPose action server is not running in ROS graph for action navigate_to_pose'],
+          nav2: {
+            serverAvailable: false,
+            waypointReady: true,
+            lifecycle: { active: true },
+            scan: { available: true },
+          },
+        },
+      },
+    })
+
+    assert.equal(result.status, 'ready')
+    assert.equal(result.severity, 'green')
+    assert.equal(result.text, 'Nav2 ready')
+  })
+
+  it('keeps Nav2 ready when app waypoint readiness overrides stale runtime action blocker', () => {
+    const result = deriveNavigationStatus({
+      dogzillaWaypointReadiness: {
+        readyForMapWaypoints: true,
+        blockers: [],
+      },
+      bridgeRuntime: {
+        navigation: {
+          waypointReady: false,
+          blockers: ['Nav2 NavigateToPose action server is not running in ROS graph for action navigate_to_pose'],
+          nav2: {
+            serverAvailable: false,
+            lifecycle: { active: true },
+            scan: { available: true },
+          },
+        },
+      },
+    })
+
+    assert.equal(result.status, 'ready')
+    assert.equal(result.severity, 'green')
+    assert.equal(result.text, 'Nav2 ready')
+  })
+
   it('returns navigating when dispatch active and pose moving', () => {
     const t = now()
     const result = deriveNavigationStatus({

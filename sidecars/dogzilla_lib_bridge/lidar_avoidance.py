@@ -17,6 +17,10 @@ DEFAULT_LIDAR_AVOIDANCE_ENABLED = os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_ENABL
 DEFAULT_LIDAR_AVOIDANCE_TIMEOUT = float(os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_TIMEOUT", "4.0"))
 DEFAULT_LIDAR_AVOIDANCE_COMMAND = os.environ.get("DOGZILLA_LIDAR_AVOIDANCE_COMMAND", "").strip()
 DEFAULT_LIDAR_SCAN_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_LIDAR_SCAN_WAIT_TIMEOUT", "2.0"))
+DEFAULT_NAV2_SCAN_TOPIC = os.environ.get(
+    "DOGZILLA_NAV2_SCAN_TOPIC",
+    os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2"),
+)
 NAV2_COSTMAP_LIDAR_MODE = "nav2_costmap"
 LIDAR_AVOIDANCE_PACKAGE = "yahboom_laser"
 LIDAR_AVOIDANCE_NODE = "laser_Avoidance_xgo_RS200"
@@ -67,7 +71,9 @@ class LidarAvoidanceSupervisor:
             "required": True,
             "enabled": self.enabled,
             "mode": mode,
-            "lidarTopic": request.get("lidarTopic") or "/scan",
+            "lidarTopic": request.get("lidarTopic") or (
+                DEFAULT_NAV2_SCAN_TOPIC if mode == NAV2_COSTMAP_LIDAR_MODE else "/scan"
+            ),
             "command": request.get("command") or LIDAR_AVOIDANCE_DOC_COMMAND,
         }
 
@@ -77,7 +83,7 @@ class LidarAvoidanceSupervisor:
             return result
 
         if mode == NAV2_COSTMAP_LIDAR_MODE:
-            result = self._ensure_nav2_costmap_scan(base)
+            result = self._ensure_nav2_costmap_scan(base, request=request)
             self.last_result = result
             return result
 
@@ -100,9 +106,31 @@ class LidarAvoidanceSupervisor:
         self.last_result = result
         return result
 
-    def _ensure_nav2_costmap_scan(self, base: dict[str, Any]) -> dict[str, Any]:
+    def _ensure_nav2_costmap_scan(
+        self,
+        base: dict[str, Any],
+        *,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         failures: list[dict[str, Any]] = []
-        topic = str(base.get("lidarTopic") or "/scan")
+        topic = str(base.get("lidarTopic") or DEFAULT_NAV2_SCAN_TOPIC)
+        request = request if isinstance(request, dict) else {}
+
+        scan_status = request.get("scanStatus") if isinstance(request.get("scanStatus"), dict) else None
+        if scan_status and str(scan_status.get("topic") or topic) == topic:
+            publisher_count = int(scan_status.get("publisherCount") or 0)
+            subscription_count = int(scan_status.get("subscriptionCount") or 0)
+            if scan_status.get("available") is True and publisher_count > 0 and subscription_count > 0:
+                return {
+                    **base,
+                    "ok": True,
+                    "attempt": "nav2-scan-status",
+                    "publisherCount": publisher_count,
+                    "subscriptionCount": subscription_count,
+                    "checkedAt": scan_status.get("checkedAt"),
+                    "safety": "Nav2 costmaps own obstacle avoidance; the bridge re-used the live Nav2 scan snapshot instead of re-probing ROS.",
+                }
+
         bridge_scan = self._check_bridge_scan_endpoint()
         if bridge_scan.get("ok"):
             return {

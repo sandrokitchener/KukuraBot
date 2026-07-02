@@ -266,68 +266,71 @@
                 <span id="robot-map-bbox" class="map-bbox" hidden></span>
               </div>
             </div>
-<details id="map-workflow-panel" class="map-workflow-panel">
+<details id="map-workflow-panel" class="map-workflow-panel" open>
 <summary class="map-workflow-head">
-<span class="map-workflow-title">Navigation Setup</span>
-<span id="map-workflow-status" class="map-workflow-status">Ready check not run.</span>
+<span class="map-workflow-title">Map Controls</span>
+<span id="map-workflow-status" class="map-workflow-status">Ready.</span>
 </summary>
-              <div class="map-workflow-steps">
-                <div class="map-workflow-step">
-                  <span class="map-step-number">1</span>
-                  <span class="map-step-label">Localize on Map</span>
-                  <span class="map-step-hint">Find robot on saved map. Auto-started on app launch.</span>
-                  <div class="map-workflow-actions">
-                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Localize on Map</button>
-                  </div>
-                </div>
-                <div class="map-workflow-step">
-                  <span class="map-step-number">2</span>
-                  <span class="map-step-label">Mark Origin</span>
-                  <span class="map-step-hint">Set charger/home. Once per map or after remap.</span>
-                  <div class="map-workflow-actions">
-                    <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Mark Origin</button>
-                  </div>
-                </div>
-                <div class="map-workflow-step">
-                  <span class="map-step-number">3</span>
-                  <span class="map-step-label">Save Waypoints</span>
-                  <span class="map-step-hint">DRIVE to each spot, wait for waypointSafe, then save.</span>
-                  <div class="waypoint-capture-row">
-                    <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
-                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as a waypoint">Save Spot</button>
-                    <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
-                  </div>
-                  <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
-                    <span class="stale-waypoints-label">Out of date — drive robot here, then click Recapture</span>
-                    <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
-                  </div>
-                </div>
-                <div class="map-workflow-step">
-                  <span class="map-step-number">4</span>
-                  <span class="map-step-label">Check Ready</span>
-                  <span class="map-step-hint">Verify Nav2 + waypoint readiness before dispatch.</span>
-                  <div class="map-workflow-actions">
-                    <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check Ready</button>
-                    <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Nav</button>
-                  </div>
-                </div>
-              </div>
-              <details id="map-new-space-section" class="map-new-space-section">
-                <summary class="map-new-space-head">
-                  <span class="map-new-space-title">Map a new space</span>
-                  <span class="map-new-space-hint">First time or replacing a stale map</span>
-                </summary>
-                <div class="map-new-space-body">
-                  <span id="slam-mode-chip" class="slam-mode-chip" hidden>Mapping</span>
-                  <div class="map-workflow-actions">
-                    <button type="button" id="new-map-button" class="map-slam-button" data-connection-action="start-map-pose-mapping">New Map</button>
-                    <button type="button" id="save-map-button" class="map-slam-button" data-connection-action="save-map-pose" disabled>Save Map</button>
-                  </div>
-                  <p class="map-new-space-note">After Save Map, localization restarts automatically against the new map.</p>
-                </div>
-              </details>
+<div class="map-workflow-steps">
+  <div class="map-workflow-step map-workflow-step-primary">
+    <span class="map-step-number">1</span>
+    <span class="map-step-label">Build / Save Map</span>
+    <span class="map-step-hint">Start New Map, drive slow overlapping loops, then Save Map. Save Map commits the default map and restarts localization.</span>
+    <div class="map-workflow-actions map-slam-actions">
+      <span id="slam-mode-chip" class="slam-mode-chip" hidden>Live mapping</span>
+      <button type="button" id="new-map-button" class="map-slam-button" data-connection-action="start-map-pose-mapping">Start New Map</button>
+      <button type="button" id="save-map-button" class="map-slam-button" data-connection-action="save-map-pose">Save Map</button>
+    </div>
+  </div>
+</div>
+<details id="map-advanced-setup-section" class="map-new-space-section">
+  <summary class="map-new-space-head">
+    <span class="map-new-space-title">Advanced Setup</span>
+    <span class="map-new-space-hint">Origin, waypoints, readiness</span>
+  </summary>
+  <div class="map-workflow-steps">
+    <div class="map-workflow-step">
+      <span class="map-step-number">2</span>
+      <span class="map-step-label">Localize Saved Map</span>
+      <span class="map-step-hint">Restart saved-map localization when pose is stale. This does not create or save a map.</span>
+      <div class="map-workflow-actions">
+        <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Localize Saved Map</button>
+      </div>
+    </div>
+    <div class="map-workflow-step">
+      <span class="map-step-number">3</span>
+      <span class="map-step-label">Mark Charger Origin</span>
+      <span class="map-step-hint">Set charger/home after the saved map is aligned.</span>
+      <div class="map-workflow-actions">
+        <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Mark Origin</button>
+      </div>
+    </div>
+    <div class="map-workflow-step">
+      <span class="map-step-number">4</span>
+      <span class="map-step-label">Save Waypoint</span>
+      <span class="map-step-hint">Drive to the real spot, wait for trusted map pose, then save or recapture.</span>
+      <div class="waypoint-capture-row">
+        <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
+        <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as waypoint">Save Spot</button>
+        <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
+      </div>
+      <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
+        <span class="stale-waypoints-label">Out of date - drive robot here, then click Recapture</span>
+        <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
+      </div>
+    </div>
+    <div class="map-workflow-step">
+      <span class="map-step-number">5</span>
+      <span class="map-step-label">Check Navigation</span>
+      <span class="map-step-hint">Verify Nav2, scan, odom, and waypoint dispatch readiness.</span>
+      <div class="map-workflow-actions">
+        <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check Ready</button>
+        <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Nav</button>
+      </div>
+    </div>
+  </div>
 </details>
- <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
+</details><div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
               <span class="robot-map-axis robot-map-axis-y" aria-hidden="true"></span>
@@ -450,11 +453,14 @@
           <p id="connection-status" class="connection-status">Loading connection.</p>
         </section>
 
-        <section class="connection-panel preflight-panel">
-          <div class="bridge-head">
-            <h2>Diagnostics</h2>
+      <section class="connection-panel preflight-panel">
+        <div class="bridge-head">
+          <h2>Diagnostics</h2>
+          <div class="diagnostics-actions">
             <button id="run-dogzilla-preflight-button" type="button">Run diagnostics</button>
+            <button id="check-pi-performance-button" type="button">Pi load</button>
           </div>
+        </div>
           <p id="dogzilla-preflight-status" class="connection-status" aria-live="polite">Not run.</p>
           <div id="dogzilla-preflight-summary" class="preflight-summary" aria-label="DOGZILLA diagnostics summary">
             <div>
@@ -516,7 +522,7 @@
             <div class="bridge-action-grid">
               <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
               <button type="button" data-connection-action="save-map-pose">Save Map</button>
-              <button type="button" data-connection-action="start-map-pose-mapping">New Map</button>
+              <button type="button" data-connection-action="start-map-pose-mapping">Start New Map</button>
               <button type="button" data-connection-action="stop-vendor-app">Stop vendor app</button>
               <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
             </div>
@@ -601,7 +607,7 @@
             <pre class="mermaid">
 flowchart TD
     S{Saved map exists?}
-    S -->|no| A[Open Map a new space]
+    S -->|no| A[Open Build a New SLAM Map]
     A --> B[New Map]
     B --> C[Drive robot around slowly]
     C --> D[Save Map]
@@ -624,7 +630,7 @@ flowchart TD
           <div id="help-mermaid-fallback" class="help-mermaid-fallback" hidden>
             <p>Diagram could not be rendered. Flow:</p>
             <ol class="help-fallback-list">
-              <li>If no saved map: open Map a new space, click New Map</li>
+              <li>If no saved map: open Build a New SLAM Map, click New Map</li>
               <li>Drive robot around slowly to build the map</li>
               <li>Click Save Map</li>
               <li>Localization restarts automatically against the new map</li>
@@ -650,8 +656,8 @@ flowchart TD
               <p>On a normal session, the app does this automatically. It starts Cartographer in localization mode against the saved map. Click "Localize on Map" if you need to restart it manually.</p>
             </li>
             <li>
-              <strong>Map a new space (only first time or when replacing a stale map)</strong>
-              <p>Open the "Map a new space" section and click "New Map". Cartographer enters SLAM mapping mode. Drive the robot slowly around the entire area to build the map, then click "Save Map". Localization restarts automatically against the new map.</p>
+              <strong>Build a New SLAM Map (only first time or when replacing a stale map)</strong>
+              <p>Open the "Build a New SLAM Map" section and click "Start New Map". Cartographer enters SLAM mapping mode. Drive the robot slowly around the entire area to build the map, then click "Save Map". Localization restarts automatically against the new map.</p>
             </li>
             <li>
               <strong>Mark Origin</strong>

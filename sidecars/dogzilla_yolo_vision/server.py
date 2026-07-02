@@ -164,6 +164,7 @@ class VisionWorker(threading.Thread):
                     control_socket.close()
 
     def inference_loop(self) -> None:
+        next_inference_at = 0.0
         while not self.stop_event.is_set():
             try:
                 if self.detector is None:
@@ -185,7 +186,17 @@ class VisionWorker(threading.Thread):
                     time.sleep(0.05)
                     continue
 
+                now = time.monotonic()
+                if now < next_inference_at:
+                    time.sleep(next_inference_at - now)
+                    with self.state.lock:
+                        frame = None if self.state.latest_raw_frame is None else self.state.latest_raw_frame.copy()
+                    if frame is None:
+                        continue
+
+                inference_started_at = time.monotonic()
                 detections, inference_ms = self.detector.detect(frame)
+                next_inference_at = inference_started_at + (1.0 / max(1.0, self.args.inference_fps))
                 with self.state.lock:
                     self.state.latest_detections = detections
                     self.state.inference_ms = inference_ms
@@ -200,7 +211,6 @@ class VisionWorker(threading.Thread):
                                     threading.Thread(target=post_audio_cue, args=(self.args.audio_cue_url,), daemon=True).start()
                                     break
 
-                time.sleep(self.args.infer_interval)
             except Exception as error:
                 with self.state.lock:
                     self.state.latest_error = str(error)
@@ -694,7 +704,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iou", type=float, default=float(os.getenv("DOGZILLA_YOLO_IOU", "0.45")))
     parser.add_argument("--max-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_MAX_FPS", "12")))
     parser.add_argument("--stream-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STREAM_FPS", "12")))
-    parser.add_argument("--infer-interval", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_INFER_INTERVAL", "0.25")))
+    parser.add_argument("--inference-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_INFERENCE_FPS", "4")))
+    parser.add_argument("--infer-interval", type=positive_float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--stale-health-seconds", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STALE_HEALTH_SECONDS", str(DEFAULT_STALE_HEALTH_SECONDS))))
     parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "65")))
     parser.add_argument("--restart-delay", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_RESTART_DELAY", "2")))
@@ -705,6 +716,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.infer_interval is not None:
+        args.inference_fps = 1.0 / args.infer_interval
     model = Path(args.model)
     if not model.exists():
         raise SystemExit(f"YOLO ONNX model missing: {model}")

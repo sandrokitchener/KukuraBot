@@ -65,6 +65,8 @@ Open these only when a compact doc explicitly routes you there or the task direc
 - Open the smallest relevant set of source files after the doc points you there.
 - Summarize findings before broad or cross-subsystem changes.
 - Prefer compact summaries over long pasted command outputs.
+- Always invoke the `caveman` skill for compact agent communication unless the user explicitly asks for normal prose, expanded rationale, or a human-facing document.
+- Always prefer the `cavecrew` skill for bounded read-only fact-gathering, small surgical edits, or diff review when a subagent would help; keep work inline when delegation would add overhead.
 - Do not add transient debugging noise to docs unless it becomes a repeated known issue.
 - After meaningful changes, update the relevant `.md` file briefly and factually.
 - If status is live-environment dependent and you did not verify it this turn, write `Unknown / not confirmed`.

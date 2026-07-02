@@ -76,6 +76,13 @@ elif ros2 pkg executables cartographer_ros 2>/dev/null | grep -q "cartographer_p
     || conversion_status="error"
 fi
 
+if [ "$conversion_status" != "ok" ] || [ ! -s "$map_stem.yaml" ] || [ ! -s "$map_stem.pgm" ]; then
+  echo "Cartographer saved $target_pbstream, but Nav2 map conversion did not produce $map_stem.yaml and $map_stem.pgm." >&2
+  echo "Refusing to update $DOGZILLA_MAP_METADATA so the active default map stays unchanged." >&2
+  cat "$REMOTE_ROOT/logs/map-pose-save.log" >&2 || true
+  exit 2
+fi
+
 cat > "$DOGZILLA_MAP_METADATA" <<JSON
 {
   "id": "$map_id",

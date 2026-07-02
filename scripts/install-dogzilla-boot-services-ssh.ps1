@@ -216,6 +216,7 @@ sudo tee /etc/systemd/system/robodoge-map-pose.service >/dev/null <<SERVICE
 Description=Robo-Doge DOGZILLA Cartographer Map Pose
 After=robodoge-rosbridge.service
 Wants=robodoge-rosbridge.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -224,6 +225,8 @@ EnvironmentFile=/etc/robodoge/dogzilla.env
 ExecStartPre=-/usr/bin/docker rm -f robodoge-map-pose
 ExecStart=/usr/bin/docker run --rm --name robodoge-map-pose --privileged --network host -e REMOTE_ROOT=$REMOTE_ROOT -e POSE_PORT=$LIDAR_PORT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_MAP_POSE_MODE=auto -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_map_pose/start-map-pose-in-container.sh'
 ExecStop=-/usr/bin/docker rm -f robodoge-map-pose
+Restart=on-failure
+RestartSec=10
 TimeoutStartSec=180
 StandardOutput=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/map-pose-systemd.log
@@ -238,6 +241,7 @@ Description=Robo-Doge DOGZILLA Nav2 Navigation
 After=robodoge-rosbridge.service robodoge-map-pose.service
 Wants=robodoge-rosbridge.service robodoge-map-pose.service
 PartOf=robodoge-rosbridge.service robodoge-map-pose.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -247,8 +251,9 @@ ExecStartPre=/bin/bash -lc 'for i in \$(seq 1 60); do /usr/bin/docker inspect -f
 ExecStartPre=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "[s]tart-navigation-in-container.sh" 2>/dev/null || true'
 ExecStart=/usr/bin/docker exec robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
 ExecStop=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "/opt/ros/humble/lib/nav2_|[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null || true'
-Restart=no
-TimeoutStartSec=180
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=240
 StandardOutput=append:$REMOTE_ROOT/logs/navigation-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/navigation-systemd.log
 

@@ -144,6 +144,7 @@ const dogzillaAudioVolumeValue = document.querySelector('#dogzilla-audio-volume-
 const connectionOutput = document.querySelector('#connection-output')
 const connectionActionButtons = document.querySelectorAll('[data-connection-action]')
 const runDogzillaPreflightButton = document.querySelector('#run-dogzilla-preflight-button')
+const checkPiPerformanceButton = document.querySelector('#check-pi-performance-button')
 const dogzillaPreflightStatus = document.querySelector('#dogzilla-preflight-status')
 const dogzillaPreflightSummary = document.querySelector('#dogzilla-preflight-summary')
 const dogzillaPreflightChecks = document.querySelector('#dogzilla-preflight-checks')
@@ -441,6 +442,7 @@ robotNameInput.addEventListener('keydown', handleRobotNameInputKeydown)
 saveDogzillaBackendButton.addEventListener('click', handleDogzillaBackendSave)
 saveDogzillaConnectionButton.addEventListener('click', handleDogzillaConnectionSave)
 runDogzillaPreflightButton.addEventListener('click', handleDogzillaPreflight)
+checkPiPerformanceButton?.addEventListener('click', handlePiPerformanceCheck)
 dogzillaAudioVolumeInput?.addEventListener('input', dogzillaAudio.handleVolumeInput)
 robotCameraSnapshotButton.addEventListener('click', handleReconSnapshot)
 robotCameraRefreshButton.addEventListener('click', handleDogzillaCameraRefresh)
@@ -1330,6 +1332,22 @@ function renderMapStatus(mapPayload, healthPayload) {
     robotMapModeChip.hidden = false
   }
 
+  const saveMapButton = document.getElementById('save-map-button')
+  const newMapButton = document.getElementById('new-map-button')
+  const slamModeChip = document.getElementById('slam-mode-chip')
+  const mappingActive = status.mode === 'mapping' && status.fresh
+  if (saveMapButton) {
+    saveMapButton.disabled = !mappingActive
+    saveMapButton.title = mappingActive ? 'Save the live SLAM map and make it the default' : 'Start New Map and wait for live mapping before saving'
+  }
+  if (newMapButton) {
+    newMapButton.disabled = mappingActive
+    newMapButton.title = mappingActive ? 'Mapping is already running' : 'Start a new live SLAM map'
+  }
+  if (slamModeChip) {
+    slamModeChip.hidden = !mappingActive
+  }
+
   if (robotMapFreshness) {
     if (status.freshnessLabel) {
       robotMapFreshness.textContent = status.freshnessLabel
@@ -1896,13 +1914,20 @@ async function handleDogzillaConnectionAction(event) {
       if (!localizeResponse.ok || localizePayload.status === 'error') {
         throw new Error(localizePayload.error || localizePayload.stderr || 'DOGZILLA localization failed after save.')
       }
-      connectionStatus.textContent = `${formatConnectionAction('start-map-pose')}: ${localizePayload.status}.`
-      connectionOutput.textContent = formatDogzillaActionOutput(localizePayload)
-      setStatus(`DOGZILLA ${formatConnectionAction('start-map-pose')} ${localizePayload.status}.`)
+      const mapSaveProof = extractMapSaveProof(payload)
+      const proofSummary = mapSaveProof
+        ? `Saved default map ${mapSaveProof.id || mapSaveProof.yaml || mapSaveProof.pbstream}.`
+        : 'Map saved.'
+      connectionStatus.textContent = `${proofSummary} Localization restarted.`
+      connectionOutput.textContent = [
+        formatMapSaveProof(mapSaveProof),
+        `localization\n${formatDogzillaActionOutput(localizePayload)}`
+      ].filter(Boolean).join('\n\n')
+      setStatus(`DOGZILLA ${proofSummary} Localization restarted.`)
       if (slamChip) slamChip.hidden = true
       if (newMapBtn) newMapBtn.disabled = false
       if (saveMapBtn) saveMapBtn.disabled = true
-      setMapWorkflowStatus(`${formatConnectionAction('start-map-pose')}: ${localizePayload.status}.`, 'success')
+      setMapWorkflowStatus(`${proofSummary} Localization restarted.`, 'success')
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
@@ -2094,6 +2119,138 @@ function renderServiceProbe(payload) {
   connectionStatus.textContent = labels.length ? `${labels.join('. ')}.` : 'No service results.'
 }
 
+async function handlePiPerformanceCheck() {
+  const reportWindow = openPiPerformanceWindow()
+  renderPiPerformanceWindow(reportWindow, { state: 'loading' })
+  checkPiPerformanceButton.disabled = true
+
+  try {
+    const response = await apiFetch('/api/dogzilla/pi-performance', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+    const payload = await response.json()
+
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || 'Pi performance diagnostics failed.')
+    }
+
+    renderPiPerformanceWindow(reportWindow, { state: 'ready', payload })
+    setStatus('Pi performance check complete.')
+  } catch (error) {
+    const message = formatError(error)
+    renderPiPerformanceWindow(reportWindow, { state: 'error', message })
+    setStatus(message, 'error')
+  } finally {
+    checkPiPerformanceButton.disabled = false
+  }
+}
+
+function openPiPerformanceWindow() {
+  const reportWindow = window.open('', 'dogzilla-pi-performance', 'width=520,height=620')
+  if (reportWindow) return reportWindow
+  return window
+}
+
+function renderPiPerformanceWindow(reportWindow, { state, payload, message }) {
+  const doc = reportWindow.document
+  const data = payload?.data || {}
+  const cpu = data.cpu || {}
+  const memory = data.memory || {}
+  const temperature = data.temperature || {}
+  const system = data.system || {}
+  const loadAverage = Array.isArray(cpu.loadAverage)
+    ? cpu.loadAverage.map((value) => formatMetricNumber(value)).join(' / ')
+    : 'Unknown'
+  const uptime = typeof system.uptimeSec === 'number'
+    ? formatDuration(system.uptimeSec * 1000)
+    : 'Unknown'
+  const throttled = system.throttled || 'Unknown'
+  const body = state === 'loading'
+    ? '<p class="status">Checking Pi status...</p>'
+    : state === 'error'
+      ? `<p class="status error">${escapeHtml(message || 'Pi performance diagnostics failed.')}</p>`
+      : `
+        <dl class="metrics">
+          <div><dt>Host</dt><dd>${escapeHtml(data.hostname || 'DOGZILLA Pi')}</dd></div>
+          <div><dt>Load average</dt><dd>${escapeHtml(loadAverage)}</dd></div>
+          <div><dt>CPU cores</dt><dd>${escapeHtml(formatMetricNumber(cpu.cores))}</dd></div>
+          <div><dt>Memory used</dt><dd>${escapeHtml(formatMemoryUsage(memory))}</dd></div>
+          <div><dt>Temperature</dt><dd>${escapeHtml(formatTemperature(temperature.celsius))}</dd></div>
+          <div><dt>Uptime</dt><dd>${escapeHtml(uptime)}</dd></div>
+          <div><dt>Throttle flags</dt><dd>${escapeHtml(throttled)}</dd></div>
+        </dl>
+        <p class="status">Collected ${escapeHtml(formatEventTimestamp(data.collectedAt))} in ${escapeHtml(formatMetricNumber(payload.durationMs))}ms.</p>
+        <details>
+          <summary>Raw JSON</summary>
+          <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+        </details>
+      `
+
+  doc.open()
+  doc.write(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DOGZILLA Pi Load</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #101418; color: #f4f7f9; }
+    main { padding: 24px; }
+    h1 { margin: 0 0 18px; font-size: 22px; letter-spacing: 0; }
+    .status { margin: 14px 0 0; color: #aab6bf; }
+    .status.error { color: #ffb1a5; }
+    .metrics { display: grid; gap: 10px; margin: 0; }
+    .metrics div { display: grid; grid-template-columns: minmax(120px, 0.8fr) 1.2fr; gap: 14px; padding: 12px; border: 1px solid #2b343c; border-radius: 8px; background: #171d22; }
+    dt { color: #9aa8b3; font-size: 13px; }
+    dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+    details { margin-top: 18px; }
+    summary { cursor: pointer; color: #c7d2da; }
+    pre { overflow: auto; padding: 12px; border-radius: 8px; background: #080b0d; color: #dce6ec; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>DOGZILLA Pi Load</h1>
+    ${body}
+  </main>
+</body>
+</html>`)
+  doc.close()
+  reportWindow.focus?.()
+}
+
+function formatMemoryUsage(memory) {
+  const used = formatMetricNumber(memory.usedMb)
+  const total = formatMetricNumber(memory.totalMb)
+  const percent = formatMetricNumber(memory.usedPercent)
+  if (used === 'Unknown' || total === 'Unknown') return 'Unknown'
+  return `${used} / ${total} MB (${percent}%)`
+}
+
+function formatTemperature(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'Unknown'
+  return `${value.toFixed(1)} C`
+}
+
+function formatMetricNumber(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'Unknown'
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function renderDogzillaPreflight(payload) {
   const summary = payload.summary || {}
   const checks = Array.isArray(payload.checks) ? payload.checks : []
@@ -2245,6 +2402,59 @@ function formatMapOriginCapture(origin = {}) {
     parts.push(`Yaw ${formatTelemetryNumber(yaw)} rad.`)
   }
   return parts.join(' ')
+}
+
+function parseLastJsonLine(text) {
+  if (!text) {
+    return null
+  }
+
+  const lines = String(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index]
+    if (!line.startsWith('{') || !line.endsWith('}')) {
+      continue
+    }
+    try {
+      return JSON.parse(line)
+    } catch {
+      // Keep scanning earlier output lines.
+    }
+  }
+
+  return null
+}
+
+function extractMapSaveProof(payload) {
+  if (!payload || payload.action !== 'save-map-pose') {
+    return null
+  }
+
+  const parsed = payload.mapSave || parseLastJsonLine(payload.stdout)
+  if (!parsed || parsed.status !== 'ok') {
+    return null
+  }
+
+  return {
+    id: parsed.id || '',
+    pbstream: parsed.pbstream || '',
+    yaml: parsed.yaml || '',
+    rosMapConversion: parsed.rosMapConversion || '',
+  }
+}
+
+function formatMapSaveProof(proof) {
+  if (!proof) {
+    return ''
+  }
+
+  return [
+    'map save proof',
+    `id: ${proof.id || 'n/a'}`,
+    `pbstream: ${proof.pbstream || 'n/a'}`,
+    `yaml: ${proof.yaml || 'n/a'}`,
+    `rosMapConversion: ${proof.rosMapConversion || 'n/a'}`,
+  ].join('\n')
 }
 
 function formatDogzillaActionOutput(payload) {
@@ -3705,7 +3915,7 @@ function formatRobotSummary(robotRuntime, robotDispatch, payload) {
 
   if (robotDispatch?.status === 'navigation-unavailable' || robotDispatch?.status === 'waypoint-blocked') {
     if (robotDispatch.recovery) {
-      return `Repairing navigation: ${robotDispatch.recovery}`
+      return `Navigation blocked: ${robotDispatch.recovery}`
     }
     return robotDispatch.operatorMessage
       || 'Waypoint not sent: DOGZILLA map pose is available, but no waypoint navigation server is running. Manual controls and non-waypoint actions are still available.'

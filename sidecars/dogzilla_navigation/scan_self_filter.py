@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import rclpy
     from rclpy.node import Node
+    from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import LaserScan
 
     class ScanSelfFilter(Node):
@@ -35,8 +36,13 @@ def main(argv: list[str] | None = None) -> int:
             self.mask_start = math.radians(args.mask_start_deg)
             self.mask_end = math.radians(args.mask_end_deg)
             self.mask_range = max(float(args.mask_range_m), 0.0)
-            self.publisher = self.create_publisher(LaserScan, args.output_topic, 10)
-            self.subscription = self.create_subscription(LaserScan, args.input_topic, self.filter_scan, 10)
+            self.publisher = self.create_publisher(LaserScan, args.output_topic, qos_profile_sensor_data)
+            self.subscription = self.create_subscription(
+                LaserScan,
+                args.input_topic,
+                self.filter_scan,
+                qos_profile_sensor_data,
+            )
             self.get_logger().info(
                 f"publishing {args.output_topic} from {args.input_topic}; "
                 f"mask {args.mask_start_deg:.1f}-{args.mask_end_deg:.1f} deg under {self.mask_range:.2f} m"

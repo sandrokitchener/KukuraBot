@@ -18,7 +18,7 @@ test('DOGZILLA waypoint readiness requires action, odom, lifecycle, and filtered
   assert.equal(ready.scanReady, true)
 })
 
-test('DOGZILLA waypoint readiness blocks action plus odom without lifecycle and scan proof', () => {
+test('DOGZILLA waypoint readiness trusts explicit bridge waypointReady for Nav2 chain', () => {
   const readiness = getDogzillaWaypointNavigationReadiness({
     nav2: {
       ...readyNav2(),
@@ -28,11 +28,12 @@ test('DOGZILLA waypoint readiness blocks action plus odom without lifecycle and 
     },
   })
 
-  assert.equal(readiness.ready, false)
+  assert.equal(readiness.ready, true)
   assert.equal(readiness.actionAvailable, true)
   assert.equal(readiness.odomReady, true)
-  assert.match(readiness.reason, /Nav2 lifecycle state was not reported/)
-  assert.match(readiness.reason, /No LaserScan publishers visible on \/scan_nav2/)
+  assert.equal(readiness.lifecycleActive, false)
+  assert.equal(readiness.scanReady, false)
+  assert.equal(readiness.reason, '')
 })
 
 test('DOGZILLA waypoint readiness steps expose missing odom TF as its own startup gate', () => {

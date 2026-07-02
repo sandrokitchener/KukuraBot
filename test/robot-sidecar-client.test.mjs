@@ -190,7 +190,7 @@ assert.equal(requests[0].envelope.canonicalPlan.params.waypoint, 'living_room')
 assert.equal(requests[0].envelope.canonicalPlan.params.frame, 'map')
 assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.required, true)
 assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.mode, 'nav2_costmap')
-assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.lidarTopic, '/scan')
+assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.lidarTopic, '/scan_nav2')
 assert.match(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.command, /Nav2 costmaps/)
     },
   )
@@ -953,8 +953,8 @@ kind: 'fetch',
         obstacleAvoidance: {
           required: true,
           mode: 'nav2_costmap',
-          lidarTopic: '/scan',
-          command: 'verify Nav2 costmaps have live /scan; do not start Yahboom laser_Avoidance_xgo_RS200 during Nav2 waypoint control',
+          lidarTopic: '/scan_nav2',
+          command: 'verify Nav2 costmaps have live /scan_nav2; do not start Yahboom laser_Avoidance_xgo_RS200 during Nav2 waypoint control',
           docs: 'sidecars/dogzilla_navigation/README.md',
         },
       },
