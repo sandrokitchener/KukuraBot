@@ -1446,6 +1446,27 @@ function setMapLayerStatus(element, state, label) {
   element.textContent = label || ''
 }
 
+function setRecenterVisualState(state) {
+  const running = state === 'running'
+  const success = state === 'success'
+  const error = state === 'error'
+  const label = running ? 'Re-centering...' : 'Re-center Here'
+  for (const button of document.querySelectorAll('[data-connection-action="start-map-pose"]')) {
+    if (button.textContent === 'Re-center Here' || button.textContent === 'Re-centering...') {
+      button.textContent = label
+    }
+  }
+  if (running) {
+    setMapWorkflowStatus('Re-centering on saved map...', '')
+    setMapLayerStatus(robotMapLayerGrid, 'stale', 'Re-centering map')
+  } else if (success) {
+    setMapWorkflowStatus('Re-centered on saved map.', 'success')
+    setMapLayerStatus(robotMapLayerGrid, 'live', 'Map re-centered')
+  } else if (error) {
+    setMapLayerStatus(robotMapLayerGrid, 'stale', 'Re-center failed')
+  }
+}
+
 function formatSlamChipLabel(status) {
   const detail = [status.freshnessLabel, status.cellCountsLabel].filter(Boolean).join(' · ')
   return detail ? `SLAM building · ${detail}` : 'SLAM building'
@@ -1992,6 +2013,8 @@ async function handleDogzillaConnectionAction(event) {
     setMapWorkflowStatus('Starting SLAM mapping...', '')
   } else if (action === 'save-map-pose') {
     setMapWorkflowStatus('Saving occupancy grid and locking map...', '')
+  } else if (action === 'start-map-pose') {
+    setRecenterVisualState('running')
   }
 
   try {
@@ -2060,15 +2083,18 @@ async function handleDogzillaConnectionAction(event) {
       ensureTopDownMapView()
       setMapWorkflowStatus('SLAM mapping started. Waiting for occupancy grid updates...', 'success')
       void refreshDogzillaMap()
-  } else if (action === 'save-map-pose' || action === 'start-map-pose') {
-    slamMappingSessionActive = false
-    slamMappingSessionStartedAt = 0
-    void stopDogzillaSlamMapStream()
-    if (slamChip) slamChip.hidden = true
+    } else if (action === 'save-map-pose' || action === 'start-map-pose') {
+      slamMappingSessionActive = false
+      slamMappingSessionStartedAt = 0
+      void stopDogzillaSlamMapStream()
+      if (slamChip) slamChip.hidden = true
       if (newMapBtn) newMapBtn.disabled = false
       if (saveMapBtn) saveMapBtn.disabled = true
+      if (action === 'start-map-pose') {
+        setRecenterVisualState(payload.status === 'ok' ? 'success' : 'error')
+      }
     }
-    if (action === 'start-map-pose' || action === 'start-map-pose-mapping' || action === 'save-map-pose') {
+    if (action === 'start-map-pose-mapping' || action === 'save-map-pose') {
       setMapWorkflowStatus(`${formatConnectionAction(action)}: ${payload.status}.`, payload.status === 'ok' ? 'success' : '')
     }
 
@@ -2097,6 +2123,9 @@ async function handleDogzillaConnectionAction(event) {
     connectionOutput.textContent = formatError(error)
     if (event.currentTarget.closest?.('.map-workflow-panel')) {
       setMapWorkflowStatus(formatError(error), 'error')
+    }
+    if (action === 'start-map-pose') {
+      setRecenterVisualState('error')
     }
     setStatus(formatError(error), 'error')
   } finally {
