@@ -928,31 +928,7 @@ export function createRobotMapRenderer({
       context.fill()
     }
 
-    // Layer 8: Heading cone (maroon, behind center dot)
-    const coneLen = Math.min(width, height) * 0.055
-    const headingTheta = (canvasPose || robotPose).theta
-    const dirX = Math.cos(headingTheta)
-    const dirY = -Math.sin(headingTheta)
-    const perpX = Math.sin(headingTheta)
-    const perpY = Math.cos(headingTheta)
-    const halfBase = coneLen * 0.35
-    const baseCx = centerX + coneLen * dirX
-    const baseCy = centerY + coneLen * dirY
-    context.fillStyle = `rgba(190, 28, 28, ${poseTrusted ? '0.82' : '0.25'})`
-    context.beginPath()
-    context.moveTo(centerX, centerY)
-    context.lineTo(baseCx + perpX * halfBase, baseCy + perpY * halfBase)
-    context.lineTo(baseCx - perpX * halfBase, baseCy - perpY * halfBase)
-    context.closePath()
-    context.fill()
-
-    // Layer 9: Robot center dot (sits on top of everything)
-    context.fillStyle = `rgba(255, 255, 255, ${poseTrusted ? '0.9' : '0.35'})`
-    context.beginPath()
-    context.arc(centerX, centerY, 3, 0, Math.PI * 2)
-    context.fill()
-
-    // Layer 10: Untrusted-pose warning text
+    // Layer 8: Untrusted-pose warning text
     if (!poseTrusted) {
       context.save()
       context.font = 'bold 11px sans-serif'
