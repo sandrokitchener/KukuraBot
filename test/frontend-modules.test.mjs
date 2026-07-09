@@ -672,6 +672,38 @@ test("createRobotMapRenderer exposes callable setPoseTrust", () => {
   renderer.setPoseTrust(false)
   renderer.setPoseTrust(undefined)
 })
+
+test('robot map keeps recent pose marker through transient missing pose', () => {
+  const dot = {
+    style: {
+      setProperty(name, value) {
+        this[name] = value
+      },
+    },
+  }
+  const renderer = createRobotMapRenderer({
+    elements: {
+      dot,
+      lidarScan: { getContext: () => null, width: 0, height: 0, style: {} },
+      meta: { textContent: '' },
+      poseReadout: { textContent: '', title: '' },
+      track: { replaceChildren() {} },
+      waypoints: { replaceChildren() {} },
+    },
+    getRuntimeConfig: () => ({}),
+    formatEventTimestamp: () => 'now',
+  })
+
+  renderer.renderDot({
+    pose: { frame: 'map', x: 1, y: 2, theta: 0.25 },
+    receivedAt: new Date().toISOString(),
+  })
+  assert.equal(dot.style.opacity, '1')
+
+  renderer.hideDot()
+  assert.equal(dot.style.opacity, '0.35')
+})
+
 test('formatWaypointReadinessSummary distinguishes ready and blocked map waypoint state', () => {
   assert.equal(formatWaypointReadinessSummary({
     readyForMapWaypoints: true,

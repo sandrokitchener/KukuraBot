@@ -9,6 +9,7 @@ const EGO_HISTORY_MS = 1_800
 const MAX_EGO_HISTORY_POINTS = 1_200
 const EGO_CLUSTER_DISTANCE_METERS = 0.42
 const EGO_CLUSTER_MIN_POINTS = 3
+const ROBOT_POSE_GRACE_MS = 5_000
 
 function rangeToRGBA(rangeNorm, alpha = 1) {
   const t = clamp(rangeNorm, 0, 1)
@@ -481,8 +482,10 @@ export function createRobotMapRenderer({
 
   function renderDot(robot) {
     if (!robot?.pose) {
-      lastRenderedRobot = null
-      hideDot()
+      if (showLastRenderedPoseAsStale(formatPoseUnavailableMessage(robot, formatEventTimestamp))) {
+        return
+      }
+      hideDot({ force: true })
       clearPoseTrack()
       setPoseReadout(null)
       setMeta(formatPoseUnavailableMessage(robot, formatEventTimestamp))
@@ -492,8 +495,10 @@ export function createRobotMapRenderer({
     const canvasPose = getCanvasRobotPose(robot)
     const robotPose = canvasPose || normalizeRobotMapPose(robot.pose)
     if (!robotPose) {
-      lastRenderedRobot = null
-      hideDot()
+      if (showLastRenderedPoseAsStale(formatPoseUnavailableMessage(robot, formatEventTimestamp))) {
+        return
+      }
+      hideDot({ force: true })
       clearPoseTrack()
       setPoseReadout(null)
       setMeta(formatPoseUnavailableMessage(robot, formatEventTimestamp))
@@ -503,8 +508,10 @@ export function createRobotMapRenderer({
     const view = getCurrentMapView(getRobotMapRangeMeters(getWaypoints(), robot), robotPose)
     const position = poseToMapPosition(robotPose, view.rangeMeters, view.centerX, view.centerY, view.rangeYMeters)
     if (!position) {
-      lastRenderedRobot = null
-      hideDot()
+      if (showLastRenderedPoseAsStale(formatPoseUnavailableMessage(robot, formatEventTimestamp))) {
+        return
+      }
+      hideDot({ force: true })
       clearPoseTrack()
       setPoseReadout(null)
       setMeta(formatPoseUnavailableMessage(robot, formatEventTimestamp))
@@ -535,9 +542,30 @@ export function createRobotMapRenderer({
       `x ${robotPose.x.toFixed(2)}m, y ${robotPose.y.toFixed(2)}m, θ ${robotPose.theta.toFixed(2)}rad. Updated ${formatEventTimestamp(robot.receivedAt)}.${trustSuffix}`,
     )
   }
-  function hideDot() {
+  function hideDot({ force = false } = {}) {
+    if (!force && showLastRenderedPoseAsStale()) {
+      return
+    }
     lastRenderedRobot = null
     elements.dot.style.opacity = '0'
+  }
+
+  function getRobotReceivedAtMs(robot) {
+    const receivedAt = Date.parse(robot?.receivedAt || robot?.timestamp || '')
+    return Number.isFinite(receivedAt) ? receivedAt : Date.now()
+  }
+
+  function showLastRenderedPoseAsStale(message = '') {
+    if (!lastRenderedRobot?.pose || Date.now() - getRobotReceivedAtMs(lastRenderedRobot) > ROBOT_POSE_GRACE_MS) {
+      return false
+    }
+    elements.dot.style.opacity = '0.35'
+    const robotPose = getCanvasRobotPose(lastRenderedRobot) || normalizeRobotMapPose(lastRenderedRobot.pose)
+    setPoseReadout(robotPose, robotPose?.frame || 'map')
+    if (message) {
+      setMeta(message)
+    }
+    return true
   }
 
   function renderPoseTrack(track, robot) {
@@ -1709,11 +1737,6 @@ function drawCenteredLidarScan(context, points, { width, height, displayRange, n
     context.fill()
   }
 
-  // Center dot
-  context.fillStyle = 'rgba(255, 255, 255, 0.9)'
-  context.beginPath()
-  context.arc(centerX, centerY, 3, 0, Math.PI * 2)
-  context.fill()
   context.restore()
 }
 
