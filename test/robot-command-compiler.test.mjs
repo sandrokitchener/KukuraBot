@@ -265,7 +265,7 @@ test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', 
   assert.match(preview.warnings.at(-1), /no saved DOGZILLA map origin/)
 })
 
-test('compileRobotRuntimePreview blocks app_map waypoint when saved origin has no map identity', () => {
+test('compileRobotRuntimePreview accepts app_map waypoint even when saved origin has no map identity', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
@@ -287,9 +287,7 @@ test('compileRobotRuntimePreview blocks app_map waypoint when saved origin has n
     },
   }))
 
-  assert.equal(preview.status, 'invalid')
-  assert.deepEqual(preview.missingRequired, ['waypoint.mapOrigin'])
-  assert.match(preview.warnings.at(-1), /origin has no active map identity/)
+  assert.equal(preview.status, 'ready')
 })
 
 test('compileRobotRuntimePreview rejects trick actions without verified numeric ids', () => {

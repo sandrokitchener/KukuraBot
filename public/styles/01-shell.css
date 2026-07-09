@@ -260,9 +260,35 @@ body {
 
 .robot-column {
   display: grid;
-  grid-template-rows: auto minmax(86px, auto) minmax(90px, auto) minmax(250px, 1fr) minmax(180px, 0.72fr);
+  grid-template-rows: auto minmax(520px, auto) minmax(118px, auto) minmax(64px, auto) minmax(72px, auto);
   gap: clamp(10px, 1vh, 16px);
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.robot-tabs {
+  order: 0;
+}
+
+.robot-map-panel {
+  order: 1;
+}
+
+.manual-control-panel {
+  order: 2;
+}
+
+.robot-state-panel {
+  order: 3;
+}
+
+.robot-camera-panel {
+  order: 4;
+}
+
+.output-panel {
+  order: 5;
 }
 
 .robot-tabs {
@@ -387,9 +413,12 @@ body {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto auto minmax(320px, 1fr) auto;
-  gap: 10px;
-  min-height: 430px;
+  grid-template-rows: auto minmax(360px, 1fr) auto auto;
+  gap: 8px;
+  min-height: 520px;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .robot-camera-panel {
@@ -402,7 +431,8 @@ body {
 }
 
 .output-panel {
-  min-height: 116px;
+  min-height: 88px;
+  max-height: min(18vh, 150px);
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   overflow: hidden;

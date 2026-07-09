@@ -7,7 +7,6 @@ import {
   DEFAULT_MAP_ORIGIN_FILE,
   loadDogzillaMapOrigin,
   mapPoseToAppPose,
-  hasDogzillaMapOriginIdentity,
 } from '../lib/dogzilla-map-frame.mjs'
 
 const SCRIPT_FILE = fileURLToPath(import.meta.url)
@@ -20,11 +19,11 @@ export async function migrateMapFrameWaypoints({
   dryRun = true,
 } = {}) {
   const mapOrigin = await loadDogzillaMapOrigin(originFile)
-  if (!mapOrigin || !hasDogzillaMapOriginIdentity(mapOrigin)) {
+  if (!mapOrigin) {
     return {
       ok: false,
-      reason: 'no-valid-map-origin',
-      message: 'No valid DOGZILLA map origin found. Run set-dogzilla-map-origin.mjs first to save the current SLAM map origin.',
+      reason: 'no-map-origin',
+      message: 'No DOGZILLA map origin found. Run set-dogzilla-map-origin.mjs first to save the current SLAM map origin.',
       migratedCount: 0,
       skippedCount: 0,
     }

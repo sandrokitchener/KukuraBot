@@ -155,7 +155,6 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
   assert.equal(payload.sensors.mapPose.authority, 'tf:map->base_footprint')
   assert.equal(payload.sensors.mapPose.ageSec, 0.1)
   assert.equal(payload.sensors.mapOrigin.status, 'ready')
-  assert.equal(payload.sensors.mapOrigin.mapId, 'robodoge_home')
   assert.equal(payload.sensors.yoloVision.authority, 'DOGZILLA YOLO vision sidecar')
   assert.equal(payload.sensors.yoloVision.ageSec, 0.5)
   assert.equal(payload.sensors.isaac, undefined)
@@ -271,7 +270,7 @@ test('buildHealthzPayload marks missing required map pose as failed', () => {
   assert.deepEqual(payload.failedRequiredSensors, ['mapPose'])
 })
 
-test('buildHealthzPayload degrades when saved map origin is stale', () => {
+test('buildHealthzPayload degrades when map origin is missing', () => {
   const payload = buildHealthzPayload({
     generationId: 'gen-stale-origin',
     checkedAt: '2026-06-04T12:00:10.000Z',
@@ -282,22 +281,11 @@ test('buildHealthzPayload degrades when saved map origin is stale', () => {
           id: 'dogzilla-direct',
           kind: 'dogzilla-direct',
         },
-        mapOrigin: {
-          configured: false,
-          status: 'stale-missing-map-identity',
-          origin: {
-            label: 'charger_origin',
-            savedAt: '2026-06-04T12:00:06.000Z',
-          },
-          identity: {
-            id: '',
-            fingerprint: '',
-          },
-          activeMap: {
-            id: 'robodoge_home',
-            fingerprint: 'abc123',
-          },
-        },
+    mapOrigin: {
+      configured: false,
+      status: 'missing',
+      origin: null,
+    },
         activeRobot: {
           timestamp: '2026-06-04T12:00:08.000Z',
           receivedAt: '2026-06-04T12:00:08.500Z',
@@ -317,8 +305,8 @@ test('buildHealthzPayload degrades when saved map origin is stale', () => {
   assert.equal(payload.ok, true)
   assert.equal(payload.status, 'degraded')
   assert.equal(payload.sensors.mapOrigin.ok, false)
-  assert.equal(payload.sensors.mapOrigin.status, 'stale-missing-map-identity')
-  assert.match(payload.sensors.mapOrigin.detail, /reset and resave origin/)
+  assert.equal(payload.sensors.mapOrigin.status, 'missing')
+  assert.match(payload.sensors.mapOrigin.detail, /No saved/)
   assert.deepEqual(payload.failedRequiredSensors, [])
   assert.ok(payload.failedEnabledSensors.includes('mapOrigin'))
 })

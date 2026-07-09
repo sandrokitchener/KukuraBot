@@ -42,27 +42,30 @@ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_STALE_ST
 DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC:-0.8}"
 DOGZILLA_NAV2_SPEED_RAMP_INTERVAL="${DOGZILLA_NAV2_SPEED_RAMP_INTERVAL:-0.5}"
 DOGZILLA_NAV2_SPEED_RAMP_BUFFER="${DOGZILLA_NAV2_SPEED_RAMP_BUFFER:-10}"
+DOGZILLA_LOCALIZATION_BACKEND="${DOGZILLA_LOCALIZATION_BACKEND:-amcl}"
+DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-}"
+DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-}"
+DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-}"
 
 if [ "${DOGZILLA_NAV2_GAIT_SMOOTHER_BYPASS:-0}" = "1" ]; then
   DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC="/cmd_vel_nav"
-  echo "DOGZILLA velocity smoother bypass: gait adapter input=$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC"
 fi
 
 export ROS_DOMAIN_ID
-export DOGZILLA_NAV2_ROBOT_RADIUS DOGZILLA_NAV2_FOOTPRINT_PADDING
-export DOGZILLA_NAV2_INFLATION_RADIUS DOGZILLA_NAV2_COST_SCALING_FACTOR
-export DOGZILLA_NAV2_OBSTACLE_MIN_RANGE DOGZILLA_NAV2_OBSTACLE_MAX_RANGE DOGZILLA_NAV2_RAYTRACE_MAX_RANGE
-export DOGZILLA_NAV2_YAW_GOAL_TOLERANCE DOGZILLA_NAV2_XY_GOAL_TOLERANCE
-export DOGZILLA_NAV2_CONTROLLER_FREQUENCY DOGZILLA_NAV2_BT_LOOP_DURATION_MS
-export DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS
-export DOGZILLA_NAV2_PLANNER_FREQUENCY DOGZILLA_NAV2_SMOOTHER_FREQUENCY
-export DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE
-export DOGZILLA_NAV2_FAILURE_TOLERANCE
+export DOGZILLA_NAV2_MAP_METADATA DOGZILLA_NAV2_MAP DOGZILLA_NAV2_BASE_PARAMS DOGZILLA_NAV2_PARAMS
+export DOGZILLA_NAV2_ROBOT_RADIUS DOGZILLA_NAV2_FOOTPRINT_PADDING DOGZILLA_NAV2_INFLATION_RADIUS
+export DOGZILLA_NAV2_COST_SCALING_FACTOR DOGZILLA_NAV2_OBSTACLE_MIN_RANGE DOGZILLA_NAV2_OBSTACLE_MAX_RANGE
+export DOGZILLA_NAV2_RAYTRACE_MAX_RANGE DOGZILLA_NAV2_YAW_GOAL_TOLERANCE DOGZILLA_NAV2_XY_GOAL_TOLERANCE
+export DOGZILLA_NAV2_CONTROLLER_FREQUENCY DOGZILLA_NAV2_BT_LOOP_DURATION_MS DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS
+export DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS DOGZILLA_NAV2_PLANNER_FREQUENCY DOGZILLA_NAV2_SMOOTHER_FREQUENCY
+export DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE DOGZILLA_NAV2_FAILURE_TOLERANCE
 export DOGZILLA_NAV2_MIN_SPEED_XY DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY
 export DOGZILLA_NAV2_SCAN_FILTER_ENABLED DOGZILLA_NAV2_SCAN_FILTER_TOPIC
+export DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
 export DOGZILLA_NAV2_SPEED_RAMP_INTERVAL DOGZILLA_NAV2_SPEED_RAMP_BUFFER
+export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
 export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/logs"
@@ -71,10 +74,13 @@ pkill -9 -f "ros2.*daemon" 2>/dev/null || true
 
 if [ -z "$DOGZILLA_NAV2_MAP" ] && [ -s "$DOGZILLA_MAP_METADATA" ]; then
   DOGZILLA_NAV2_MAP="$(python3 - "$DOGZILLA_MAP_METADATA" <<'PY'
-import json, sys, pathlib
+import json
+import pathlib
+import sys
+
 md = pathlib.Path(sys.argv[1])
 try:
-    m = json.loads(md.read_text())
+    m = json.loads(md.read_text(encoding="utf-8"))
     y = (m.get("yaml") or "").strip()
     if y:
         p = pathlib.Path(y)
@@ -86,11 +92,37 @@ PY
 fi
 DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-$REMOTE_ROOT/maps/robodoge_home.yaml}"
 
+if [ -z "$DOGZILLA_INITIAL_POSE_X" ] || [ -z "$DOGZILLA_INITIAL_POSE_Y" ] || [ -z "$DOGZILLA_INITIAL_POSE_YAW" ]; then
+  origin_file="$REMOTE_ROOT/output/app-cache/dogzilla-map-origin.json"
+  if [ -s "$origin_file" ]; then
+    eval "$(python3 - "$origin_file" <<'PY'
+import json
+import shlex
+import sys
+
+try:
+    origin = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+for name in ("x", "y", "yaw"):
+    value = origin.get(name)
+    if value is not None:
+        print(f"DOGZILLA_INITIAL_POSE_{name.upper()}={shlex.quote(str(value))}")
+PY
+)"
+  fi
+fi
+DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-0}"
+DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-0}"
+DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-0}"
+export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
+
 source /opt/ros/humble/setup.bash
 source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true
 
 missing=()
-for pkg in nav2_bringup nav2_bt_navigator nav2_controller nav2_planner nav2_map_server nav2_lifecycle_manager; do
+for pkg in nav2_bringup nav2_bt_navigator nav2_controller nav2_planner nav2_map_server nav2_amcl; do
   if ! ros2 pkg prefix "$pkg" >/dev/null 2>&1; then
     missing+=("$pkg")
   fi
@@ -107,15 +139,19 @@ if [ ! -s "$DOGZILLA_NAV2_BASE_PARAMS" ]; then
 fi
 
 python3 - "$DOGZILLA_NAV2_BASE_PARAMS" "$DOGZILLA_NAV2_PARAMS" <<'PY'
-import os, sys, yaml
+import os
+import sys
+import yaml
 
 src, tgt = sys.argv[1:3]
 
 def env_f(name, default):
-    try: return float(os.environ.get(name, str(default)))
-    except: return default
+    try:
+        return float(os.environ.get(name, str(default)))
+    except Exception:
+        return default
 
-with open(src) as f:
+with open(src, encoding="utf-8") as f:
     p = yaml.safe_load(f) or {}
 
 rr = env_f("DOGZILLA_NAV2_ROBOT_RADIUS", 0.16)
@@ -142,8 +178,7 @@ st = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2")
 sfe = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_ENABLED", "1") == "1"
 
 def costmap_ros(name):
-    s = p.setdefault(name, {}).setdefault(name, {}).setdefault("ros__parameters", {})
-    return s
+    return p.setdefault(name, {}).setdefault(name, {}).setdefault("ros__parameters", {})
 
 for cname in ("local_costmap", "global_costmap"):
     rp = costmap_ros(cname)
@@ -162,32 +197,30 @@ for cname in ("local_costmap", "global_costmap"):
             l["raytrace_max_range"] = rtmax
             if sfe:
                 for sname in str(l.get("observation_sources", "")).split():
-                    src = l.get(sname)
-                    if isinstance(src, dict):
-                        src["topic"] = st
-                        src["obstacle_min_range"] = omin
-                        src["obstacle_max_range"] = omax
-                        src["raytrace_min_range"] = omin
-                        src["raytrace_max_range"] = rtmax
-                        if str(src.get("data_type", "")).lower() == "laserscan":
-                            src["inf_is_valid"] = True
+                    src_cfg = l.get(sname)
+                    if isinstance(src_cfg, dict):
+                        src_cfg["topic"] = st
+                        src_cfg["obstacle_min_range"] = omin
+                        src_cfg["obstacle_max_range"] = omax
+                        src_cfg["raytrace_min_range"] = omin
+                        src_cfg["raytrace_max_range"] = rtmax
+                        if str(src_cfg.get("data_type", "")).lower() == "laserscan":
+                            src_cfg["inf_is_valid"] = True
 
 ctrl = p.setdefault("controller_server", {}).setdefault("ros__parameters", {})
-ctrl["failure_tolerance"] = max(float(ctrl.get("failure_tolerance", 0.3) or 0.3), ft)
 ctrl["controller_frequency"] = cf
-ctrl.setdefault("goal_checker_plugins", ["general_goal_checker"])
-pc = ctrl.setdefault("progress_checker", {})
-pc.setdefault("plugin", "nav2_controller::SimpleProgressChecker")
+ctrl["failure_tolerance"] = max(ft, 0.0)
+for name in ctrl.get("controller_plugins", []):
+    fp2 = ctrl.get(name)
+    if isinstance(fp2, dict):
+        fp2["xy_goal_tolerance"] = xy
+        fp2["yaw_goal_tolerance"] = yaw
+        fp2["min_speed_xy"] = msx
+        fp2["trans_stopped_velocity"] = tsv
+
+pc = p.setdefault("controller_server", {}).setdefault("ros__parameters", {}).setdefault("progress_checker", {})
 pc["required_movement_radius"] = rmr
 pc["movement_time_allowance"] = mta
-gc = ctrl.setdefault("general_goal_checker", {})
-gc.setdefault("plugin", "nav2_controller::SimpleGoalChecker")
-gc["yaw_goal_tolerance"] = yaw
-gc["xy_goal_tolerance"] = xy
-fp2 = ctrl.get("FollowPath")
-if isinstance(fp2, dict):
-    fp2["min_speed_xy"] = msx
-    fp2["trans_stopped_velocity"] = tsv
 
 btn = p.setdefault("bt_navigator", {}).setdefault("ros__parameters", {})
 btn["bt_loop_duration"] = bld
@@ -200,8 +233,25 @@ pln["expected_planner_frequency"] = pf
 vs = p.setdefault("velocity_smoother", {}).setdefault("ros__parameters", {})
 vs["smoothing_frequency"] = sf
 
+amcl = p.setdefault("amcl", {}).setdefault("ros__parameters", {})
+amcl["use_sim_time"] = False
+amcl["base_frame_id"] = "base_link"
+amcl["global_frame_id"] = "map"
+amcl["odom_frame_id"] = "odom"
+amcl["scan_topic"] = st
+amcl["tf_broadcast"] = True
+amcl["set_initial_pose"] = True
+amcl["robot_model_type"] = "nav2_amcl::DifferentialMotionModel"
+amcl["min_particles"] = int(env_f("DOGZILLA_AMCL_MIN_PARTICLES", 300))
+amcl["max_particles"] = int(env_f("DOGZILLA_AMCL_MAX_PARTICLES", 2000))
+amcl["initial_pose"] = {
+    "x": env_f("DOGZILLA_INITIAL_POSE_X", 0.0),
+    "y": env_f("DOGZILLA_INITIAL_POSE_Y", 0.0),
+    "yaw": env_f("DOGZILLA_INITIAL_POSE_YAW", 0.0),
+}
+
 os.makedirs(os.path.dirname(tgt), exist_ok=True)
-with open(tgt, "w") as f:
+with open(tgt, "w", encoding="utf-8") as f:
     yaml.safe_dump(p, f, sort_keys=False)
 
 print(f"Generated params: robot_radius={rr} inflation_radius={ir} scan_topic={st if sfe else '/scan'}")
@@ -213,9 +263,11 @@ if [ ! -s "$DOGZILLA_NAV2_MAP" ]; then
 fi
 
 map_image="$(python3 - "$DOGZILLA_NAV2_MAP" <<'PY'
-import os, sys
+import os
+import sys
+
 img = ""
-with open(sys.argv[1]) as f:
+with open(sys.argv[1], encoding="utf-8") as f:
     for line in f:
         if line.strip().startswith("image:"):
             img = line.split(":", 1)[1].strip()
@@ -225,15 +277,27 @@ if img and not os.path.isabs(img):
 print(img)
 PY
 )"
+
 if [ -n "$map_image" ] && [ ! -s "$map_image" ]; then
   echo "Nav2 map image missing: $map_image" >&2
   exit 2
 fi
 
-pkill -f "[c]md_vel_gait_adapter.py" 2>/dev/null || true
-pkill -f "[t]f_odom_publisher.py" 2>/dev/null || true
-pkill -f "[s]can_self_filter.py" 2>/dev/null || true
-pkill -f "[r]obodoge_nav2_navigation_launch" 2>/dev/null || true
+pkill -TERM -f "[s]can_self_filter.py" 2>/dev/null || true
+pkill -TERM -f "[t]f_odom_publisher.py" 2>/dev/null || true
+pkill -TERM -f "[c]md_vel_odom_publisher.py" 2>/dev/null || true
+pkill -TERM -f "[c]md_vel_gait_adapter.py" 2>/dev/null || true
+pkill -TERM -f "[r]os2 launch .*robodoge_nav2_navigation_launch.py" 2>/dev/null || true
+pkill -TERM -f "/opt/ros/.*/lib/nav2_" 2>/dev/null || true
+pkill -TERM -f "/opt/ros/.*/lib/nav2_amcl/amcl" 2>/dev/null || true
+sleep 1
+pkill -KILL -f "[s]can_self_filter.py" 2>/dev/null || true
+pkill -KILL -f "[t]f_odom_publisher.py" 2>/dev/null || true
+pkill -KILL -f "[c]md_vel_odom_publisher.py" 2>/dev/null || true
+pkill -KILL -f "[c]md_vel_gait_adapter.py" 2>/dev/null || true
+pkill -KILL -f "[r]os2 launch .*robodoge_nav2_navigation_launch.py" 2>/dev/null || true
+pkill -KILL -f "/opt/ros/.*/lib/nav2_" 2>/dev/null || true
+pkill -KILL -f "/opt/ros/.*/lib/nav2_amcl/amcl" 2>/dev/null || true
 
 if [ "$DOGZILLA_NAV2_SCAN_FILTER_ENABLED" = "1" ]; then
   nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_self_filter.py" \
@@ -245,8 +309,9 @@ if [ "$DOGZILLA_NAV2_SCAN_FILTER_ENABLED" = "1" ]; then
     > "$REMOTE_ROOT/logs/scan-self-filter.log" 2>&1 &
 fi
 
-echo "Waiting for Pi-owned Cartographer map->base_link TF..." >&2
-python3 - <<'PY'
+if [ "$DOGZILLA_LOCALIZATION_BACKEND" = "cartographer" ]; then
+  echo "Waiting Pi-owned Cartographer map->base_link TF..." >&2
+  python3 - <<'PY'
 import os
 import sys
 import time
@@ -254,12 +319,13 @@ import time
 os.environ.setdefault("PYTHONUNBUFFERED", "1")
 
 import rclpy
+from rclpy.duration import Duration
 from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
 
 rclpy.init(args=None)
 node = Node("robodoge_nav_carto_ready")
-buf = Buffer(cache_time=rclpy.duration.Duration(seconds=5.0))
+buf = Buffer(cache_time=Duration(seconds=5.0))
 TransformListener(buf, node)
 deadline = time.monotonic() + 35.0
 found = False
@@ -286,13 +352,23 @@ if not found:
     raise SystemExit(2)
 PY
 
-nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
-  --odom-frame odom \
-  --base-frame base_link \
-  --fallback-source-frame map \
-  --topic /odom \
-  --rate 10 \
-  > "$REMOTE_ROOT/logs/tf-odom-publisher.log" 2>&1 &
+  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
+    --odom-frame odom \
+    --base-frame base_link \
+    --fallback-source-frame map \
+    --topic /odom \
+    --rate 10 \
+    > "$REMOTE_ROOT/logs/tf-odom-publisher.log" 2>&1 &
+else
+  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/cmd_vel_odom_publisher.py" \
+    --input-topic "$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC" \
+    --topic /odom \
+    --odom-frame odom \
+    --base-frame base_link \
+    --rate 15 \
+    --stale-stop-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC" \
+    > "$REMOTE_ROOT/logs/cmd-vel-odom-publisher.log" 2>&1 &
+fi
 
 if [ "$DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED" = "1" ]; then
   nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/cmd_vel_gait_adapter.py" \
@@ -314,4 +390,5 @@ exec ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
   use_sim_time:=false \
   autostart:=true \
   use_respawn:=true \
+  localization_backend:="$DOGZILLA_LOCALIZATION_BACKEND" \
   >> "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1

@@ -70,6 +70,8 @@ npm run dogzilla:start-map-pose
 npm run dogzilla:start-navigation
 ```
 
+`start-dogzilla-yolo-vision-ssh.ps1` serves the app camera stream in raw mode by default. Add `-DetectionEnabled` only when object detection is needed; it loads ONNX runtime and increases Pi CPU load.
+
 Direct bridge logical navigation modes:
 
 ```powershell

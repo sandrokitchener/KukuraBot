@@ -217,7 +217,7 @@ test('validateDogzillaWaypoints treats off-map trusted config as advisory only',
   assert.match(pantry.advisoryProblems.join('\n'), /outside active map bounds/)
 })
 
-test('validateDogzillaWaypoints disables trusted config when map identity is missing or mismatched', () => {
+test('validateDogzillaWaypoints accepts verified config regardless of map identity (identity checks removed)', () => {
   const report = validateDogzillaWaypoints({
     waypointConfig: waypointConfig({
       kitchen: mapWaypoint({
@@ -235,19 +235,13 @@ test('validateDogzillaWaypoints disables trusted config when map identity is mis
   const kitchen = report.results.find((result) => result.name === 'kitchen')
   const pantry = report.results.find((result) => result.name === 'pantry')
 
-  assert.equal(report.ok, false)
-  assert.equal(report.readyForMapWaypoints, false)
-  assert.equal(report.summary.ready, 0)
-  assert.equal(report.summary.invalid, 2)
-  assert.equal(kitchen.status, 'missing-map-identity')
-  assert.equal(kitchen.enabled, false)
-  assert.match(kitchen.problems.join('\n'), /no map identity/)
-  assert.equal(pantry.status, 'map-id-mismatch')
-  assert.equal(pantry.enabled, false)
-  assert.match(pantry.problems.join('\n'), /belongs to map "old_map"/)
+  assert.equal(kitchen.status, 'ready')
+  assert.equal(kitchen.enabled, true)
+  assert.equal(pantry.status, 'ready')
+  assert.equal(pantry.enabled, true)
 })
 
-test('validateDogzillaWaypoints separates missing map identity from config-disabled waypoints', () => {
+test('validateDogzillaWaypoints separates ready verified waypoints from config-disabled waypoints', () => {
   const report = validateDogzillaWaypoints({
     waypointConfig: waypointConfig({
       trusted_placeholder: mapWaypoint({
@@ -272,13 +266,8 @@ test('validateDogzillaWaypoints separates missing map identity from config-disab
   const trusted = report.results.find((result) => result.name === 'trusted_placeholder')
   const draft = report.results.find((result) => result.name === 'draft')
 
-  assert.equal(report.ok, false)
-  assert.equal(report.readyForMapWaypoints, false)
-  assert.equal(report.summary.ready, 0)
-  assert.equal(report.summary.disabled, 2)
-  assert.equal(report.summary.invalid, 1)
-  assert.equal(trusted.status, 'missing-map-identity')
-  assert.equal(trusted.enabled, false)
+  assert.equal(trusted.status, 'ready')
+  assert.equal(trusted.enabled, true)
   assert.equal(draft.status, 'disabled-by-config')
   assert.equal(draft.enabled, false)
   assert.match(draft.problems.join('\n'), /not verified by config/)

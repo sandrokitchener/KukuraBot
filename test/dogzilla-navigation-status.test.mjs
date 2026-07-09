@@ -21,35 +21,9 @@ describe('deriveNavigationStatus', () => {
     assert.equal(result.severity, 'gray')
   })
 
-  it('returns blocked when stale map origin mismatch', () => {
-    const result = deriveNavigationStatus({
-      mapOriginStatus: { status: 'stale-map-mismatch', configured: false },
-      dispatchState: { status: 'navigating' },
-    })
-    assert.equal(result.status, 'blocked')
-    assert.equal(result.severity, 'orange')
-    assert.match(result.text, /stale-map-mismatch/)
-  })
-
-  it('returns blocked when stale missing map identity', () => {
-    const result = deriveNavigationStatus({
-      mapOriginStatus: { status: 'stale-missing-map-identity', configured: false },
-    })
-    assert.equal(result.status, 'blocked')
-    assert.match(result.text, /stale-missing-map-identity/)
-  })
-
-  it('returns blocked when active map identity is unavailable', () => {
-    const result = deriveNavigationStatus({
-      mapOriginStatus: { status: 'active-map-identity-unavailable', configured: false },
-    })
-    assert.equal(result.status, 'blocked')
-    assert.match(result.text, /active-map-identity-unavailable/)
-  })
-
   it('uses waypoint readiness blocker before fallback map-origin noise', () => {
     const result = deriveNavigationStatus({
-      mapOriginStatus: { status: 'active-map-identity-unavailable', configured: false },
+      mapOriginStatus: { status: 'missing', configured: false },
       dogzillaWaypointReadiness: {
         readyForMapWaypoints: false,
         blockers: ['5 invalid map waypoint(s) in source of truth'],
@@ -67,7 +41,7 @@ describe('deriveNavigationStatus', () => {
     })
     assert.equal(result.status, 'blocked')
     assert.match(result.text, /5 invalid map waypoint/)
-    assert.doesNotMatch(result.text, /active-map-identity-unavailable/)
+    assert.doesNotMatch(result.text, /missing/)
   })
 
   it('returns blocked when nav readiness fails', () => {

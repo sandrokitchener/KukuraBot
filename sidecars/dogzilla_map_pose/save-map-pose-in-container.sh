@@ -83,6 +83,17 @@ if [ "$conversion_status" != "ok" ] || [ ! -s "$map_stem.yaml" ] || [ ! -s "$map
   exit 2
 fi
 
+cp "$target_pbstream" "$REMOTE_ROOT/maps/robodoge_home.pbstream"
+cp "$map_stem.yaml" "$REMOTE_ROOT/maps/robodoge_home.yaml"
+cp "$map_stem.pgm" "$REMOTE_ROOT/maps/robodoge_home.pgm"
+
+previous_metadata="$DOGZILLA_MAP_METADATA.previous"
+if [ -s "$DOGZILLA_MAP_METADATA" ]; then
+  cp "$DOGZILLA_MAP_METADATA" "$previous_metadata"
+else
+  rm -f "$previous_metadata"
+fi
+
 cat > "$DOGZILLA_MAP_METADATA" <<JSON
 {
   "id": "$map_id",
@@ -96,5 +107,44 @@ cat > "$DOGZILLA_MAP_METADATA" <<JSON
   "rosMapConversion": "$conversion_status"
 }
 JSON
+
+python3 - "$REMOTE_ROOT" "$previous_metadata" "$target_pbstream" "$map_stem.yaml" "$map_stem.pgm" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+remote_root = Path(sys.argv[1])
+metadata_path = Path(sys.argv[2])
+keep = {str(Path(value).resolve()) for value in sys.argv[3:] if value}
+
+try:
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+except Exception:
+    metadata = {}
+
+for key in ("pbstream", "yaml", "pgm"):
+    path = metadata.get(key)
+    if not path:
+        continue
+    candidate = Path(path)
+    if str(candidate.resolve()) not in keep:
+        try:
+            candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+for candidate in (remote_root / "maps").glob("robodoge_home_*"):
+    if candidate.suffix not in {".pbstream", ".yaml", ".pgm"}:
+        continue
+    if str(candidate.resolve()) in keep:
+        continue
+    try:
+        candidate.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+(remote_root / "output" / "app-cache" / "dogzilla-map-origin.json").unlink(missing_ok=True)
+metadata_path.unlink(missing_ok=True)
+PY
 
 printf '{"status":"ok","id":"%s","pbstream":"%s","yaml":"%s","rosMapConversion":"%s"}\n' "$map_id" "$target_pbstream" "$map_stem.yaml" "$conversion_status"

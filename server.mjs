@@ -27,7 +27,6 @@ import {
   APP_MAP_FRAME,
   applyMapOriginToPose,
   getDogzillaMapOriginStatus,
-  hasDogzillaMapOriginIdentity,
   loadDogzillaMapOrigin,
 } from './lib/dogzilla-map-frame.mjs'
 import { resolveRobotPoseFromBridgeState } from './lib/dogzilla-robot-state.mjs'
@@ -82,8 +81,7 @@ const dogzillaConfig = await loadDogzillaConnectionConfig()
 const dogzillaStartupResult = await startSimplifiedDogzillaStack({ logger: console })
 
 if (dogzillaStartupResult.blocked) {
-  console.error(`App launch blocked: ${dogzillaStartupResult.error}`)
-  process.exit(1)
+  console.warn(`DOGZILLA startup degraded: ${dogzillaStartupResult.error}`)
 }
 
 printStartupBanner({
@@ -664,7 +662,7 @@ function getDogzillaPoseTrack() {
 }
 
 function applyMapOriginToRobotState(robot, mapOrigin) {
-  if (!robot?.pose || !mapOrigin || !hasDogzillaMapOriginIdentity(mapOrigin)) {
+  if (!robot?.pose || !mapOrigin) {
     return robot
   }
 

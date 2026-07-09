@@ -117,7 +117,8 @@ DOGZILLA_ROBOT_SERIAL_PORT=__ROBOT_SERIAL_PORT__
 DOGZILLA_SERIAL_PORT=__SERIAL_PORT__
 DOGZILLA_DIRECT_DRY_RUN=0
 DOGZILLA_ROSBRIDGE_PORT=9090
-DOGZILLA_MAP_TOPIC=/map_cartographer
+DOGZILLA_MAP_TOPIC=/map
+DOGZILLA_LOCALIZATION_BACKEND=amcl
 ENV
 
 sudo tee /etc/systemd/system/robodoge-direct-bridge.service >/dev/null <<SERVICE
@@ -199,7 +200,7 @@ Type=simple
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
 TimeoutStartSec=180
-ExecStartPre=/bin/bash -lc '/usr/bin/docker inspect robodoge-rosbridge >/dev/null 2>&1 || /usr/bin/docker create --name robodoge-rosbridge --privileged --network host -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_SERIAL_PORT=$SERIAL_PORT -e DOGZILLA_LIDAR_BAUDRATE=230400 -e DOGZILLA_LIDAR_TOPIC=/scan -e DOGZILLA_ROSBRIDGE_PORT=9090 -e DOGZILLA_MAP_TOPIC=/map_cartographer -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc '"'"'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh'"'"''
+ExecStartPre=/bin/bash -lc '/usr/bin/docker inspect robodoge-rosbridge >/dev/null 2>&1 || /usr/bin/docker create --name robodoge-rosbridge --privileged --network host -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_SERIAL_PORT=$SERIAL_PORT -e DOGZILLA_LIDAR_BAUDRATE=230400 -e DOGZILLA_LIDAR_TOPIC=/scan -e DOGZILLA_ROSBRIDGE_PORT=9090 -e DOGZILLA_MAP_TOPIC=/map -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc '"'"'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh'"'"''
 ExecStart=/usr/bin/docker start -a robodoge-rosbridge
 ExecStop=-/usr/bin/docker stop -t 20 robodoge-rosbridge
 Restart=always
@@ -238,9 +239,9 @@ SERVICE
 sudo tee /etc/systemd/system/robodoge-navigation.service >/dev/null <<SERVICE
 [Unit]
 Description=Robo-Doge DOGZILLA Nav2 Navigation
-After=robodoge-rosbridge.service robodoge-map-pose.service
-Wants=robodoge-rosbridge.service robodoge-map-pose.service
-PartOf=robodoge-rosbridge.service robodoge-map-pose.service
+After=robodoge-rosbridge.service
+Wants=robodoge-rosbridge.service
+PartOf=robodoge-rosbridge.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -266,7 +267,7 @@ sudo systemctl daemon-reload
 sudo systemctl stop robodoge-lidar-bridge.service 2>/dev/null || true
 sudo systemctl disable robodoge-lidar-bridge.service 2>/dev/null || true
 sudo docker rm -f robodoge-lidar-bridge 2>/dev/null || true
-sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service robodoge-navigation.service
+sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-navigation.service
 # Prevent the Yahboom OLED vendor app from respawning and reclaiming /dev/ttyAMA0 on live navigation machines.
 sudo systemctl disable --now yahboom_oled.service 2>/dev/null || true
 sudo systemctl restart robodoge-audio-cue.service || true
@@ -274,11 +275,9 @@ sudo systemctl restart robodoge-yolo-vision.service || true
 sudo systemctl restart robodoge-rosbridge.service || true
 sudo systemctl restart robodoge-direct-bridge.service || true
 sleep 4
-sudo systemctl restart robodoge-map-pose.service || true
-sleep 4
 sudo systemctl restart robodoge-navigation.service || true
 
-systemctl --no-pager --full status robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service robodoge-navigation.service || true
+systemctl --no-pager --full status robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-navigation.service || true
 '@
 
 $remoteScript = $remoteScript.

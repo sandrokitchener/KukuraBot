@@ -204,6 +204,36 @@
   min-width: 0;
 }
 
+.manual-control-speed {
+  display: grid;
+  grid-template-columns: minmax(0, 104px) minmax(72px, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.manual-control-speed span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.manual-control-speed input[type='range'] {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.manual-control-speed output {
+  min-width: 38px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .manual-control-readout {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

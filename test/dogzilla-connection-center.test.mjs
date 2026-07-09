@@ -28,6 +28,7 @@ test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () =
   assert.equal(config.camera.controlPort, 6000)
   assert.equal(config.camera.wakeCommand, '$010F040115#')
   assert.equal(config.vision.enabled, false)
+  assert.equal(config.vision.detectionEnabled, false)
   assert.equal(config.vision.streamUrl, 'http://192.168.8.88:8894/stream.mjpg')
   assert.equal(config.audio.enabled, false)
   assert.equal(config.audio.cueUrl, 'http://192.168.8.88:8895/cue')
@@ -134,7 +135,24 @@ test('buildDogzillaActionPlan starts YOLO, audio, and lidar support services ind
   assert.ok(yoloPlan.args.includes('-CameraUrl'))
   assert.equal(yoloPlan.args[yoloPlan.args.indexOf('-CameraUrl') + 1], '/dev/video0')
   assert.ok(yoloPlan.args.includes('-Background'))
+  assert.equal(yoloPlan.args.includes('-DetectionEnabled'), false)
   assert.equal(yoloPlan.args.includes('-ModelPath'), false)
+
+  const yoloDetectionPlan = buildDogzillaActionPlan('start-yolo', normalizeDogzillaConnectionConfig({
+    ssh: {
+      host: '192.168.8.88',
+      user: 'pi',
+      alias: 'dogzilla',
+    },
+    remoteRoot: '/home/pi/robodoge',
+    vision: {
+      enabled: true,
+      detectionEnabled: true,
+      port: 8894,
+      sourceStreamUrl: '/dev/video0',
+    },
+  }))
+  assert.ok(yoloDetectionPlan.args.includes('-DetectionEnabled'))
   assert.ok(lidarPlan.args.some((arg) => arg.endsWith('start-dogzilla-rosbridge-ssh.ps1')))
   assert.ok(lidarPlan.args.includes('-SshPort'))
   assert.equal(lidarPlan.args[lidarPlan.args.indexOf('-SshPort') + 1], '22')
@@ -273,6 +291,7 @@ test('buildDogzillaActionPlan exposes explicit map mapping and save actions', ()
   assert.equal(mappingPlan.action, 'start-map-pose-mapping')
   assert.ok(mappingPlan.args.some((arg) => arg.endsWith('start-dogzilla-map-pose-ssh.ps1')))
   assert.equal(mappingPlan.args[mappingPlan.args.indexOf('-Mode') + 1], 'mapping')
+  assert.ok(mappingPlan.args.includes('-ForceRestart'))
   assert.equal(savePlan.action, 'save-map-pose')
   assert.ok(savePlan.args.some((arg) => arg.endsWith('save-dogzilla-map-pose-ssh.ps1')))
 })

@@ -120,7 +120,7 @@ DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists onl
 | `8891` | Isaac bridge |
 | `8892` | ROS2 bridge |
 | `8893` | DOGZILLA direct bridge |
-| `8894` | DOGZILLA YOLO vision |
+| `8894` | DOGZILLA camera stream sidecar; raw stream by default, YOLO detection opt-in |
 | `8895` | DOGZILLA audio cue (keeps live volume state via `/volume`; direct callers like YOLO use it as fallback) |
 | `9090` | DOGZILLA rosbridge (Pi-hosted; throttled scan/TF/odom over WebSocket) |
 

@@ -8,6 +8,7 @@ import {
   hasManualVectorChanged,
   hasManualVectorInput,
   normalizeManualAxis,
+  readManualForwardScale,
   readManualBarkTriggerPressed,
   readManualGamepadVector,
   shouldSendManualCommand,
@@ -207,6 +208,14 @@ function createManualControlElements() {
     forwardMeter: meter(),
     strafeMeter: meter(),
     turnMeter: meter(),
+    speedSlider: {
+      value: '45',
+      disabled: false,
+      setAttribute() {},
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    speedValue: { textContent: '' },
   }
 }
 
@@ -274,6 +283,19 @@ test('manual control resets forward ramp when forward input is released', () => 
   const next = applyForwardRamp({ forward: 0.8, strafe: 0, turn: 0 }, state, 2000)
   assert.equal(next.vector.forward, 0.2)
   assert.equal(next.gait, 'walk')
+})
+
+test('manual forward gait slider scales positive forward motion', () => {
+  assert.equal(readManualForwardScale('45'), 0.45)
+  assert.equal(readManualForwardScale('0.35'), 0.35)
+  assert.equal(readManualForwardScale('5'), 0.2)
+  assert.equal(readManualForwardScale('150'), 1)
+
+  const state = { forwardRampStartedAt: 1000 }
+  const initial = applyForwardRamp({ forward: 0.8, strafe: 0, turn: 0 }, state, 1000, { forwardScale: 0.5 })
+  assert.equal(initial.vector.forward, 0.1)
+  const full = applyForwardRamp({ forward: 0.8, strafe: 0, turn: 0 }, state, 2000, { forwardScale: 0.5 })
+  assert.equal(full.vector.forward, 0.4)
 })
 
 test('manual control sends when forward ramp changes gait stage', () => {
@@ -662,11 +684,10 @@ test('formatWaypointReadinessSummary distinguishes ready and blocked map waypoin
   assert.equal(formatWaypointReadinessSummary({
     readyForMapWaypoints: false,
     blockers: [
-      'map origin not ready: stale-missing-map-identity',
+      'map origin not ready: missing',
       '12 invalid map waypoint(s) in source of truth',
-      'no ready map waypoints in source of truth',
     ],
-  }), 'Waypoints not ready: map origin not ready: stale-missing-map-identity; 12 invalid map waypoint(s) in source of truth.')
+  }), 'Waypoints not ready: map origin not ready: missing; 12 invalid map waypoint(s) in source of truth.')
 })
 
 test('deriveOperatorLastCommand renders last command and result from dispatch payload', () => {
@@ -833,6 +854,7 @@ test('formatMapStatusPayload reads mode from health payload map field', () => {
   assert.equal(result.modeLabel, 'Mapping')
   assert.equal(result.fresh, true)
   assert.equal(result.lastUpdateAgeSec, 1.4)
+  assert.equal(result.receivedAtEpoch, 1000)
   assert.match(result.freshnessLabel, /1\.4s ago/)
   assert.equal(result.occupiedCount, 1200)
   assert.equal(result.freeCount, 8400)

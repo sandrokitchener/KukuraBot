@@ -54,6 +54,8 @@ const manualControlTurnValue = document.querySelector('#manual-control-turn-valu
 const manualControlForwardMeter = document.querySelector('#manual-control-forward-meter')
 const manualControlStrafeMeter = document.querySelector('#manual-control-strafe-meter')
 const manualControlTurnMeter = document.querySelector('#manual-control-turn-meter')
+const manualControlSpeedSlider = document.querySelector('#manual-control-speed-slider')
+const manualControlSpeedValue = document.querySelector('#manual-control-speed-value')
 const speechPanel = document.querySelector('.speech-panel')
 const speechProfileName = document.querySelector('#speech-profile-name')
 const speechProfileSelect = document.querySelector('#speech-profile-select')
@@ -101,6 +103,9 @@ const robotMapModeChip = document.querySelector('#robot-map-mode-chip')
 const robotMapFreshness = document.querySelector('#robot-map-freshness')
 const robotMapCellCounts = document.querySelector('#robot-map-cell-counts')
 const robotMapBbox = document.querySelector('#robot-map-bbox')
+const robotMapLayerGrid = document.querySelector('#robot-map-layer-grid')
+const robotMapLayerScan = document.querySelector('#robot-map-layer-scan')
+const robotMapLayerWaypoints = document.querySelector('#robot-map-layer-waypoints')
 const robotPoseReadout = document.querySelector('#robot-pose-readout')
 const robotNavBadge = document.querySelector('#robot-nav-badge')
 const robotMapPanel = document.querySelector('.robot-map-panel')
@@ -228,6 +233,8 @@ let robotStateTimerId = null
 let robotLidarTimerId = null
 let robotMapTimerId = null
 let robotCameraLoadTimerId = null
+let slamMappingSessionActive = false
+let slamMappingSessionStartedAt = 0
 let activeThinkingCue = null
 let thinkingCueToken = 0
 let reconSnapshots = []
@@ -333,6 +340,8 @@ const manualControl = createManualControlController({
     forwardMeter: manualControlForwardMeter,
     strafeMeter: manualControlStrafeMeter,
     turnMeter: manualControlTurnMeter,
+    speedSlider: manualControlSpeedSlider,
+    speedValue: manualControlSpeedValue,
   },
   apiFetch,
   toApiUrl,
@@ -1276,7 +1285,7 @@ function startRobotMapPolling() {
 }
 
 async function refreshDogzillaMap() {
-  const mapPath = '/api/dogzilla/map'
+  const mapPath = slamMappingSessionActive ? '/api/dogzilla/map?stream=slam' : '/api/dogzilla/map'
   const healthPath = '/api/dogzilla/lidar/health'
 
   try {
@@ -1295,7 +1304,7 @@ async function refreshDogzillaMap() {
       if (robotMapGridMeta) {
         robotMapGridMeta.textContent = payload?.status === 'no-map' ? 'No map' : 'Map unavailable'
       }
-      renderMapStatus(null, healthPayload)
+      renderMapStatus(payload, healthPayload)
       adaptMapPollInterval(healthPayload)
       return
     }
@@ -1307,7 +1316,7 @@ async function refreshDogzillaMap() {
     document.querySelector('.robot-map-head')?.classList.add('has-map')
     renderMapStatus(payload, healthPayload)
     adaptMapPollInterval(healthPayload)
-  } catch {
+} catch {
     robotMap.setMapData(null)
     document.querySelector('.robot-map-head')?.classList.remove('has-map')
     if (robotMapGridMeta) {
@@ -1335,17 +1344,29 @@ function renderMapStatus(mapPayload, healthPayload) {
   const saveMapButton = document.getElementById('save-map-button')
   const newMapButton = document.getElementById('new-map-button')
   const slamModeChip = document.getElementById('slam-mode-chip')
-  const mappingActive = status.mode === 'mapping' && status.fresh
+  const gridAfterSlamStart = slamMappingSessionActive
+    && typeof status.receivedAtEpoch === 'number'
+    && status.receivedAtEpoch >= slamMappingSessionStartedAt
+  const mappingGridFresh = status.fresh && (status.mode === 'mapping' || gridAfterSlamStart)
+  const mappingActive = slamMappingSessionActive || mappingGridFresh
   if (saveMapButton) {
     saveMapButton.disabled = !mappingActive
-    saveMapButton.title = mappingActive ? 'Save the live SLAM map and make it the default' : 'Start New Map and wait for live mapping before saving'
+    saveMapButton.title = mappingGridFresh
+      ? 'Save the live SLAM map and make it the default'
+      : slamMappingSessionActive
+        ? 'Save the active SLAM map. If the grid is not ready yet, the bridge will report why.'
+        : 'Start New Map before saving'
   }
   if (newMapButton) {
     newMapButton.disabled = mappingActive
     newMapButton.title = mappingActive ? 'Mapping is already running' : 'Start a new live SLAM map'
   }
   if (slamModeChip) {
+    slamModeChip.textContent = mappingGridFresh ? formatSlamChipLabel(status) : 'SLAM waiting for occupancy grid'
     slamModeChip.hidden = !mappingActive
+  }
+  if (mappingActive) {
+    ensureTopDownMapView()
   }
 
   if (robotMapFreshness) {
@@ -1373,6 +1394,125 @@ function renderMapStatus(mapPayload, healthPayload) {
     } else {
       robotMapBbox.hidden = true
     }
+  }
+  renderMapLayerStatus(status, mapPayload, healthPayload)
+  const workflowSummary = formatMapWorkflowSummary(status, healthPayload)
+  if (workflowSummary) {
+    setMapWorkflowStatus(workflowSummary.message, workflowSummary.state)
+  }
+}
+
+async function stopDogzillaSlamMapStream() {
+  try {
+    await apiFetch('/api/dogzilla/map?stream=off')
+  } catch {
+    // Best effort only; the next app/server start will use the default topic list.
+  }
+}
+
+function renderMapLayerStatus(status, mapPayload, healthPayload) {
+  const gridState = mapPayload?.ok === true
+    ? status.fresh
+      ? 'live'
+      : 'stale'
+    : 'missing'
+  const gridLabel = mapPayload?.ok === true
+    ? status.cellCountsLabel
+      ? `Grid ${status.cellCountsLabel}`
+      : 'Grid loaded'
+    : 'No occupancy grid'
+  setMapLayerStatus(robotMapLayerGrid, gridState, gridLabel)
+
+  const lidarLive = healthPayload?.ok === true || healthPayload?.status === 'ok'
+  const lidarStatus = healthPayload?.status ? String(healthPayload.status) : lidarLive ? 'ok' : 'missing'
+  setMapLayerStatus(robotMapLayerScan, lidarLive ? 'live' : 'missing', lidarLive ? 'LiDAR live' : `LiDAR ${lidarStatus}`)
+
+  const waypoints = Array.isArray(runtimeConfig.robotRuntime?.waypoints) ? runtimeConfig.robotRuntime.waypoints : []
+  const waypointReadiness = runtimeConfig.robotRuntime?.waypointReadiness
+  const waypointsReady = waypointReadiness?.readyForMapWaypoints === true
+  const waypointBlocked = waypointReadiness && waypointsReady !== true
+  const waypointState = waypointsReady ? 'live' : waypointBlocked ? 'stale' : waypoints.length ? 'ready' : 'missing'
+  const waypointLabel = waypointsReady
+    ? `Waypoints ready (${waypoints.length})`
+    : waypoints.length
+      ? `Waypoints ${waypoints.length}`
+      : 'No waypoints'
+  setMapLayerStatus(robotMapLayerWaypoints, waypointState, waypointLabel)
+}
+
+function setMapLayerStatus(element, state, label) {
+  if (!element) return
+  element.dataset.state = state || 'missing'
+  element.textContent = label || ''
+}
+
+function formatSlamChipLabel(status) {
+  const detail = [status.freshnessLabel, status.cellCountsLabel].filter(Boolean).join(' · ')
+  return detail ? `SLAM building · ${detail}` : 'SLAM building'
+}
+
+function formatMapWorkflowSummary(status, healthPayload) {
+  const lidarLive = healthPayload?.ok === true || healthPayload?.status === 'ok'
+  const scanText = lidarLive ? 'LiDAR overlay live' : 'LiDAR overlay unavailable'
+  const gridAfterSlamStart = slamMappingSessionActive
+    && typeof status.receivedAtEpoch === 'number'
+    && status.receivedAtEpoch >= slamMappingSessionStartedAt
+  if (status.mode === 'mapping') {
+    const gridFresh = status.fresh && (!slamMappingSessionActive || gridAfterSlamStart)
+    const gridText = gridFresh ? 'occupancy grid updating' : 'waiting for a fresh grid update'
+    return {
+      state: gridFresh ? 'success' : 'error',
+      message: `SLAM building: ${gridText}; ${scanText}.`,
+    }
+  }
+  if (slamMappingSessionActive && status.mode !== 'no-map') {
+    const gridFresh = status.fresh && gridAfterSlamStart
+    const gridText = gridFresh ? 'occupancy grid updating' : 'waiting for fresh grid update'
+    return {
+      state: gridFresh ? 'success' : 'error',
+      message: `SLAM stream active: ${gridText}; ${scanText}.`,
+    }
+  }
+  if (slamMappingSessionActive && status.mode === 'no-map') {
+    return {
+      state: 'error',
+      message: `SLAM stream requested: waiting for first occupancy grid from Pi; ${scanText}.`,
+    }
+  }
+  if (status.mode === 'localization') {
+    return {
+      state: status.fresh ? 'success' : '',
+      message: status.fresh ? `Map locked: ${scanText}; add origin and waypoints.` : 'Map locked: waiting for fresh localization grid.',
+    }
+  }
+  if (status.mode === 'no-map') {
+    return {
+      state: '',
+      message: 'No occupancy grid loaded. Start New Map to build SLAM.',
+    }
+  }
+  if (status.mode && status.mode !== 'unknown') {
+    return {
+      state: status.fresh ? 'success' : '',
+      message: `Map mode ${status.mode}: ${scanText}.`,
+    }
+  }
+  return null
+}
+
+function ensureTopDownMapView() {
+  if (robotMap.getViewMode() === 'map') return
+  robotMap.setViewMode('map')
+  updateMapViewToggle()
+}
+
+function updateMapViewToggle() {
+  if (!mapViewToggle) return
+  const mode = robotMap.getViewMode()
+  mapViewToggle.textContent = mode === 'follow' ? 'Top-down map' : 'Follow robot'
+  mapViewToggle.dataset.viewMode = mode
+  if (mapViewModeLabel) {
+    mapViewModeLabel.textContent = robotMap.getViewModeLabel()
   }
 }
 
@@ -1405,14 +1545,17 @@ async function refreshDogzillaLidarScan() {
     if (!response.ok || payload.ok !== true) {
       robotMap.clearLidarScan()
       robotMap.setLidarSummary(robotMap.formatLidarFailureSummary(payload))
+      setMapLayerStatus(robotMapLayerScan, 'missing', payload?.status ? `LiDAR ${payload.status}` : 'LiDAR no scan')
       return
     }
 
     robotMap.renderLidarScan(payload)
     robotMap.setLidarSummary(robotMap.formatLidarSummary(payload))
+    setMapLayerStatus(robotMapLayerScan, 'live', 'LiDAR overlay live')
   } catch (error) {
     robotMap.clearLidarScan()
     robotMap.setLidarSummary(`Lidar: ${formatError(error)}`)
+    setMapLayerStatus(robotMapLayerScan, 'missing', 'LiDAR overlay unavailable')
   }
 }
 
@@ -1834,6 +1977,22 @@ async function handleDogzillaConnectionAction(event) {
   setConnectionActionsDisabled(true)
   connectionStatus.textContent = `Running ${formatConnectionAction(action)}...`
   connectionOutput.textContent = `Running ${formatConnectionAction(action)}...`
+  if (action === 'start-map-pose-mapping') {
+    slamMappingSessionActive = false
+    const slamChip = document.getElementById('slam-mode-chip')
+    const newMapBtn = document.getElementById('new-map-button')
+    const saveMapBtn = document.getElementById('save-map-button')
+    if (slamChip) {
+      slamChip.textContent = 'Starting SLAM...'
+      slamChip.hidden = false
+    }
+    if (newMapBtn) newMapBtn.disabled = true
+    if (saveMapBtn) saveMapBtn.disabled = true
+    ensureTopDownMapView()
+    setMapWorkflowStatus('Starting SLAM mapping...', '')
+  } else if (action === 'save-map-pose') {
+    setMapWorkflowStatus('Saving occupancy grid and locking map...', '')
+  }
 
   try {
     if (action === 'capture-map-origin') {
@@ -1889,12 +2048,23 @@ async function handleDogzillaConnectionAction(event) {
     const slamChip = document.getElementById('slam-mode-chip')
     const newMapBtn = document.getElementById('new-map-button')
     const saveMapBtn = document.getElementById('save-map-button')
-    if (action === 'start-map-pose-mapping') {
-      if (slamChip) slamChip.hidden = false
+  if (action === 'start-map-pose-mapping') {
+    slamMappingSessionActive = true
+    slamMappingSessionStartedAt = Date.now() / 1000
+    if (slamChip) {
+      slamChip.textContent = 'SLAM waiting for occupancy grid'
+      slamChip.hidden = false
+      }
       if (newMapBtn) newMapBtn.disabled = true
       if (saveMapBtn) saveMapBtn.disabled = false
-    } else if (action === 'save-map-pose' || action === 'start-map-pose') {
-      if (slamChip) slamChip.hidden = true
+      ensureTopDownMapView()
+      setMapWorkflowStatus('SLAM mapping started. Waiting for occupancy grid updates...', 'success')
+      void refreshDogzillaMap()
+  } else if (action === 'save-map-pose' || action === 'start-map-pose') {
+    slamMappingSessionActive = false
+    slamMappingSessionStartedAt = 0
+    void stopDogzillaSlamMapStream()
+    if (slamChip) slamChip.hidden = true
       if (newMapBtn) newMapBtn.disabled = false
       if (saveMapBtn) saveMapBtn.disabled = true
     }
@@ -1904,30 +2074,23 @@ async function handleDogzillaConnectionAction(event) {
 
     // After saving a new map, automatically restart localization against it.
     if (action === 'save-map-pose' && payload.status === 'ok') {
-      setMapWorkflowStatus('Map saved. Restarting localization...', 'success')
-      const localizeResponse = await apiFetch('/api/dogzilla/connection/action', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'start-map-pose' }),
-      })
-      const localizePayload = await localizeResponse.json()
-      if (!localizeResponse.ok || localizePayload.status === 'error') {
-        throw new Error(localizePayload.error || localizePayload.stderr || 'DOGZILLA localization failed after save.')
-      }
       const mapSaveProof = extractMapSaveProof(payload)
       const proofSummary = mapSaveProof
         ? `Saved default map ${mapSaveProof.id || mapSaveProof.yaml || mapSaveProof.pbstream}.`
         : 'Map saved.'
-      connectionStatus.textContent = `${proofSummary} Localization restarted.`
+      const originMessage = payload.origin ? 'Origin captured at current robot pose.' : 'Origin capture proof missing.'
+      connectionStatus.textContent = `${proofSummary} Localization restarted. ${originMessage}`
       connectionOutput.textContent = [
         formatMapSaveProof(mapSaveProof),
-        `localization\n${formatDogzillaActionOutput(localizePayload)}`
+        payload.mapOriginCleared ? 'old origin cleared before capture' : '',
+        payload.origin ? `origin\n${JSON.stringify(payload.origin, null, 2)}` : '',
+        payload.localization ? `localization\n${formatDogzillaActionOutput(payload.localization)}` : ''
       ].filter(Boolean).join('\n\n')
-      setStatus(`DOGZILLA ${proofSummary} Localization restarted.`)
+      setStatus(`DOGZILLA ${proofSummary} Localization restarted. ${originMessage}`)
       if (slamChip) slamChip.hidden = true
       if (newMapBtn) newMapBtn.disabled = false
       if (saveMapBtn) saveMapBtn.disabled = true
-      setMapWorkflowStatus(`${proofSummary} Localization restarted.`, 'success')
+      setMapWorkflowStatus(`${proofSummary} Localization restarted. ${originMessage}`, 'success')
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
@@ -2007,11 +2170,7 @@ function handleMapViewToggle() {
   const currentMode = robotMap.getViewMode()
   const newMode = currentMode === 'follow' ? 'map' : 'follow'
   robotMap.setViewMode(newMode)
-  mapViewToggle.textContent = newMode === 'follow' ? 'Top-down map' : 'Follow robot'
-  mapViewToggle.dataset.viewMode = newMode
-  if (mapViewModeLabel) {
-    mapViewModeLabel.textContent = robotMap.getViewModeLabel()
-  }
+  updateMapViewToggle()
 }
 
 async function ensureDogzillaRobotLinkReady() {
@@ -2121,6 +2280,10 @@ function renderServiceProbe(payload) {
 
 async function handlePiPerformanceCheck() {
   const reportWindow = openPiPerformanceWindow()
+  if (!reportWindow) {
+    setStatus('Pi load window was blocked by the browser.', 'error')
+    return
+  }
   renderPiPerformanceWindow(reportWindow, { state: 'loading' })
   checkPiPerformanceButton.disabled = true
 
@@ -2151,8 +2314,7 @@ async function handlePiPerformanceCheck() {
 
 function openPiPerformanceWindow() {
   const reportWindow = window.open('', 'dogzilla-pi-performance', 'width=520,height=620')
-  if (reportWindow) return reportWindow
-  return window
+  return reportWindow || null
 }
 
 function renderPiPerformanceWindow(reportWindow, { state, payload, message }) {
@@ -2166,7 +2328,7 @@ function renderPiPerformanceWindow(reportWindow, { state, payload, message }) {
     ? cpu.loadAverage.map((value) => formatMetricNumber(value)).join(' / ')
     : 'Unknown'
   const uptime = typeof system.uptimeSec === 'number'
-    ? formatDuration(system.uptimeSec * 1000)
+    ? formatUptime(system.uptimeSec)
     : 'Unknown'
   const throttled = system.throttled || 'Unknown'
   const body = state === 'loading'
@@ -2235,6 +2397,16 @@ function formatMemoryUsage(memory) {
 function formatTemperature(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return 'Unknown'
   return `${value.toFixed(1)} C`
+}
+
+function formatUptime(seconds) {
+  if (typeof seconds !== 'number' || Number.isNaN(seconds)) return 'Unknown'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
 }
 
 function formatMetricNumber(value) {
@@ -2610,7 +2782,8 @@ function applyRobotRuntimeConfig() {
   const robotRuntime = runtimeConfig.robotRuntime
   const activeTarget = robotRuntime.activeTarget
 
-  runtimeTargetChip.textContent = activeTarget.label
+  runtimeTargetChip.textContent = formatRuntimeTargetChip(robotRuntime)
+  runtimeTargetChip.title = activeTarget.label || runtimeTargetChip.textContent
   const robotName = robotRuntime.robotName || DEFAULT_ROBOT_RUNTIME.robotName
   if (primaryRobotTabName) {
     primaryRobotTabName.textContent = robotName
@@ -2809,6 +2982,22 @@ function renderNavigationChainHealth(readinessPayload) {
       button.addEventListener('click', handleDogzillaConnectionAction)
     }
   }
+}
+
+function formatRuntimeTargetChip(robotRuntime = {}) {
+  if (robotRuntime.dryRun === true) {
+    return 'Dry run'
+  }
+
+  const kind = robotRuntime.activeTarget?.kind || ''
+  if (kind === 'isaacsim') {
+    return 'Simulation'
+  }
+  if (kind === 'dogzilla-direct' || kind === 'ros2-bridge') {
+    return 'Real robot'
+  }
+
+  return 'Robot target'
 }
 
 function handleNavChainDotsClick() {
@@ -3081,7 +3270,7 @@ function applyDogzillaCameraConfig() {
   const vision = runtimeConfig.dogzilla?.vision
   const streamUrl = camera?.proxyStreamPath ? toApiUrl(camera.proxyStreamPath) : camera?.streamUrl || ''
   const upstreamStreamUrl = camera?.streamUrl || ''
-  const yoloEnabled = vision?.enabled !== false
+  const yoloEnabled = vision?.detectionEnabled === true
 
   if (robotCameraYoloToggle) {
     robotCameraYoloToggle.dataset.yoloEnabled = String(yoloEnabled)

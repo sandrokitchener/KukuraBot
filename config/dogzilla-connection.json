@@ -27,6 +27,7 @@
   },
   "vision": {
     "enabled": true,
+    "detectionEnabled": false,
     "label": "DOGZILLA YOLO annotated camera",
     "baseUrl": "http://10.0.4.32:8894",
     "port": 8894,
@@ -52,7 +53,8 @@
     "rosbridgeUrl": "ws://10.0.4.32:9090",
     "rosbridgePort": 9090,
     "serialPort": "/dev/ttyAMA1",
-    "mapTopic": "/map_cartographer",
+    "mapTopic": "/map",
+    "slamMapTopic": "/map_cartographer",
     "rosbridgeTopics": [
       {
         "topic": "/scan",

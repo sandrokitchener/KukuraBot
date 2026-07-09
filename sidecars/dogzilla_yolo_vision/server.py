@@ -24,10 +24,17 @@ from urllib.request import Request, urlopen
 try:
     import cv2
     import numpy as np
-    import onnxruntime as ort
 except Exception as error:  # pragma: no cover - exercised on Pi startup
     print(f"Missing required vision dependency: {error}", file=sys.stderr, flush=True)
     raise
+
+try:
+    import onnxruntime as ort
+except Exception as error:  # pragma: no cover - optional in raw stream mode
+    ort = None
+    ORT_IMPORT_ERROR = error
+else:
+    ORT_IMPORT_ERROR = None
 
 
 BOUNDARY = "frame"
@@ -77,6 +84,8 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
 
 class YoloOnnxDetector:
     def __init__(self, model_path: str, labels_path: str, input_size: int, confidence: float, iou: float):
+        if ort is None:
+            raise RuntimeError(f"onnxruntime is required when detection is enabled: {ORT_IMPORT_ERROR}")
         self.model_path = model_path
         self.input_size = input_size
         self.confidence = confidence
@@ -137,14 +146,16 @@ class VisionWorker(threading.Thread):
                     if self.stop_event.is_set():
                         return
 
-                    with self.state.lock:
-                        detections = list(self.state.latest_detections)
-                        inference_ms = self.state.inference_ms
+                    output_frame = frame
+                    if self.args.detection_enabled:
+                        with self.state.lock:
+                            detections = list(self.state.latest_detections)
+                            inference_ms = self.state.inference_ms
+                        output_frame = draw_detections(frame, detections, inference_ms)
 
-                    annotated = draw_detections(frame, detections, inference_ms)
-                    encode_ok, jpeg = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), self.args.jpeg_quality])
+                    encode_ok, jpeg = cv2.imencode(".jpg", output_frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.args.jpeg_quality])
                     if not encode_ok:
-                        raise RuntimeError("Could not encode annotated JPEG frame.")
+                        raise RuntimeError("Could not encode camera JPEG frame.")
 
                     with self.state.lock:
                         self.state.latest_raw_frame = frame.copy()
@@ -164,6 +175,16 @@ class VisionWorker(threading.Thread):
                     control_socket.close()
 
     def inference_loop(self) -> None:
+        if not self.args.detection_enabled:
+            with self.state.lock:
+                self.state.model_loaded = False
+                self.state.labels = []
+                self.state.latest_detections = []
+                self.state.inference_ms = 0.0
+            while not self.stop_event.is_set():
+                time.sleep(0.25)
+            return
+
         next_inference_at = 0.0
         while not self.stop_event.is_set():
             try:
@@ -309,6 +330,7 @@ def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, An
             error = f"Camera frame is stale; latest age {age:.2f}s."
         return {
             "ok": state.latest_jpeg is not None and not error and not stale,
+            "detectionEnabled": args.detection_enabled,
             "modelLoaded": state.model_loaded,
             "model": args.model,
             "cameraUrl": args.camera_url,
@@ -333,6 +355,7 @@ def detections_payload(state: VisionState) -> dict[str, Any]:
     with state.lock:
         return {
             "ok": state.latest_jpeg is not None and not state.latest_error,
+            "detectionEnabled": bool(getattr(state.worker.args, "detection_enabled", False)) if state.worker else False,
             "frameAt": state.latest_frame_at,
             "inferenceMs": state.inference_ms,
             "detections": [detection_to_json(d) for d in state.latest_detections],
@@ -684,6 +707,10 @@ def positive_float(value: str) -> float:
     return parsed
 
 
+def normalize_bool(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="DOGZILLA YOLO ONNX annotated camera stream")
     parser.add_argument("--host", default=os.getenv("DOGZILLA_YOLO_HOST", "0.0.0.0"))
@@ -706,6 +733,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stream-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STREAM_FPS", "12")))
     parser.add_argument("--inference-fps", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_INFERENCE_FPS", "4")))
     parser.add_argument("--infer-interval", type=positive_float, default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--detection-enabled",
+        dest="detection_enabled",
+        action="store_true",
+        default=normalize_bool(os.getenv("DOGZILLA_YOLO_DETECTION_ENABLED", "0")),
+        help="Run YOLO inference and annotate the stream. Defaults off to keep Pi load low.",
+    )
+    parser.add_argument("--raw-stream", dest="detection_enabled", action="store_false", help="Serve camera stream without YOLO inference.")
     parser.add_argument("--stale-health-seconds", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STALE_HEALTH_SECONDS", str(DEFAULT_STALE_HEALTH_SECONDS))))
     parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "65")))
     parser.add_argument("--restart-delay", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_RESTART_DELAY", "2")))
@@ -718,16 +753,19 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.infer_interval is not None:
         args.inference_fps = 1.0 / args.infer_interval
-    model = Path(args.model)
-    if not model.exists():
-        raise SystemExit(f"YOLO ONNX model missing: {model}")
+    if args.detection_enabled:
+        model = Path(args.model)
+        if not model.exists():
+            raise SystemExit(f"YOLO ONNX model missing: {model}")
 
     state = VisionState()
     server = ReusableThreadingHTTPServer((args.host, args.port), VisionHandler)
     server.state = state  # type: ignore[attr-defined]
     server.args = args  # type: ignore[attr-defined]
     print(f"DOGZILLA YOLO vision stream listening on http://{args.host}:{args.port}", flush=True)
-    print(f"Model: {args.model}", flush=True)
+    print(f"Detection enabled: {args.detection_enabled}", flush=True)
+    if args.detection_enabled:
+        print(f"Model: {args.model}", flush=True)
     print(f"Camera: {args.camera_url}", flush=True)
     server.serve_forever()
     return 0

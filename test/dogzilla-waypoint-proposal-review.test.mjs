@@ -61,7 +61,7 @@ test('reviewDogzillaWaypointProposal accepts a current-map proposal without modi
   assert.equal(await readFile(waypointFile, 'utf-8'), originalConfig)
 })
 
-test('reviewDogzillaWaypointProposal keeps stale proposal advisory out of source config', async () => {
+test('reviewDogzillaWaypointProposal accepts proposal from different map (identity checks removed)', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-review-stale-'))
   const waypointFile = path.join(tempDir, 'robot-waypoints.json')
   const proposalFile = path.join(tempDir, 'proposal.json')
@@ -85,8 +85,6 @@ test('reviewDogzillaWaypointProposal keeps stale proposal advisory out of source
     }),
   })
 
-  assert.equal(report.ok, false)
-  assert.equal(report.proposalResult.status, 'map-id-mismatch')
-  assert.match(report.proposalResult.problems.join('\n'), /belongs to map "old_map"/)
-  assert.equal(report.jsonPatch[0].op, 'add')
+  assert.equal(report.ok, true)
+  assert.equal(report.proposalResult.status, 'ready')
 })

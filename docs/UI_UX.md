@@ -68,7 +68,7 @@ If an action is disabled, show the blocker as visible text, not only a tooltip.
 
 - Keep main tabs simple: `Overview` and `Camera`.
 - Make Overview the operator home: status, map, task, manual controls, last command, and safe next action.
-- Keep Diagnostics for service recovery and bridge checks.
+- Keep Diagnostics for service recovery and bridge checks plus one-shot Pi load/performance check. The Pi load button opens a separate window and calls `/api/dogzilla/pi-performance` once for CPU load, memory usage, temperature, uptime, and throttle flags; do not convert it into polling without an explicit operator need.
 - Keep Settings for runtime/model/operator preferences.
 - Keep Help for workflow explanation.
 - Remove or convert inert rail icons so every visible navigation element either does something or is clearly decorative.

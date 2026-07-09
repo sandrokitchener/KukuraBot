@@ -37,7 +37,7 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 - `npm start` runs `scripts/start-clean.mjs`, stops local processes/listeners on Robo-Doge ports, then imports `run.mjs`.
 - Port conflicts around `3037`, `8891`-`8895`, `9090`, and `5037` can be stale Node/Python/ADB processes.
 
-- **Raw vendor camera vs direct bridge:** Direct-bridge startup can stop Yahboom `app_dogzilla.py` to free `/dev/ttyAMA0`, which also leaves vendor camera ports `6000/6500` refusing connections. Keep the app-facing camera on the YOLO/device sidecar (`8894`, `vision.enabled=true`) unless intentionally testing the raw Yahboom app camera.
+- **Raw vendor camera vs direct bridge:** Direct-bridge startup can stop Yahboom `app_dogzilla.py` to free `/dev/ttyAMA0`, which also leaves vendor camera ports `6000/6500` refusing connections. Keep the app-facing camera on the `8894` device sidecar (`vision.enabled=true`); YOLO detection is separate (`vision.detectionEnabled`) and should stay off unless object detection is needed.
 
 - Direct-bridge startup gestures are disabled by default because startup tricks/preempt commands can collide with Pi-owned Nav2 readiness. Use `ROBOT_STARTUP_GESTURE=1` only for intentional startup gesture tests.
 

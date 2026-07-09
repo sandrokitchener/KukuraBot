@@ -184,40 +184,13 @@ test('getDogzillaMapOriginIdentity reports whether saved origin belongs to a map
   assert.equal(identity.pbstream, '/maps/home.pbstream')
 })
 
-test('getDogzillaMapOriginStatus detects missing, ready, and mismatched origin maps', () => {
-  assert.equal(getDogzillaMapOriginStatus(null, { id: 'active', fingerprint: 'fp' }).status, 'missing')
-  assert.equal(getDogzillaMapOriginStatus({
-    x: 1,
-    y: 2,
-    yaw: 0,
-  }, { id: 'active', fingerprint: 'fp' }).status, 'stale-missing-map-identity')
-  assert.equal(getDogzillaMapOriginStatus({
-    x: 1,
-    y: 2,
-    yaw: 0,
-    map: {
-      id: 'old',
-      fingerprint: 'old-fp',
-    },
-  }, { id: 'active', fingerprint: 'fp' }).status, 'stale-map-mismatch')
-  assert.equal(getDogzillaMapOriginStatus({
-    x: 1,
-    y: 2,
-    yaw: 0,
-    map: {
-      id: 'active',
-      fingerprint: 'fp',
-    },
-  }, null).status, 'active-map-identity-unavailable')
-  assert.equal(getDogzillaMapOriginStatus({
-    x: 1,
-    y: 2,
-    yaw: 0,
-    map: {
-      id: 'active',
-      fingerprint: 'fp',
-    },
-  }, { id: 'active', fingerprint: 'fp' }).status, 'ready')
+test('getDogzillaMapOriginStatus detects missing and ready origin', () => {
+  assert.equal(getDogzillaMapOriginStatus(null).status, 'missing')
+  assert.equal(getDogzillaMapOriginStatus(null).configured, false)
+  assert.equal(getDogzillaMapOriginStatus({ x: 1, y: 2, yaw: 0 }).status, 'ready')
+  assert.equal(getDogzillaMapOriginStatus({ x: 1, y: 2, yaw: 0 }).configured, true)
+  assert.equal(getDogzillaMapOriginStatus({ x: 1, y: 2, yaw: 0, map: { id: 'old', fingerprint: 'old-fp' } }).status, 'ready')
+  assert.equal(getDogzillaMapOriginStatus({ x: 1, y: 2, yaw: 0, map: { id: 'active', fingerprint: 'fp' } }).status, 'ready')
 })
 
 test('applyMapOriginToPose keeps raw map pose while exposing saved app origin coordinates', () => {

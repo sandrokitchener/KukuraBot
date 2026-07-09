@@ -12,6 +12,7 @@ param(
   [string]$RemoteRoot = "/home/pi/robodoge",
   [int]$Port = 8894,
   [string]$CameraUrl = "auto",
+  [switch]$DetectionEnabled,
   [switch]$Background,
   [switch]$NoSync,
   [switch]$NoInstallDeps,
@@ -79,7 +80,7 @@ if (-not $NoSync) {
   }
 }
 
-if (-not $resolvedModelPath) {
+if ($DetectionEnabled -and -not $resolvedModelPath) {
   Write-Host "Using existing remote YOLO ONNX model: $remoteModelPath"
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "test -s '$remoteModelPath'"
   if ($LASTEXITCODE -ne 0) {
@@ -87,11 +88,12 @@ if (-not $resolvedModelPath) {
   }
 }
 
-if (-not $resolvedDataYamlPath) {
+if ($DetectionEnabled -and -not $resolvedDataYamlPath) {
   Write-Host "Using existing remote YOLO labels: $remoteLabelsPath"
 }
 
-$installProbe = "import importlib.util, sys; missing=[m for m in ('cv2','numpy','onnxruntime') if importlib.util.find_spec(m) is None]; print('missing:' + ','.join(missing) if missing else 'deps-ok'); sys.exit(42 if missing else 0)"
+$pythonModules = if ($DetectionEnabled) { "'cv2','numpy','onnxruntime'" } else { "'cv2','numpy'" }
+$installProbe = "import importlib.util, sys; missing=[m for m in ($pythonModules) if importlib.util.find_spec(m) is None]; print('missing:' + ','.join(missing) if missing else 'deps-ok'); sys.exit(42 if missing else 0)"
 $installProbeQuoted = ConvertTo-RemoteSingleQuote $installProbe
 $installCommand = "python3 -c $installProbeQuoted"
 
@@ -101,8 +103,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Pi is missing required Python vision dependencies. Re-run without -NoInstallDeps to install onnxruntime."
   }
 
-  Write-Host "Installing missing Pi Python dependency: onnxruntime"
-  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "python3 -m pip install --user --break-system-packages onnxruntime"
+  $installPackage = if ($DetectionEnabled) { "onnxruntime" } else { "opencv-python numpy" }
+  Write-Host "Installing missing Pi Python vision dependency: $installPackage"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "python3 -m pip install --user --break-system-packages $installPackage"
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to install onnxruntime on Pi."
   }
@@ -125,7 +128,8 @@ $cameraControlArgs = if ($usesHttpCamera) {
 } else {
   "--camera-control-host '' --camera-control-port 0"
 }
-$serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_yolo_vision/server.py --host 0.0.0.0 --port $Port --model $remoteModelPath --labels $remoteLabelsPath --camera-url $effectiveCameraUrl $cameraControlArgs"
+$detectionFlag = if ($DetectionEnabled) { "--detection-enabled" } else { "--raw-stream" }
+$serverCommand = "export PYTHONUNBUFFERED=1; cd $RemoteRoot && python3 sidecars/dogzilla_yolo_vision/server.py --host 0.0.0.0 --port $Port --model $remoteModelPath --labels $remoteLabelsPath --camera-url $effectiveCameraUrl $cameraControlArgs $detectionFlag"
 
 $releaseVendorCameraCommand = "true"
 if (-not $usesHttpCamera) {

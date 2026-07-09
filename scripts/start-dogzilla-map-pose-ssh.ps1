@@ -14,6 +14,7 @@ param(
   [string]$Mode = "auto",
   [string]$MapPath = "",
   [switch]$AllowMapping,
+  [switch]$ForceRestart,
   [switch]$NoSync,
   [switch]$NoHostKeyScan
 )
@@ -55,6 +56,7 @@ Write-Output "Starting DOGZILLA Cartographer map pose in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
 $mapEnv = if ($MapPath) { " -e DOGZILLA_MAP_PBSTREAM=$MapPath" } else { "" }
 $allowMappingEnv = if ($AllowMapping) { " -e DOGZILLA_MAP_POSE_ALLOW_MAPPING=1" } else { "" }
+$forceRestartEnv = if ($ForceRestart) { " -e DOGZILLA_FORCE_RESTART=1" } else { "" }
 
 $originFile = Join-Path $repoRoot "output/app-cache/dogzilla-map-origin.json"
 $initialX = "0"
@@ -88,7 +90,7 @@ function Wait-ContainerRunning {
   return $false
 }
 
-$remoteCommand = "docker exec -e DOGZILLA_DOCKER_EXEC=1 -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$initialPoseEnv $ContainerName bash $containerScript"
+$remoteCommand = "docker exec -e DOGZILLA_DOCKER_EXEC=1 -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$initialPoseEnv $ContainerName bash $containerScript"
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
   Write-Output "Container $ContainerName not available; starting via systemd..."

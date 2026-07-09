@@ -58,7 +58,7 @@ printf '/dev/ttyAMA1'
   Write-Host "Auto-selected DOGZILLA lidar serial port: $effectiveSerialPort"
 }
 
-$serverCommand = "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; export DOGZILLA_SERIAL_PORT=$effectiveSerialPort; export DOGZILLA_LIDAR_BAUDRATE=$Baudrate; export DOGZILLA_LIDAR_TOPIC=$Topic; export DOGZILLA_ROSBRIDGE_PORT=$Port; export DOGZILLA_MAP_TOPIC=/map_cartographer; cd $RemoteRoot && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh"
+$serverCommand = "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; export DOGZILLA_SERIAL_PORT=$effectiveSerialPort; export DOGZILLA_LIDAR_BAUDRATE=$Baudrate; export DOGZILLA_LIDAR_TOPIC=$Topic; export DOGZILLA_ROSBRIDGE_PORT=$Port; export DOGZILLA_MAP_TOPIC=/map; cd $RemoteRoot && bash sidecars/dogzilla_rosbridge/start-rosbridge-in-container.sh"
 $serverCommandQuoted = ConvertTo-RemoteSingleQuote $serverCommand
 $containerName = "robodoge-rosbridge"
 

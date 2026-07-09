@@ -7,6 +7,9 @@ const MANUAL_CONTROL_GAIT = 'walk'
 const MANUAL_CONTROL_PACE = 'normal'
 const MANUAL_CONTROL_FORWARD_RAMP_MS = 1000
 const MANUAL_CONTROL_FORWARD_WALK_FLOOR = 0.25
+const MANUAL_CONTROL_FORWARD_SCALE_MIN = 0.2
+const MANUAL_CONTROL_FORWARD_SCALE_MAX = 1
+const MANUAL_CONTROL_FORWARD_SCALE_DEFAULT = 0.45
 const MANUAL_CONTROL_BARK_BUTTON_INDEX = 7
 const MANUAL_CONTROL_BARK_THRESHOLD = 0.55
 const MANUAL_CONTROL_BARK_COOLDOWN_MS = 900
@@ -35,10 +38,14 @@ export function createManualControlController({
     forwardRampStartedAt: 0,
     lastGait: null,
     lastPace: null,
+    forwardScale: readManualForwardScale(elements?.speedSlider?.value),
     barkTriggerPressed: false,
     lastBarkAt: 0,
     barkPending: false,
   }
+
+  elements?.speedSlider?.addEventListener?.('input', handleForwardSpeedInput)
+  renderForwardSpeedScale()
 
   function handleToggle() {
     if (state.enabled) {
@@ -133,6 +140,7 @@ export function createManualControlController({
   }
 
   function dispose() {
+    elements?.speedSlider?.removeEventListener?.('input', handleForwardSpeedInput)
     if (state.enabled && isRealRobotTargetActive()) {
       navigator.sendBeacon?.(
         toApiUrl('/api/robot/manual-control'),
@@ -193,8 +201,8 @@ export function createManualControlController({
 
     state.gamepadIndex = gamepad.index
     const now = Date.now()
-    const rawVector = readManualGamepadVector(gamepad)
-    const ramp = applyForwardRamp(rawVector, state, now)
+      const rawVector = readManualGamepadVector(gamepad)
+      const ramp = applyForwardRamp(rawVector, state, now, { forwardScale: state.forwardScale })
     const vector = ramp.vector
     renderPad(gamepad)
     renderVector(vector)
@@ -335,6 +343,9 @@ export function createManualControlController({
     elements.toggleButton.textContent = state.enabled ? 'Disable gamepad' : 'Enable gamepad'
     elements.toggleButton.disabled = !supported || !realTarget
     elements.neutralButton.disabled = !realTarget || state.pending
+    if (elements.speedSlider) {
+      elements.speedSlider.disabled = !supported || !realTarget
+    }
 
     if (!supported) {
       elements.status.textContent = 'Gamepad API unavailable in this browser.'
@@ -367,6 +378,26 @@ export function createManualControlController({
     setManualMeter(elements.forwardMeter, vector.forward)
     setManualMeter(elements.strafeMeter, vector.strafe)
     setManualMeter(elements.turnMeter, vector.turn)
+  }
+
+  function handleForwardSpeedInput(event) {
+    state.forwardScale = readManualForwardScale(event?.target?.value)
+    renderForwardSpeedScale()
+    if (state.enabled) {
+      state.lastVector = null
+      setManualControlStatus(`Forward gait ${formatManualForwardScale(state.forwardScale)}.`)
+    }
+  }
+
+  function renderForwardSpeedScale() {
+    if (elements.speedSlider) {
+      const percent = Math.round(state.forwardScale * 100)
+      elements.speedSlider.value = String(percent)
+      elements.speedSlider.setAttribute?.('aria-valuetext', `${percent}% forward gait`)
+    }
+    if (elements.speedValue) {
+      elements.speedValue.textContent = formatManualForwardScale(state.forwardScale)
+    }
   }
 
   function setManualControlStatus(message, isError = false) {
@@ -450,8 +481,18 @@ export function createNeutralManualVector() {
   }
 }
 
-export function applyForwardRamp(vector, state, now = Date.now()) {
+export function readManualForwardScale(value) {
+  const numeric = Number(value)
+  const percentValue = Number.isFinite(numeric) && numeric > 1 ? numeric / 100 : numeric
+  if (!Number.isFinite(percentValue)) {
+    return MANUAL_CONTROL_FORWARD_SCALE_DEFAULT
+  }
+  return Number(clamp(percentValue, MANUAL_CONTROL_FORWARD_SCALE_MIN, MANUAL_CONTROL_FORWARD_SCALE_MAX).toFixed(2))
+}
+
+export function applyForwardRamp(vector, state, now = Date.now(), options = {}) {
   const forward = Number(vector?.forward) || 0
+  const forwardScale = readManualForwardScale(options.forwardScale ?? 1)
 
   if (forward <= 0) {
     const movingWithoutForward = !!(Math.abs(Number(vector?.strafe) || 0) > 0 || Math.abs(Number(vector?.turn) || 0) > 0)
@@ -472,7 +513,7 @@ export function applyForwardRamp(vector, state, now = Date.now()) {
   const progress = clamp(elapsed / MANUAL_CONTROL_FORWARD_RAMP_MS, 0, 1)
   const curve = easeOutCubic(progress)
   const multiplier = MANUAL_CONTROL_FORWARD_WALK_FLOOR + (1 - MANUAL_CONTROL_FORWARD_WALK_FLOOR) * curve
-  const rampedForward = Number((forward * multiplier).toFixed(3))
+  const rampedForward = Number((forward * multiplier * forwardScale).toFixed(3))
   const stage = getForwardRampStage(progress)
 
   return {
@@ -573,6 +614,10 @@ function formatManualControlSummary(payload, runtimeConfig) {
 
 function formatManualVector(vector) {
   return `x ${formatManualAxis(vector.forward)}, y ${formatManualAxis(vector.strafe)}, turn ${formatManualAxis(vector.turn)}`
+}
+
+function formatManualForwardScale(value) {
+  return `${Math.round(readManualForwardScale(value) * 100)}%`
 }
 
 function formatManualAxis(value) {

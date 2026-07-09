@@ -172,7 +172,7 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
     assert.equal(kitchenWaypoint.navigable, true)
   }
   assert.doesNotMatch(kitchenWaypoint.verificationProblem, /captured-pose note|notes still|dummy|stored pose does not match/i)
-  assert.match(payload.robotRuntime.mapOrigin.status, /ready|stale-missing-map-identity|stale-map-mismatch|active-map-identity-unavailable|missing/)
+  assert.match(payload.robotRuntime.mapOrigin.status, /ready|missing/)
   assert.equal(kitchenWaypoint.frame, 'app_map')
   assert.equal(kitchenWaypoint.capturedMapPose?.frame, 'map')
   if (payload.robotRuntime.mapOrigin.configured) {

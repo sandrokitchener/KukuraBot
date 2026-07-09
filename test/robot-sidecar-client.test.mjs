@@ -498,7 +498,7 @@ test('sendRobotCommand blocks trusted waypoint when live robot pose is outside a
   )
 })
 
-test('sendRobotCommand blocks trusted config waypoint captured against a different DOGZILLA map', async () => {
+test('sendRobotCommand sends trusted config waypoint even with different map fingerprint (identity checks removed)', async () => {
   const requests = []
 
   await withMockedFetch(
@@ -526,18 +526,16 @@ test('sendRobotCommand blocks trusted config waypoint captured against a differe
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'map-id-mismatch')
-      assert.equal(result.attempted, false)
-      assert.equal(result.kind, 'map-waypoint')
-      assert.match(result.error, /belongs to map "old_map"/)
-      assert.match(result.operatorMessage, /stale or unknown map identity/)
-      assert.equal(requests.length, 1)
+      assert.equal(result.status, 'sent')
+      assert.equal(result.attempted, true)
+      assert.equal(requests.length, 2)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
   )
 })
 
-test('sendRobotCommand blocks trusted config waypoint without active map identity', async () => {
+test('sendRobotCommand sends trusted config waypoint without active map identity (identity checks removed)', async () => {
   const requests = []
 
   await withMockedFetch(
@@ -562,12 +560,11 @@ test('sendRobotCommand blocks trusted config waypoint without active map identit
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'missing-map-identity')
-      assert.equal(result.attempted, false)
-      assert.equal(result.kind, 'map-waypoint')
-      assert.match(result.error, /no map identity/)
-      assert.equal(requests.length, 1)
+      assert.equal(result.status, 'sent')
+      assert.equal(result.attempted, true)
+      assert.equal(requests.length, 2)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
   )
 })

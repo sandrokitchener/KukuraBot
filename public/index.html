@@ -175,6 +175,11 @@
               <button id="manual-control-toggle-button" type="button">Enable gamepad</button>
               <button id="manual-control-neutral-button" type="button">Neutral</button>
             </div>
+            <label class="manual-control-speed" for="manual-control-speed-slider">
+              <span>Forward gait</span>
+              <input id="manual-control-speed-slider" type="range" min="20" max="100" step="5" value="45" />
+              <output id="manual-control-speed-value" for="manual-control-speed-slider">45%</output>
+            </label>
             <div class="manual-control-readout" aria-label="Manual control input">
               <div class="manual-control-axis">
                 <span>Forward</span>
@@ -253,19 +258,24 @@
               <h2>Mini Map</h2>
               <div class="robot-map-actions">
                 <div class="map-view-toggle-row">
-                  <button type="button" id="map-view-toggle" class="map-view-toggle" data-view-mode="follow">Top-down map</button>
-                  <span class="map-view-mode-label">Follow</span>
+                  <button type="button" id="map-view-toggle" class="map-view-toggle" data-view-mode="map">Follow robot</button>
+                  <span class="map-view-mode-label">Map</span>
                 </div>
                 <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
               </div>
-              <div class="robot-map-meta-row">
-                <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
-                <span id="robot-map-mode-chip" class="map-mode-chip" hidden>…</span>
-                <span id="robot-map-freshness" class="map-freshness" hidden></span>
-                <span id="robot-map-cell-counts" class="map-cell-counts" hidden></span>
-                <span id="robot-map-bbox" class="map-bbox" hidden></span>
-              </div>
+            <div class="robot-map-meta-row">
+              <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
+              <span id="robot-map-mode-chip" class="map-mode-chip" hidden>…</span>
+              <span id="robot-map-freshness" class="map-freshness" hidden></span>
+              <span id="robot-map-cell-counts" class="map-cell-counts" hidden></span>
+              <span id="robot-map-bbox" class="map-bbox" hidden></span>
             </div>
+            <div class="robot-map-layer-row" aria-label="Map layer status">
+              <span id="robot-map-layer-grid" class="robot-map-layer" data-state="missing">Occupancy grid</span>
+              <span id="robot-map-layer-scan" class="robot-map-layer" data-state="missing">Live LiDAR</span>
+              <span id="robot-map-layer-waypoints" class="robot-map-layer" data-state="missing">Waypoints</span>
+            </div>
+          </div>
 <details id="map-workflow-panel" class="map-workflow-panel" open>
 <summary class="map-workflow-head">
 <span class="map-workflow-title">Map Controls</span>
@@ -274,33 +284,29 @@
 <div class="map-workflow-steps">
   <div class="map-workflow-step map-workflow-step-primary">
     <span class="map-step-number">1</span>
-    <span class="map-step-label">Build / Save Map</span>
-    <span class="map-step-hint">Start New Map, drive slow overlapping loops, then Save Map. Save Map commits the default map and restarts localization.</span>
-    <div class="map-workflow-actions map-slam-actions">
-      <span id="slam-mode-chip" class="slam-mode-chip" hidden>Live mapping</span>
-      <button type="button" id="new-map-button" class="map-slam-button" data-connection-action="start-map-pose-mapping">Start New Map</button>
-      <button type="button" id="save-map-button" class="map-slam-button" data-connection-action="save-map-pose">Save Map</button>
+          <span class="map-step-label">Align Robot</span>
+          <span class="map-step-hint">Restart localization on the active saved map when the robot pose is stale.</span>
+          <div class="map-workflow-actions">
+            <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Re-center Here</button>
     </div>
   </div>
 </div>
 <details id="map-advanced-setup-section" class="map-new-space-section">
   <summary class="map-new-space-head">
     <span class="map-new-space-title">Advanced Setup</span>
-    <span class="map-new-space-hint">Origin, waypoints, readiness</span>
+    <span class="map-new-space-hint">Lock map, waypoints, readiness</span>
   </summary>
   <div class="map-workflow-steps">
     <div class="map-workflow-step">
       <span class="map-step-number">2</span>
-      <span class="map-step-label">Localize Saved Map</span>
       <span class="map-step-hint">Restart saved-map localization when pose is stale. This does not create or save a map.</span>
       <div class="map-workflow-actions">
-        <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Localize Saved Map</button>
       </div>
     </div>
     <div class="map-workflow-step">
       <span class="map-step-number">3</span>
-      <span class="map-step-label">Mark Charger Origin</span>
-      <span class="map-step-hint">Set charger/home after the saved map is aligned.</span>
+      <span class="map-step-label">Lock Origin</span>
+      <span class="map-step-hint">After Save Map restarts localization, set charger/home as the fixed origin for waypoints.</span>
       <div class="map-workflow-actions">
         <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Mark Origin</button>
       </div>
@@ -308,7 +314,7 @@
     <div class="map-workflow-step">
       <span class="map-step-number">4</span>
       <span class="map-step-label">Save Waypoint</span>
-      <span class="map-step-hint">Drive to the real spot, wait for trusted map pose, then save or recapture.</span>
+      <span class="map-step-hint">Drive to the physical spot on the locked map, wait for trusted map pose, then save or recapture.</span>
       <div class="waypoint-capture-row">
         <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
         <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as waypoint">Save Spot</button>
@@ -521,8 +527,7 @@
             <summary>Maintenance controls</summary>
             <div class="bridge-action-grid">
               <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
-              <button type="button" data-connection-action="save-map-pose">Save Map</button>
-              <button type="button" data-connection-action="start-map-pose-mapping">Start New Map</button>
+              <button type="button" data-connection-action="start-map-pose">Re-center Here</button>
               <button type="button" data-connection-action="stop-vendor-app">Stop vendor app</button>
               <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
             </div>

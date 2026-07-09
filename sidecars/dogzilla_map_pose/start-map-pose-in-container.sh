@@ -103,6 +103,22 @@ print(path)
 PY
 )"
 fi
+if [ -z "$DOGZILLA_MAP_PBSTREAM" ]; then
+  DOGZILLA_MAP_PBSTREAM="$(python3 - "$REMOTE_ROOT/maps" <<'PY'
+import sys
+from pathlib import Path
+
+maps_dir = Path(sys.argv[1])
+candidates = sorted(
+    maps_dir.glob("robodoge_home_*.pbstream"),
+    key=lambda path: path.stat().st_mtime if path.exists() else 0,
+    reverse=True,
+)
+if candidates:
+    print(candidates[0])
+PY
+)"
+fi
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-$REMOTE_ROOT/maps/robodoge_home.pbstream}"
 
 IMU_CONFIG=""

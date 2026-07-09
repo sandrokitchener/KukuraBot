@@ -86,7 +86,7 @@ test('DOGZILLA Nav2 startup ignores final yaw by default', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
   assert.match(script, /DOGZILLA_NAV2_YAW_GOAL_TOLERANCE="\$\{DOGZILLA_NAV2_YAW_GOAL_TOLERANCE:-6\.283185307179586\}"/)
-  assert.match(script, /gc\["yaw_goal_tolerance"\] = yaw/)
+  assert.match(script, /fp2\["yaw_goal_tolerance"\] = yaw/)
   assert.match(script, /scan_topic=\{st if sfe else/)
 })
 
@@ -95,10 +95,13 @@ test('DOGZILLA Nav2 launch routes controller and recovery cmd_vel through veloci
   const controllerBlock = nodeBlock(launch, 'nav2_controller')
   const behaviorBlock = nodeBlock(launch, 'nav2_behaviors')
   const smootherBlock = nodeBlock(launch, 'nav2_velocity_smoother')
+  const amclBlock = nodeBlock(launch, 'nav2_amcl')
 
   assert.match(controllerBlock, /remappings=remappings \+ \[\("cmd_vel", "cmd_vel_nav"\)\]/)
   assert.match(behaviorBlock, /remappings=remappings \+ \[\("cmd_vel", "cmd_vel_nav"\)\]/)
   assert.match(smootherBlock, /\("cmd_vel", "cmd_vel_nav"\), \("cmd_vel_smoothed", "cmd_vel"\)/)
+  assert.match(amclBlock, /package="nav2_amcl"/)
+  assert.match(launch, /DeclareLaunchArgument\("localization_backend", default_value="amcl"\)/)
 })
 
 test('DOGZILLA Nav2 startup uses cmd_vel gait adapter as the default base consumer', async () => {
@@ -115,6 +118,8 @@ test('DOGZILLA Nav2 starts scan filter and odom helper directly', async () => {
 
   assert.match(script, /scan_self_filter\.py/)
   assert.match(script, /tf_odom_publisher\.py/)
+  assert.match(script, /cmd_vel_odom_publisher\.py/)
+  assert.match(script, /DOGZILLA_LOCALIZATION_BACKEND="\$\{DOGZILLA_LOCALIZATION_BACKEND:-amcl\}"/)
   assert.match(script, /--input-topic \/scan/)
   assert.match(script, /--output-topic "\$DOGZILLA_NAV2_SCAN_FILTER_TOPIC"/)
   assert.match(script, /--mask-start-deg "\$DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG"/)
@@ -127,7 +132,7 @@ test('DOGZILLA Nav2 starts scan filter and odom helper directly', async () => {
 test('DOGZILLA Nav2 startup generates params with expected values', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /src\["topic"\] = st/)
+  assert.match(script, /src_cfg\["topic"\] = st/)
   assert.match(script, /inf_is_valid/)
   assert.doesNotMatch(script, /source\.get\("topic"\) == "\/scan"/)
 })
@@ -241,6 +246,9 @@ test('DOGZILLA support service background startups avoid nested SSH heredocs', a
   assert.doesNotMatch(yoloScript, /\$detectCameraCommand = @'/)
   assert.match(yoloScript, /\$detectCameraCommand = 'for candidate in \/dev\/v4l\/by-id\/\*video-index0/)
   assert.match(yoloScript, /python3 -c \$installProbeQuoted/)
+  assert.match(yoloScript, /\[switch\]\$DetectionEnabled/)
+  assert.match(yoloScript, /\$detectionFlag = if \(\$DetectionEnabled\)/)
+  assert.match(yoloScript, /--raw-stream/)
   assert.match(yoloScript, /fuser -k \$releaseCameraSource/)
   assert.match(yoloScript, /\$stopPattern = "\[s\]idecars\/dogzilla_yolo_vision\/server\.py"/)
   assert.match(yoloScript, /pgrep -f ' \+ \$stopPatternQuoted/)
@@ -373,17 +381,17 @@ test('DOGZILLA map-pose startup keeps Cartographer alive when initial TF probe m
   assert.match(script, /while pgrep -f "\[c\]artographer_node" >\/dev\/null 2>&1; do/)
 })
 
-test('DOGZILLA Nav2 startup does not forward map-pose env vars (Pi-owned map-pose is separate)', async () => {
-  const script = await readFile(SCRIPT_PATH, 'utf-8')
+test('DOGZILLA Nav2 startup seeds AMCL initial pose from saved origin, not map-pose mode', async () => {
+ const script = await readFile(SCRIPT_PATH, 'utf-8')
 
-  assert.doesNotMatch(script, /DOGZILLA_INITIAL_POSE/)
-  assert.doesNotMatch(script, /start_map_pose_localization/)
-  assert.doesNotMatch(script, /cartographer_node/)
-  assert.doesNotMatch(script, /cartographer_occupancy_grid_node/)
-  assert.doesNotMatch(script, /DOGZILLA_MAP_PBSTREAM/)
-  assert.doesNotMatch(script, /static_transform_publisher.*map odom/)
-  assert.match(script, /robodoge-map-pose\.service must be healthy before Nav2 starts/)
-  assert.doesNotMatch(script, /Proceeding anyway/)
+ assert.match(script, /DOGZILLA_INITIAL_POSE_X/)
+ assert.match(script, /DOGZILLA_INITIAL_POSE_Y/)
+ assert.match(script, /DOGZILLA_INITIAL_POSE_YAW/)
+ assert.doesNotMatch(script, /DOGZILLA_MAP_POSE_MODE/)
+ assert.doesNotMatch(script, /start_map_pose_localization/)
+ assert.doesNotMatch(script, /cartographer_occupancy_grid_node/)
+ assert.doesNotMatch(script, /DOGZILLA_MAP_PBSTREAM/)
+ assert.doesNotMatch(script, /Proceeding anyway/)
 })
 
 test('DOGZILLA map-pose SSH launcher reads saved origin and passes initial pose env vars', async () => {
@@ -477,9 +485,10 @@ const statusIndex = script.indexOf('status robodoge-direct-bridge.service')
 assert.ok(serviceIndex > 0, 'expected robodoge-navigation.service unit')
 assert.match(script, /Description=Robo-Doge DOGZILLA Nav2 Navigation/)
 assert.match(script, /"dogzilla_navigation"/)
-assert.match(script, /After=robodoge-rosbridge\.service robodoge-map-pose\.service/)
-assert.match(script, /Wants=robodoge-rosbridge\.service robodoge-map-pose\.service/)
-  assert.match(script, /PartOf=robodoge-rosbridge\.service robodoge-map-pose\.service/)
+assert.match(script, /After=robodoge-rosbridge\.service/)
+assert.match(script, /Wants=robodoge-rosbridge\.service/)
+  assert.match(script, /PartOf=robodoge-rosbridge\.service/)
+  assert.doesNotMatch(script, /After=robodoge-rosbridge\.service robodoge-map-pose\.service/)
   assert.match(script, /Type=simple/)
   assert.match(script, /StartLimitIntervalSec=0/)
   assert.match(script, /Restart=on-failure/)
@@ -495,6 +504,7 @@ assert.ok(enableIndex > serviceIndex, 'expected service enable after unit write'
 assert.ok(restartIndex > enableIndex, 'expected service restart after enable')
 assert.ok(statusIndex > restartIndex, 'expected service status after restart')
 assert.doesNotMatch(script, /docker rm -f robodoge-navigation/)
+  assert.match(script, /DOGZILLA_MAP_TOPIC=\/map/)
 })
 
 test('DOGZILLA direct bridge SSH startup stops vendor app before launching bridge', async () => {

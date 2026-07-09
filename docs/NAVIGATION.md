@@ -65,8 +65,8 @@ Two independent topics carry occupancy grids on the DOGZILLA Pi:
 
 | Topic | Publisher | Purpose |
 | --- | --- | --- |
-| `/map` | Nav2 `map_server` | Static saved map (`.yaml`), used by Nav2 |
-| `/map_cartographer` | Cartographer occupancy grid | Live SLAM/localization grid for app minimap truth |
+| `/map` | Nav2 `map_server` + AMCL | Default static map for navigation and normal minimap polling |
+| `/map_cartographer` | Cartographer occupancy grid | Explicit SLAM-only grid for advanced mapping sessions |
 
 The live Cartographer grid contains raw probabilities (`0-100`), while saved `.pgm` output is thresholded into free/unknown/occupied. `public/robot-map.js` thresholds live cells so the minimap looks like the saved map:
 
@@ -204,6 +204,8 @@ Normal app startup and command-time waypoint dispatch do not start map-pose or N
 
 Startup scripts are Windows PowerShell-driven SSH launchers. Avoid PowerShell heredocs sent through SSH, serialize apt work through startup locks, and use parent-safe `pgrep` stop loops for background services.
 
+`start-navigation-in-container.sh` must stop any stale Nav2 launch, AMCL, and Nav2 lifecycle executables before starting a new stack. Leaving an old `map_server` active makes the new lifecycle manager collide on `/map_server` and abort bringup even when the replacement map loads correctly.
+
 Normal app startup and command-time waypoint dispatch do not start map-pose or Nav2. `lib/robot-sidecar-client.mjs` reports readiness blockers when the Pi-owned stack is down. Use the manual scripts below only for explicit operator repair or SLAM mapping workflows.
 
 ## Cartographer/Nav2 Docker image
@@ -234,6 +236,10 @@ Use the primary Build / Save Map row for SLAM: Start New Map -> drive slow overl
 
 `Localize on Map` seeds Cartographer localization from the saved charger origin (`output/app-cache/dogzilla-map-origin.json` locally, deployed to `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` on the Pi), defaulting to no initial pose when no origin exists. It is local refinement, not global relocalization.
 
+The UI map panel must make SLAM state explicit: Start New Map switches the mini-map into top-down mode, shows occupancy-grid, live LiDAR, and waypoint layer states, then keeps Save Map available for the active SLAM session. If the grid is not ready yet, the save action should fail with bridge evidence instead of silently staying grayed out. Use the Manual Control forward-gait slider for slow mapping passes; it scales only positive forward gamepad motion before `/api/robot/manual-control` dispatch.
+
+During an active SLAM pass, `/api/dogzilla/map?stream=slam` subscribes to configured `lidar.mapTopic` (`/map_cartographer` by default); normal map polling must not add full occupancy grids to the default rosbridge topic list.
+
 ## Waypoint recapture
 
 When a saved waypoint no longer aligns with physical space, recapture it explicitly. Cartographer laser-only localization does not require Nav2 or odometry, but it cannot globally relocalize after the robot is carried.
@@ -249,6 +255,8 @@ Chat command handling must use the same resolved runtime and ROS2 config for pre
 ## Tuning
 
 `config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance. Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`.
+
+Cartographer fresh-mapping configs use widened online correlative scan matching (`linear_search_window = 0.6`, `angular_search_window = 45 deg`, constraint scores `0.65`) because DOGZILLA has no reliable wheel odom/IMU; narrow `0.1 m / 15 deg` matching can collapse a whole-house drive into a first-room trajectory.
 
 ## Known live-work rules
 

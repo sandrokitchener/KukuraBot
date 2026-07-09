@@ -73,7 +73,7 @@ export function createRobotMapRenderer({
   let cachedGridCanvas = null
   let viewCenterX = 0
   let viewCenterY = 0
-  let mapViewMode = 'follow'
+  let mapViewMode = 'map'
   let lastMapCanvasWidth = 0
   let lastMapCanvasHeight = 0
   let appMapOriginCache = null
@@ -1058,6 +1058,7 @@ export function formatMapStatusPayload(mapPayload, healthPayload) {
     occupiedCount: 0,
     freeCount: 0,
     bboxLabel: '',
+    receivedAtEpoch: null,
   }
 
   if (!mapPayload || mapPayload.ok !== true) {
@@ -1074,6 +1075,9 @@ export function formatMapStatusPayload(mapPayload, healthPayload) {
   result.modeLabel = mapMode === 'mapping' ? 'Mapping' : mapMode === 'localization' ? 'Localizing' : mapMode
 
   const ageSec = mapPayload.receivedAtAgeSec
+  if (typeof mapPayload.receivedAtEpoch === 'number' && Number.isFinite(mapPayload.receivedAtEpoch)) {
+    result.receivedAtEpoch = mapPayload.receivedAtEpoch
+  }
   if (typeof ageSec === 'number' && Number.isFinite(ageSec)) {
     result.lastUpdateAgeSec = ageSec
     result.fresh = ageSec <= 5  // fresh if last update within 5 seconds

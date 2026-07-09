@@ -83,13 +83,10 @@ export function validateDogzillaWaypoints({
   const mapOriginStatus = getDogzillaMapOriginStatus(mapOrigin, normalizedMap)
   const readinessBlockers = buildReadinessBlockers({
     navigation,
-    mapOriginStatus,
-    requiresMapOrigin,
     readyCount: ready.length,
     invalidCount: invalid.length,
   })
   const readyForMapWaypoints = navigation.ready
-    && (!requiresMapOrigin || mapOriginStatus.configured)
     && ready.length > 0
     && invalid.length === 0
 
@@ -138,17 +135,12 @@ export function validateDogzillaWaypoints({
 
 function buildReadinessBlockers({
   navigation,
-  mapOriginStatus,
-  requiresMapOrigin,
   readyCount,
   invalidCount,
 }) {
   const blockers = []
   if (!navigation?.ready) {
     blockers.push(`navigation not ready: ${navigation?.reason || 'Nav2 waypoint readiness unknown'}`)
-  }
-  if (requiresMapOrigin && !mapOriginStatus?.configured) {
-    blockers.push(`map origin not ready: ${mapOriginStatus?.status || 'unknown'}`)
   }
   if (invalidCount > 0) {
     blockers.push(`${invalidCount} invalid map waypoint(s) in source of truth`)
@@ -278,7 +270,7 @@ function validateOneWaypoint({
       ...base,
       enabled: false,
       ok: false,
-      status: identityCheck.reason || 'stale-map-mismatch',
+      status: identityCheck.reason || 'map-metadata-unavailable',
       compiledPose: {
         frame: params.frame,
         x: params.x,
