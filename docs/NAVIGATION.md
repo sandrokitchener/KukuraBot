@@ -173,7 +173,7 @@ Control modes via bridge:
 - If Nav2 is unavailable, app/server reports blockers. It does not auto-repair or auto-start navigation.
 - Default startup mode is `navigate`, matching the Pi boot contract: Nav2 should already be running before the app starts.
 
-Pi boot/systemd owns normal map-pose/Nav2 lifetime. `robodoge-rosbridge.service` keeps the shared ROS container running, `robodoge-map-pose.service` starts Cartographer localization, and `robodoge-navigation.service` runs `sidecars/dogzilla_navigation/start-navigation-in-container.sh` inside `robodoge-rosbridge`. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`.
+Pi boot/systemd owns normal map-pose/Nav2 lifetime. `robodoge-rosbridge.service` keeps the shared ROS container running, `robodoge-map-pose.service` starts Cartographer localization, and `robodoge-navigation.service` runs `sidecars/dogzilla_navigation/start-navigation-in-container.sh` inside `robodoge-rosbridge` with `DOGZILLA_LOCALIZATION_BACKEND=cartographer`. `npm start`, `npm run dev:lan`, command dispatch, and server health polling do not request `/mode navigate` as startup repair and do not call `start-map-pose` or `start-navigation`.
 
 Startup scripts must not install ROS packages during normal boot. If Nav2, Cartographer, or `nav2_msgs` dependencies are missing, the Pi-owned service should fail loud so the image/setup can be fixed explicitly.
 
@@ -200,7 +200,7 @@ npm run dogzilla:start-navigation
 
 Normal app startup and command-time waypoint dispatch do not start map-pose or Nav2. `lib/robot-sidecar-client.mjs` reports readiness blockers when the Pi-owned stack is down. Use the manual scripts below only for explicit operator repair.
 
-`scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar, reads saved origin, and runs `docker exec robodoge-map-pose` to publish initial pose. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge`.
+`scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar, reads saved origin, and runs `docker exec robodoge-map-pose` to publish initial pose. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge` with `DOGZILLA_LOCALIZATION_BACKEND=cartographer`.
 
 Startup scripts are Windows PowerShell-driven SSH launchers. Avoid PowerShell heredocs sent through SSH, serialize apt work through startup locks, and use parent-safe `pgrep` stop loops for background services.
 
@@ -265,6 +265,12 @@ Cartographer fresh-mapping configs use widened online correlative scan matching 
 - If robot is low battery or unhealthy, pause live motion retries and continue only local code/tests.
 - If robot heads the wrong way, verify translation direction and heading/orientation early.
 - For waypoint capture, drive the robot to the spot. Carrying it can leave `waypointSafe` true while pose is wrong.
+
+## Cartographer load notes
+
+`DOGZILLA_MAP_POSE_OCCUPANCY_GRID=auto` starts `cartographer_occupancy_grid_node` only for `mapping` / `continue_mapping`. Keep localization mode grid-off by default; force grid only when debugging live SLAM/localization display.
+
+Cartographer localization configs keep same scan-match window but process half of rangefinder messages, publish submaps/trajectory less often, optimize less often, and sample pose-graph constraints less aggressively. Do not set `TRAJECTORY_BUILDER.pure_localization` on this Humble Cartographer build; live test showed it aborts startup with `Key 'pure_localization' was used the wrong number of times`. Preserve split: mapping configs favor recovery/coverage, localization configs favor lower Pi CPU while keeping `map->odom/base_link` fresh enough for Nav2.
 
 ## More detail
 

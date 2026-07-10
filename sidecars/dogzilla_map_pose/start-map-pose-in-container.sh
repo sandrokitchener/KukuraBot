@@ -5,6 +5,7 @@ REMOTE_ROOT="${REMOTE_ROOT:-/home/pi/robodoge}"
 POSE_PORT="${POSE_PORT:-9090}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}"
+DOGZILLA_MAP_POSE_OCCUPANCY_GRID="${DOGZILLA_MAP_POSE_OCCUPANCY_GRID:-auto}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-}"
 DOGZILLA_IMU_AVAILABLE="${DOGZILLA_IMU_AVAILABLE:-false}"
@@ -207,6 +208,26 @@ case "$mode" in
     ;;
 esac
 
+case "$DOGZILLA_MAP_POSE_OCCUPANCY_GRID" in
+  auto|"")
+    if [ "$mode" = "mapping" ] || [ "$mode" = "continue_mapping" ]; then
+      START_OCCUPANCY_GRID=true
+    else
+      START_OCCUPANCY_GRID=false
+    fi
+    ;;
+  1|true|TRUE|yes|YES|on|ON)
+    START_OCCUPANCY_GRID=true
+    ;;
+  0|false|FALSE|no|NO|off|OFF)
+    START_OCCUPANCY_GRID=false
+    ;;
+  *)
+    echo "Unknown DOGZILLA_MAP_POSE_OCCUPANCY_GRID=$DOGZILLA_MAP_POSE_OCCUPANCY_GRID. Use auto, true, or false." >&2
+    exit 2
+    ;;
+esac
+
 if [ "$mode" = "localization" ] && [ "$DOGZILLA_INITIAL_POSE_SKIP" != "1" ]; then
   if [ -z "$DOGZILLA_INITIAL_POSE_X" ] || [ -z "$DOGZILLA_INITIAL_POSE_Y" ] || [ -z "$DOGZILLA_INITIAL_POSE_YAW" ]; then
     origin_file="$REMOTE_ROOT/output/app-cache/dogzilla-map-origin.json"
@@ -370,7 +391,8 @@ rclpy.shutdown()
 PY
 fi
 
-if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
+if [ "$START_OCCUPANCY_GRID" = "true" ]; then
+  if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
   (
     exec 8>&- 2>/dev/null || true
     nohup ros2 run cartographer_ros cartographer_occupancy_grid_node \
@@ -379,6 +401,9 @@ if ! pgrep -f "[c]artographer_occupancy_grid_node" >/dev/null 2>&1; then
       --ros-args -r /map:=/map_cartographer \
       > "$REMOTE_ROOT/logs/map-occupancy-grid.log" 2>&1 &
   )
+  fi
+else
+  pkill -TERM -f "[c]artographer_occupancy_grid_node" 2>/dev/null || true
 fi
 
 python3 - <<'PY' || echo "Map-pose TF not ready after startup probe; keeping Cartographer alive for recovery." >&2
