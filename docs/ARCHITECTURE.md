@@ -34,6 +34,10 @@ public/ UI or packaged shell
 | `lib/dogzilla-startup-watchdog.mjs` | Optional app-up support-service/direct-bridge check; does not start Nav2 |
 | `sidecars/` | Python/ROS/DOGZILLA support services |
 
+## Operator UI boundaries
+
+Keep routine controls narrow: Settings owns model, runtime target, sound volume, and speech profile; Diagnostics owns aggregate preflight and Pi-load checks, with connection setup and service repair collapsed. Robot Info is the persistent navigation-status surface, and its Nav-chain detail stays operator-expanded; do not duplicate Nav2 blockers into command or minimap overlays.
+
 ## Runtime targets
 
 Configured by `config/robot-runtime.json`.

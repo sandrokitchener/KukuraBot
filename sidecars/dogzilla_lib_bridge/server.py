@@ -27,8 +27,10 @@ _NAV_MODE_HISTORY: deque[dict[str, Any]] = deque(maxlen=20)
 _NAV_MODE_TRANSITIONING = False
 _NAV_MODE_AUTO_DEMOTE_TIMER: threading.Timer | None = None
 _NAV_MODE_IDLE_DELAY_SEC = float(os.environ.get("DOGZILLA_NAV_MODE_IDLE_DELAY_SEC", "300.0"))
+_NAV2_STANDBY_ENABLED = os.environ.get("DOGZILLA_NAV2_STANDBY_ENABLED", "0") == "1"
 CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
 REMOTE_ROOT = os.environ.get("REMOTE_ROOT", "/home/pi/robodoge")
+AUTONOMOUS_MAPPING_DIR = Path(REMOTE_ROOT) / "maps"
 VALID_NAV_MODES = {"idle", "localize", "navigate", "sleep"}
 
 
@@ -90,6 +92,7 @@ def set_nav_mode(mode: str) -> dict[str, Any]:
             return {"ok": False, "error": "nav_mode_transition_in_progress", "mode": _NAV_MODE}
         current = _NAV_MODE
         if current == mode:
+            _cancel_nav_mode_demote()
             return {"ok": True, "mode": mode, "changed": False}
         _NAV_MODE_TRANSITIONING = True
     _cancel_nav_mode_demote()
@@ -116,40 +119,65 @@ def set_nav_mode(mode: str) -> dict[str, Any]:
 
 def _enter_sleep_mode() -> dict[str, Any]:
     _cancel_nav_mode_demote()
+    lifecycle = _manage_nav2_lifecycle(1)
+    if not lifecycle["ok"]:
+        return lifecycle
     return {
         "ok": True,
-        "note": "logical sleep mode only; Pi-owned Nav2 services are left running",
+        "note": "Nav2 paused; Cartographer and Pi-owned services remain running",
         "piOwnedNav2": True,
+        "navStandby": True,
     }
 
 
 def _enter_idle_mode() -> dict[str, Any]:
+    lifecycle = _manage_nav2_lifecycle(1)
+    if not lifecycle["ok"]:
+        return lifecycle
     return {
         "ok": True,
-        "note": "logical idle mode only; Pi-owned Nav2 services are left running",
+        "note": "Nav2 paused; Cartographer and Pi-owned services remain running",
         "piOwnedNav2": True,
+        "navStandby": True,
     }
 
 
 def _enter_localize_mode() -> dict[str, Any]:
+    lifecycle = _manage_nav2_lifecycle(1)
+    if not lifecycle["ok"]:
+        return lifecycle
     return {
         "ok": True,
-        "note": "logical localize mode only; Pi-owned Nav2 services are left running",
+        "note": "Nav2 paused while Cartographer localization and Pi-owned services remain active",
         "piOwnedNav2": True,
+        "navStandby": True,
     }
 
 
 def _enter_navigate_mode() -> dict[str, Any]:
+    lifecycle = _manage_nav2_lifecycle(2)
+    if not lifecycle["ok"]:
+        return lifecycle
     return {
         "ok": True,
-        "note": "using Pi-owned Nav2 services; bridge did not start or restart navigation",
+        "note": "Nav2 resumed through Pi-owned lifecycle manager",
         "piOwnedNav2": True,
+        "navStandby": False,
     }
 
 
 def _schedule_nav_mode_demote(target_mode: str = "idle") -> None:
-    # Pi-owned Nav2 stays up until an explicit service-level operator action.
-    return None
+    global _NAV_MODE_AUTO_DEMOTE_TIMER
+    _cancel_nav_mode_demote()
+    if get_nav_mode() != "navigate":
+        return
+    _NAV_MODE_AUTO_DEMOTE_TIMER = threading.Timer(
+        max(30.0, _NAV_MODE_IDLE_DELAY_SEC),
+        _nav_mode_demote_callback,
+        args=(target_mode,),
+    )
+    _NAV_MODE_AUTO_DEMOTE_TIMER.daemon = True
+    _NAV_MODE_AUTO_DEMOTE_TIMER.start()
 
 
 def _cancel_nav_mode_demote() -> None:
@@ -160,7 +188,26 @@ def _cancel_nav_mode_demote() -> None:
 
 
 def _nav_mode_demote_callback(target_mode: str) -> None:
-    return None
+    if get_nav_mode() == "navigate":
+        set_nav_mode(target_mode)
+
+
+def _manage_nav2_lifecycle(command: int) -> dict[str, Any]:
+    if not _NAV2_STANDBY_ENABLED:
+        return {"ok": True, "navStandby": command == 1, "standbyEnabled": False}
+    if command not in (1, 2):
+        return {"ok": False, "error": f"unsupported_nav2_lifecycle_command:{command}"}
+    command_text = f"{{command: {command}}}"
+    shell = (
+        f"docker exec {CONTAINER_NAME} bash -lc "
+        f"'source /opt/ros/humble/setup.bash; "
+        f"ros2 service call /lifecycle_manager_navigation/manage_nodes "
+        f"nav2_msgs/srv/ManageLifecycleNodes \"{command_text}\"'"
+    )
+    code, output = _run(shell, timeout=12.0)
+    if code != 0:
+        return {"ok": False, "error": "Nav2 lifecycle transition failed", "detail": output[-1200:]}
+    return {"ok": True, "navStandby": command == 1, "standbyEnabled": True}
 
 
 # Legacy sleep/wake helpers now expressed as mode transitions.
@@ -791,7 +838,7 @@ class DogzillaRuntime:
                 "error": "Nav mode is sleep; call POST /mode navigate first",
                 "navMode": current_mode,
             }
-        if current_mode not in ("navigate", "localize"):
+        if current_mode != "navigate":
             # Auto-promote from idle/localize to navigate, then wait for readiness.
             mode_result = set_nav_mode("navigate")
             if not mode_result.get("ok"):
@@ -1127,6 +1174,26 @@ def _get_load_average() -> list[str] | None:
         return None
 
 
+def get_autonomous_mapping_status(maps_dir: Path = AUTONOMOUS_MAPPING_DIR) -> dict[str, Any]:
+    def read_json(name: str) -> dict[str, Any]:
+        try:
+            payload = json.loads((maps_dir / name).read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    status = read_json("autonomous-mapping-status.json")
+    result = read_json("autonomous-mapping-result.json")
+    return {
+        "active": (maps_dir / "autonomous-mapping.active").is_file(),
+        "state": status.get("state") or result.get("state") or "idle",
+        "startedAt": status.get("startedAt"),
+        "updatedAt": status.get("updatedAt"),
+        "candidateAvailable": result.get("state") == "candidate-ready" or "candidate=true" in str(result.get("detail") or ""),
+        "detail": result.get("detail") or status.get("reason") or "",
+    }
+
+
 class BridgeServer(ThreadingHTTPServer):
     def __init__(self, server_address, handler_class, runtime: DogzillaRuntime):
         super().__init__(server_address, handler_class)
@@ -1149,8 +1216,11 @@ class Handler(BaseHTTPRequestHandler):
                     "receivedCount": self.server.received_count,
                     "loadAverage": _get_load_average(),
                     "navMode": get_nav_mode(),
+                    "navStandby": get_nav_mode() in {"idle", "localize", "sleep"},
+                    "wakeReady": not _NAV_MODE_TRANSITIONING,
                     "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
                     "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
+                    "autonomousMapping": get_autonomous_mapping_status(),
                     "runtime": runtime,
                 },
             )
@@ -1174,10 +1244,11 @@ class Handler(BaseHTTPRequestHandler):
                     "navMode": get_nav_mode(),
                     "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
                     "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
-                    "nav2Ready": bool(nav2_snapshot.get("waypointReady")),
-                    "waypointReady": bool(nav2_snapshot.get("waypointReady")),
+                    "nav2Ready": bool(nav2_snapshot.get("waypointReady")) and get_nav_mode() == "navigate",
+                    "waypointReady": bool(nav2_snapshot.get("waypointReady")) and get_nav_mode() == "navigate",
                     "nav2Backend": nav2_snapshot.get("backend", "unknown"),
                     "canSendGoal": bool(nav2_snapshot.get("canSendGoal")),
+                    "autonomousMapping": get_autonomous_mapping_status(),
                     "runtimeSnapshot": False,
                 },
             )

@@ -10,10 +10,14 @@ export PYTHONPATH="/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/
 export PATH="/opt/ros/humble/bin:$PATH"
 . /opt/ros/humble/setup.sh 2>/dev/null
 . /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true
+action_ready=false
+odom_ready=false
+scan_ready=false
 for i in $(seq 1 180); do
-  if timeout --kill-after=2 5 ros2 action list 2>/dev/null | grep -q '^/navigate_to_pose$' \
-    && timeout --kill-after=2 5 ros2 topic info /odom 2>/dev/null | grep -q 'Publisher count: [1-9]' \
-    && timeout --kill-after=2 5 ros2 topic info "$SCAN_TOPIC" 2>/dev/null | grep -q 'Publisher count: [1-9]'; then
+  $action_ready || timeout --kill-after=2 5 ros2 action list 2>/dev/null | grep '^/navigate_to_pose$' >/dev/null && action_ready=true
+  $odom_ready || timeout --kill-after=2 5 ros2 topic info /odom 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null && odom_ready=true
+  $scan_ready || timeout --kill-after=2 5 ros2 topic info "$SCAN_TOPIC" 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null && scan_ready=true
+  if $action_ready && $odom_ready && $scan_ready; then
     echo "READY"
     exit 0
   fi

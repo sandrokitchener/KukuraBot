@@ -14,6 +14,7 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
     localization_backend = LaunchConfiguration("localization_backend")
+    mapping_mode = LaunchConfiguration("mapping_mode")
 
     configured_params = ParameterFile(
         RewrittenYaml(
@@ -35,18 +36,18 @@ def generate_launch_description():
 
     def build_nodes(context):
         backend = localization_backend.perform(context).strip().lower() or "amcl"
+        is_mapping_mode = mapping_mode.perform(context).strip().lower() in {"1", "true", "yes", "on"}
         lifecycle_nodes = [
-            "map_server",
             "controller_server",
-            "smoother_server",
             "planner_server",
             "behavior_server",
             "bt_navigator",
-            "waypoint_follower",
             "velocity_smoother",
         ]
         nodes = []
-        if backend == "amcl":
+        if not is_mapping_mode:
+            lifecycle_nodes.insert(0, "map_server")
+        if backend == "amcl" and not is_mapping_mode:
             lifecycle_nodes.insert(1, "amcl")
             nodes.append(
                 Node(
@@ -64,7 +65,7 @@ def generate_launch_description():
 
         nodes.extend(
             [
-                Node(
+                *([] if is_mapping_mode else [Node(
                     package="nav2_map_server",
                     executable="map_server",
                     name="map_server",
@@ -74,7 +75,7 @@ def generate_launch_description():
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings,
-                ),
+                )]),
                 Node(
                     package="nav2_controller",
                     executable="controller_server",
@@ -84,17 +85,6 @@ def generate_launch_description():
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings + [("cmd_vel", "cmd_vel_nav")],
-                ),
-                Node(
-                    package="nav2_smoother",
-                    executable="smoother_server",
-                    name="smoother_server",
-                    output="screen",
-                    respawn=use_respawn,
-                    respawn_delay=2.0,
-                    parameters=[configured_params],
-                    arguments=["--ros-args", "--log-level", log_level],
-                    remappings=remappings,
                 ),
                 Node(
                     package="nav2_planner",
@@ -122,17 +112,6 @@ def generate_launch_description():
                     package="nav2_bt_navigator",
                     executable="bt_navigator",
                     name="bt_navigator",
-                    output="screen",
-                    respawn=use_respawn,
-                    respawn_delay=2.0,
-                    parameters=[configured_params],
-                    arguments=["--ros-args", "--log-level", log_level],
-                    remappings=remappings,
-                ),
-                Node(
-                    package="nav2_waypoint_follower",
-                    executable="waypoint_follower",
-                    name="waypoint_follower",
                     output="screen",
                     respawn=use_respawn,
                     respawn_delay=2.0,
@@ -181,6 +160,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_respawn", default_value="true"),
             DeclareLaunchArgument("log_level", default_value="info"),
             DeclareLaunchArgument("localization_backend", default_value="amcl"),
+            DeclareLaunchArgument("mapping_mode", default_value="false"),
             OpaqueFunction(function=build_nodes),
         ]
     )

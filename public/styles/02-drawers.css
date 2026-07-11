@@ -83,7 +83,6 @@
 .bridge-head h2,
 .manual-control-head h2,
 .speech-head h2,
-.runtime-head h2,
 .robot-state-head h2,
 .robot-map-head h2,
 .robot-camera-panel h2,
@@ -99,7 +98,6 @@
 .connection-panel > * + *,
 .settings-drawer > * + *,
 .settings-panel > * + *,
-.runtime-panel > * + *,
 .speech-panel > * + * {
   margin-top: 12px;
 }
@@ -331,8 +329,13 @@
 }
 
 .connection-backend-row {
+  display: none;
   margin-top: 0;
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.connection-backend-status {
+  display: none;
 }
 
 .connection-backend-row label {
@@ -352,10 +355,6 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-}
-
-.bridge-action-grid-primary {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .bridge-action-grid button {
@@ -421,26 +420,6 @@
 
 .danger-button:hover:not(:disabled) {
   background: #721717;
-}
-
-.connection-url-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.connection-url-grid > div {
-  min-width: 0;
-  padding: 2px 10px 8px;
-  border: 0;
-  border-left: 2px solid var(--line);
-  border-radius: 0;
-  background: transparent;
-}
-
-.connection-url-grid strong {
-  display: block;
-  overflow-wrap: anywhere;
 }
 
 .preflight-panel {

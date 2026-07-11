@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     from nav_msgs.msg import Odometry
     from rclpy.duration import Duration
     from rclpy.node import Node
-    from tf2_ros import Buffer, ConnectivityException, ExtrapolationException, LookupException, TransformListener
+    from tf2_ros import Buffer, TransformListener
 
     class TfOdomPublisher(Node):
         def __init__(self) -> None:
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                     transform = self.buffer.lookup_transform(source_frame, args.base_frame, rclpy.time.Time())
                     selected_source_frame = source_frame
                     break
-                except (LookupException, ConnectivityException, ExtrapolationException) as error:
+                except Exception as error:
                     last_error = error
 
             if transform is None:

@@ -65,3 +65,29 @@ test('save-map-pose route saves map, restarts localization, and captures origin'
     await rm(tempDir, { recursive: true, force: true })
   }
 })
+
+test('candidate promotion clears the old origin before localization and Nav2 restart', async () => {
+  const actions = []
+  const sent = []
+  let originCleared = false
+
+  const handled = await tryHandleDogzillaRoute({
+    request: { method: 'POST' },
+    requestUrl: new URL('http://localhost/api/dogzilla/connection/action'),
+    response: {},
+    readJsonBody: async () => ({ action: 'promote-map-candidate', live: true }),
+    sendJson: async (_response, statusCode, payload) => { sent.push({ statusCode, payload }); return true },
+    getDogzillaPoseTrack: () => [],
+    clearDogzillaMapOriginImpl: async () => { originCleared = true },
+    runDogzillaConnectionActionImpl: async (action) => {
+      actions.push(action)
+      return { status: 'ok' }
+    },
+  })
+
+  assert.equal(handled, true)
+  assert.equal(originCleared, true)
+  assert.deepEqual(actions, ['promote-map-candidate', 'start-map-pose', 'start-navigation'])
+  assert.equal(sent[0].statusCode, 200)
+  assert.equal(sent[0].payload.mapOriginCleared, true)
+})

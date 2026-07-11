@@ -82,8 +82,10 @@ if [ "${#missing_packages[@]}" -gt 0 ]; then
   exit 2
 fi
 
-if [ -z "$DOGZILLA_MAP_PBSTREAM" ] && [ -s "$DOGZILLA_MAP_METADATA" ]; then
+if [ -s "$DOGZILLA_MAP_METADATA" ]; then
+  requested_pbstream="$DOGZILLA_MAP_PBSTREAM"
   DOGZILLA_MAP_PBSTREAM="$(python3 - "$DOGZILLA_MAP_METADATA" <<'PY'
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -94,33 +96,26 @@ try:
 except Exception:
     raise SystemExit(0)
 
-pbstream = str(metadata.get("pbstream") or "").strip()
-if not pbstream:
+artifact = (metadata.get("artifacts") or {}).get("pbstream") or {}
+pbstream = str(artifact.get("path") or metadata.get("pbstream") or "").strip()
+expected_hash = str(artifact.get("sha256") or "").strip()
+if not pbstream or len(expected_hash) != 64:
     raise SystemExit(0)
 path = Path(pbstream)
 if not path.is_absolute():
     path = metadata_path.parent / path
+if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+    raise SystemExit(0)
 print(path)
 PY
 )"
 fi
-if [ -z "$DOGZILLA_MAP_PBSTREAM" ]; then
-  DOGZILLA_MAP_PBSTREAM="$(python3 - "$REMOTE_ROOT/maps" <<'PY'
-import sys
-from pathlib import Path
-
-maps_dir = Path(sys.argv[1])
-candidates = sorted(
-    maps_dir.glob("robodoge_home_*.pbstream"),
-    key=lambda path: path.stat().st_mtime if path.exists() else 0,
-    reverse=True,
-)
-if candidates:
-    print(candidates[0])
-PY
-)"
+if [ "$DOGZILLA_MAP_POSE_MODE" != "mapping" ]; then
+  if [ -z "$DOGZILLA_MAP_PBSTREAM" ] || { [ -n "${requested_pbstream:-}" ] && [ "$requested_pbstream" != "$DOGZILLA_MAP_PBSTREAM" ]; }; then
+    echo "Active map manifest missing, invalid, or overridden: $DOGZILLA_MAP_METADATA" >&2
+    exit 2
+  fi
 fi
-DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-$REMOTE_ROOT/maps/robodoge_home.pbstream}"
 
 IMU_CONFIG=""
 if [ "$DOGZILLA_IMU_AVAILABLE" = "auto" ]; then

@@ -216,16 +216,6 @@ select {
   color: var(--ink);
 }
 
-.settings-static-field {
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: #f3eee6;
-  color: var(--ink);
-  font-weight: 800;
-}
-
 .status {
   display: flex;
   align-items: center;
@@ -279,7 +269,6 @@ select {
 }
 
 .speech-head,
-.runtime-head,
 .robot-state-head,
 .robot-map-head,
 .robot-camera-panel .robot-map-head,
@@ -310,10 +299,6 @@ select {
 }
 
 .speech-status,
-.speech-files,
-.runtime-status,
-.runtime-files,
-.settings-note,
 .settings-status,
 .meta-note {
   margin: 0;
@@ -322,7 +307,6 @@ select {
 }
 
 .speech-preview,
-.runtime-preview,
 .message-bubble,
 .output-box {
   margin: 0;
@@ -342,25 +326,18 @@ select {
   height: 100%;
 }
 
-.runtime-preview {
-  min-height: 144px;
-}
-
 .speech-panel[data-state='error'] .speech-status,
-.speech-panel[data-state='error'] .speech-preview,
-.runtime-panel[data-state='error'] .runtime-status,
-.runtime-panel[data-state='error'] .runtime-preview {
+.speech-panel[data-state='error'] .speech-preview {
   color: var(--danger);
 }
 
-.speech-panel[data-state='error'] .speech-preview,
-.runtime-panel[data-state='error'] .runtime-preview {
+.speech-panel[data-state='error'] .speech-preview {
   border-color: rgba(217, 79, 69, 0.42);
 }
 
 .robot-identity-grid {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 70px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(104px, auto);
   gap: 6px 10px;
   align-items: stretch;
 }
@@ -416,8 +393,7 @@ select {
   color: var(--ink-faint);
 }
 
-.robot-state-panel strong,
-.meta-card strong {
+.robot-state-panel strong {
   display: block;
   min-width: 0;
   color: var(--ink);

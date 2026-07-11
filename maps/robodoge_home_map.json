@@ -1,0 +1,25 @@
+{
+  "id": "robodoge_home_20260708T195940_scanner",
+  "yaml": "/home/pi/robodoge/maps/robodoge_home.yaml",
+  "pgm": "/home/pi/robodoge/maps/robodoge_home.pgm",
+  "savedAt": "2026-07-08T20:00:11-05:00",
+  "resolution": 0.05,
+  "widthCells": 304,
+  "heightCells": 364,
+  "origin": [-1.5662, -8.3426, 0.0],
+  "sourceMode": "scanner_app",
+  "sourcePath": "C:\\Users\\sandr\\OneDrive\\Documents\\SLAM App\\scans\\scan_20260708_195940",
+  "activeAlias": "robodoge_home",
+  "rosMapConversion": "external_scanner_app",
+  "artifacts": {
+    "yaml": {
+      "path": "/home/pi/robodoge/maps/robodoge_home.yaml",
+      "sha256": "7073a990edf55beec8892e6850e23db33049064bdf1d6199cb8fcf338a05057b"
+    },
+    "pgm": {
+      "path": "/home/pi/robodoge/maps/robodoge_home.pgm",
+      "sha256": "756036cf0faac6ccd727e6b5f493c11da5c4f168e9ffc505caf72f68cb8b1f18"
+    }
+  },
+  "note": "External occupancy map only; no Cartographer pbstream was generated."
+}

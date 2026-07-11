@@ -35,13 +35,10 @@ $configPath = Ensure-DogzillaSshConfig `
   -NoHostKeyScan:$NoHostKeyScan
 
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
-$remoteSetup = "sudo mkdir -p $remoteRootQuoted/maps $remoteRootQuoted/logs && sudo chown -R ${User}:${User} $remoteRootQuoted/maps $remoteRootQuoted/logs"
-Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteSetup
-if ($LASTEXITCODE -ne 0) {
-  throw "remote map-pose setup failed"
-}
-
 if (-not $NoSync) {
+  $remoteSetup = "sudo install -d -o $User -g $User $remoteRootQuoted/maps $remoteRootQuoted/logs"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteSetup
+  if ($LASTEXITCODE -ne 0) { throw "remote map-pose setup failed" }
   $mapPoseSource = Join-Path $repoRoot "sidecars\dogzilla_map_pose"
   Write-Output "Copying sidecars\dogzilla_map_pose -> ${Alias}:$RemoteRoot/sidecars/"
   & scp -r -F $configPath $mapPoseSource "${Alias}:$RemoteRoot/sidecars/"
@@ -91,17 +88,27 @@ function Wait-ContainerRunning {
 }
 
 $remoteCommand = "docker exec -e DOGZILLA_DOCKER_EXEC=1 -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$initialPoseEnv $ContainerName bash $containerScript"
-Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
-if ($LASTEXITCODE -ne 0) {
-  Write-Output "Container $ContainerName not available; starting via systemd..."
-  & ssh -F $configPath $Alias "sudo systemctl start robodoge-map-pose.service 2>/dev/null || docker start $ContainerName 2>/dev/null || true"
-  if (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25) {
-    Write-Output "Container $ContainerName started; retrying docker exec."
-    Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
-    if ($LASTEXITCODE -ne 0) {
-      throw "DOGZILLA Cartographer map pose failed to start"
+$startedInRequestedMode = $Mode -in @('mapping', 'continue_mapping')
+if ($startedInRequestedMode) {
+  Write-Output "Starting dedicated $Mode container..."
+  $startCommand = "sudo systemctl stop robodoge-map-pose.service 2>/dev/null || true; docker rm -f $ContainerName 2>/dev/null || true; docker run -d --rm --name $ContainerName --privileged --network host -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$initialPoseEnv -v /dev:/dev -v ${RemoteRoot}:${RemoteRoot} -w $RemoteRoot robodoge/ros-humble-cartographer:1.0 bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; bash $containerScript'"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $startCommand
+  if ($LASTEXITCODE -ne 0 -or !(Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25)) {
+    throw "DOGZILLA Cartographer map pose container '$ContainerName' did not become ready in $Mode mode"
+  }
+} else {
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "Container $ContainerName not available; starting via systemd..."
+    & ssh -F $configPath $Alias "sudo systemctl start robodoge-map-pose.service 2>/dev/null || docker start $ContainerName 2>/dev/null || true"
+    if (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25) {
+      Write-Output "Container $ContainerName started; retrying docker exec."
+      Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+      if ($LASTEXITCODE -ne 0) {
+        throw "DOGZILLA Cartographer map pose failed to start"
+      }
+    } else {
+      throw "DOGZILLA Cartographer map pose container '$ContainerName' did not become ready within 25s"
     }
-  } else {
-    throw "DOGZILLA Cartographer map pose container '$ContainerName' did not become ready within 25s"
   }
 }

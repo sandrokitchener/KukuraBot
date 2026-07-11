@@ -137,7 +137,7 @@ function Invoke-DogzillaSsh {
 
   Require-LocalCommand ssh
 
-  $sshArgs = @("-F", $ConfigPath, $Alias)
+  $sshArgs = @("-n", "-F", $ConfigPath, $Alias)
   if ($RemoteCommand) {
     $sshArgs += $RemoteCommand
   }

@@ -11,6 +11,8 @@ param(
   [int]$RosDomainId = 16,
   [int]$PosePort = 9090,
   [string]$MapYaml = "",
+  [switch]$MappingMode,
+  [switch]$SkipReadinessWait,
   [switch]$NoSync,
   [switch]$NoHostKeyScan,
   [double]$Nav2RobotRadius = 0,
@@ -183,13 +185,10 @@ $configPath = Ensure-DogzillaSshConfig `
   -NoHostKeyScan:$NoHostKeyScan
 
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
-$remoteSetup = "sudo mkdir -p $remoteRootQuoted/sidecars $remoteRootQuoted/logs && sudo chown -R ${User}:${User} $remoteRootQuoted/sidecars $remoteRootQuoted/logs"
-Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteSetup
-if ($LASTEXITCODE -ne 0) {
-  throw "remote navigation setup failed"
-}
-
 if (-not $NoSync) {
+  $remoteSetup = "sudo install -d -o $User -g $User $remoteRootQuoted/sidecars $remoteRootQuoted/logs"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteSetup
+  if ($LASTEXITCODE -ne 0) { throw "remote navigation setup failed" }
   $navigationSource = Join-Path $repoRoot "sidecars\dogzilla_navigation"
   Write-Output "Copying sidecars\dogzilla_navigation -> ${Alias}:$RemoteRoot/sidecars/"
   & scp -r -F $configPath $navigationSource "${Alias}:$RemoteRoot/sidecars/"
@@ -217,6 +216,7 @@ Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot
 Write-Output "Starting DOGZILLA Nav2 waypoint navigation in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_navigation/start-navigation-in-container.sh"
 $mapEnv = if ($MapYaml) { " -e DOGZILLA_NAV2_MAP=$MapYaml" } else { "" }
+$mappingModeEnv = if ($MappingMode) { " -e DOGZILLA_NAV2_MAPPING_MODE=1 -e DOGZILLA_LOCALIZATION_BACKEND=cartographer" } else { "" }
 $nav2Env = ''
 if ($Nav2RobotRadius -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_ROBOT_RADIUS=$Nav2RobotRadius" }
 if ($Nav2FootprintPadding -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_FOOTPRINT_PADDING=$Nav2FootprintPadding" }
@@ -257,7 +257,7 @@ function Wait-ContainerRunning {
 
 # Launch detached so Nav2, scan filter, gait adapter, and odom publisher survive
 # the SSH session closing.
-$remoteCommand = "docker exec -d -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$nav2Env $ContainerName bash $containerScript"
+$remoteCommand = "docker exec -d -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$mappingModeEnv$nav2Env $ContainerName bash $containerScript"
 $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
   Write-Output "Container $ContainerName not available; attempting to start..."
@@ -277,6 +277,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Output "Launched detached navigation container script; polling for Nav2 readiness."
+if ($SkipReadinessWait) {
+  Write-Output "Skipped blocking readiness wait; caller owns readiness supervision."
+  return
+}
 $scanTopic = if ($Nav2ScanFilterEnabled -eq "1" -or ($null -ne $avoidanceConfig -and $avoidanceConfig.nav2ScanFilterEnabled -eq $true)) { "/scan_nav2" } else { "/scan" }
 $waitScriptLocal = Join-Path $repoRoot "sidecars/dogzilla_navigation/wait-nav2-ready.sh"
 if (!(Test-Path -LiteralPath $waitScriptLocal)) {

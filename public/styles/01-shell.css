@@ -240,8 +240,7 @@ body {
 }
 
 .connection-panel,
-.settings-panel,
-.runtime-panel {
+.settings-panel {
   border: 0;
   border-top: 1px solid var(--line);
   border-radius: 0;
@@ -260,9 +259,10 @@ body {
 
 .robot-column {
   display: grid;
-  grid-template-rows: auto minmax(520px, auto) minmax(118px, auto) minmax(64px, auto) minmax(72px, auto);
+  grid-template-rows: auto auto minmax(420px, max-content) max-content max-content;
   gap: clamp(10px, 1vh, 16px);
   min-height: 0;
+  min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -271,23 +271,19 @@ body {
   order: 0;
 }
 
-.robot-map-panel {
+.robot-state-panel {
   order: 1;
 }
 
-.manual-control-panel {
+.robot-map-panel {
   order: 2;
 }
 
-.robot-state-panel {
-  order: 3;
-}
-
-.robot-camera-panel {
+.manual-control-panel {
   order: 4;
 }
 
-.output-panel {
+.robot-camera-panel {
   order: 5;
 }
 
@@ -413,9 +409,9 @@ body {
   padding: 12px 0 0;
   border-top: 1px solid var(--line);
   display: grid;
-  grid-template-rows: auto minmax(360px, 1fr) auto auto;
+  grid-template-rows: auto minmax(280px, 1fr) auto;
   gap: 8px;
-  min-height: 520px;
+  min-height: 420px;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -440,6 +436,11 @@ body {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.command-zone > .output-panel {
+  min-height: 160px;
+  max-height: none;
+}
+
 .output-scroll {
   min-height: 0;
   max-height: none;
@@ -448,7 +449,7 @@ body {
   scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
 }
 
-.settings-toggle {
+.app-header-button {
   position: relative;
   z-index: 1;
   display: inline-flex;
@@ -456,34 +457,25 @@ body {
   justify-content: center;
   gap: 8px;
   min-height: 34px;
-  width: auto;
+  width: 138px;
   height: 34px;
   padding: 0 11px;
-  border: 1px solid rgba(255, 123, 86, 0.24);
   border-radius: 6px;
-  background: var(--accent);
-  color: #fffaf4;
   box-shadow: none;
   cursor: pointer;
 }
 
 .connection-toggle {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 34px;
-  width: auto;
-  height: 34px;
-  padding: 0 11px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
   background: #050505;
   color: #f7f1e8;
-  box-shadow: none;
-  cursor: pointer;
+}
+
+.settings-toggle,
+.help-toggle {
+  border: 1px solid rgba(255, 123, 86, 0.24);
+  background: var(--accent);
+  color: #fffaf4;
 }
 
 .app-action-label {

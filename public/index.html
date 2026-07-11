@@ -17,7 +17,7 @@
         <div class="app-header-actions">
           <button
             id="connection-toggle"
-            class="connection-toggle"
+            class="app-header-button connection-toggle"
             type="button"
             aria-controls="connection-drawer"
             aria-expanded="false"
@@ -34,7 +34,7 @@
           </button>
           <button
             id="help-toggle"
-            class="help-toggle"
+            class="app-header-button help-toggle"
             type="button"
             aria-controls="help-drawer"
             aria-expanded="false"
@@ -46,7 +46,7 @@
           </button>
           <button
             id="settings-toggle"
-            class="settings-toggle"
+            class="app-header-button settings-toggle"
             type="button"
             aria-controls="settings-drawer"
             aria-expanded="false"
@@ -82,20 +82,6 @@
         </aside>
 
         <section class="command-zone">
-          <div class="operator-status-strip" id="operator-status-strip" data-state="waiting">
-            <div class="operator-status-row">
-              <div class="operator-status-field">
-                <span class="operator-status-label">Last cmd</span>
-                <strong id="operator-last-cmd-state" class="operator-status-value">-</strong>
-              </div>
-            </div>
-            <div class="operator-safe-next-row">
-              <span class="operator-safe-next-label">Next:</span>
-              <strong id="operator-safe-next-action" class="operator-safe-next-action">Waiting for robot</strong>
-              <span id="operator-safe-next-blocker" class="operator-safe-next-blocker" hidden></span>
-            </div>
-          </div>
-
  <div class="intro-head">
             <div class="intro-copy">
               <p id="app-eyebrow" class="eyebrow">Quadruped inspection console</p>
@@ -128,6 +114,28 @@
  >Stop</button>
  </div>
  </form>
+
+          <section class="output-panel">
+            <div class="response-head">
+              <h2>Output Log</h2>
+            </div>
+            <div class="output-scroll">
+              <div id="chat-log" class="chat-log" aria-live="polite">
+                <article class="message message-assistant message-empty">
+                  <div id="empty-message-role" class="message-role">Assistant</div>
+                  <pre id="empty-message-bubble" class="message-bubble">Waiting for first message.</pre>
+                  <div id="empty-message-meta" class="message-meta">Prompt ready.</div>
+                </article>
+              </div>
+
+              <div class="parsed-log">
+                <div class="response-head">
+                  <h2>Parsed JSON</h2>
+                </div>
+                <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
+              </div>
+            </div>
+          </section>
 
           <div id="status" class="status" data-state="idle">
             <span class="status-dot" aria-hidden="true"></span>
@@ -276,83 +284,67 @@
               <span id="robot-map-layer-waypoints" class="robot-map-layer" data-state="missing">Waypoints</span>
             </div>
           </div>
-<details id="map-workflow-panel" class="map-workflow-panel" open>
-<summary class="map-workflow-head">
-<span class="map-workflow-title">Map Controls</span>
-<span id="map-workflow-status" class="map-workflow-status">Ready.</span>
-</summary>
-<div class="map-workflow-steps">
-  <div class="map-workflow-step map-workflow-step-primary">
-    <span class="map-step-number">1</span>
-          <span class="map-step-label">Align Robot</span>
-          <span class="map-step-hint">Restart localization on the active saved map when the robot pose is stale.</span>
-          <div class="map-workflow-actions">
-            <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Re-center Here</button>
-    </div>
-  </div>
-</div>
-<details id="map-advanced-setup-section" class="map-new-space-section">
-  <summary class="map-new-space-head">
-    <span class="map-new-space-title">Advanced Setup</span>
-    <span class="map-new-space-hint">Lock map, waypoints, readiness</span>
-  </summary>
-  <div class="map-workflow-steps">
-    <div class="map-workflow-step">
-      <span class="map-step-number">2</span>
-      <span class="map-step-hint">Restart saved-map localization when pose is stale. This does not create or save a map.</span>
-      <div class="map-workflow-actions">
-      </div>
-    </div>
-    <div class="map-workflow-step">
-      <span class="map-step-number">3</span>
-      <span class="map-step-label">Lock Origin</span>
-      <span class="map-step-hint">After Save Map restarts localization, set charger/home as the fixed origin for waypoints.</span>
-      <div class="map-workflow-actions">
-        <button type="button" class="map-origin-button" data-connection-action="capture-map-origin">Mark Origin</button>
-      </div>
-    </div>
-    <div class="map-workflow-step">
-      <span class="map-step-number">4</span>
-      <span class="map-step-label">Save Waypoint</span>
-      <span class="map-step-hint">Drive to the physical spot on the locked map, wait for trusted map pose, then save or recapture.</span>
-      <div class="waypoint-capture-row">
-        <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
-        <button type="button" id="waypoint-capture-button" class="waypoint-capture-button" title="Save current robot pose as waypoint">Save Spot</button>
-        <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
-      </div>
-      <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
-        <span class="stale-waypoints-label">Out of date - drive robot here, then click Recapture</span>
-        <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
-      </div>
-    </div>
-    <div class="map-workflow-step">
-      <span class="map-step-number">5</span>
-      <span class="map-step-label">Check Navigation</span>
-      <span class="map-step-hint">Verify Nav2, scan, odom, and waypoint dispatch readiness.</span>
-      <div class="map-workflow-actions">
-        <button type="button" id="waypoint-readiness-button" class="map-workflow-button">Check Ready</button>
-        <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Nav</button>
-      </div>
-    </div>
-  </div>
-</details>
-</details><div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
+<div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
               <span class="robot-map-axis robot-map-axis-y" aria-hidden="true"></span>
               <span id="robot-map-waypoints" class="robot-map-waypoints" aria-hidden="true"></span>
               <span id="robot-map-track" class="robot-map-track" aria-hidden="true"></span>
               <span id="robot-map-dot" class="robot-map-dot" aria-hidden="true"></span>
-              <span id="robot-nav-badge" class="robot-nav-badge" aria-hidden="true"></span>
               <span id="robot-pose-readout" class="robot-pose-readout">pose -</span>
               <div class="robot-map-zoom-controls">
                 <button type="button" class="robot-map-zoom-btn" data-zoom-action="in" aria-label="Zoom in" title="Zoom in">+</button>
-                <span class="robot-map-zoom-indicator" role="button" tabindex="0" aria-label="Zoom level — click to reset" title="Zoom: 100% — scroll to zoom, click to reset">100%</span>
-                <button type="button" class="robot-map-zoom-btn" data-zoom-action="out" aria-label="Zoom out" title="Zoom out">−</button>
+                <span class="robot-map-zoom-indicator" role="button" tabindex="0" aria-label="Zoom level â€” click to reset" title="Zoom: 100% â€” scroll to zoom, click to reset">100%</span>
+                <button type="button" class="robot-map-zoom-btn" data-zoom-action="out" aria-label="Zoom out" title="Zoom out">âˆ’</button>
               </div>
             </div>
             <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>
           </section>
+            <details id="map-workflow-panel" class="map-workflow-panel" open>
+              <summary class="map-workflow-head">
+                <span class="map-workflow-title">Map Controls</span>
+                <span id="map-workflow-status" class="map-workflow-status">Ready.</span>
+              </summary>
+              <div class="map-workflow-steps">
+                <div class="map-workflow-step map-workflow-step-primary">
+                  <span class="map-step-number">1</span>
+                  <span class="map-step-label">Build Map</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" id="autonomous-map-start-button" class="map-workflow-button map-workflow-button-primary" data-connection-action="start-autonomous-mapping">Map This Floor</button>
+                    <button type="button" id="autonomous-map-continue-button" class="map-workflow-button" data-connection-action="continue-autonomous-mapping">Continue Current Map</button>
+                    <button type="button" id="autonomous-map-finish-button" class="map-workflow-button" data-connection-action="finish-autonomous-mapping" disabled>Finish Mapping</button>
+                    <button type="button" id="autonomous-map-promote-button" class="map-workflow-button" data-connection-action="promote-map-candidate" disabled>Use Candidate Map</button>
+                  </div>
+                </div>
+                <div class="map-workflow-step map-workflow-step-primary">
+                  <span class="map-step-number">2</span>
+                  <span class="map-step-label">Align Robot</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Re-center Here</button>
+                  </div>
+                </div>
+                <div class="map-workflow-step">
+                  <span class="map-step-number">3</span>
+                  <span class="map-step-label">Save Waypoint</span>
+                  <div class="waypoint-capture-row">
+                    <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
+                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button">Save Spot</button>
+                    <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
+                  </div>
+                  <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
+                    <span class="stale-waypoints-label">Out of date - drive robot here, then click Recapture</span>
+                    <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
+                  </div>
+                </div>
+                <div class="map-workflow-step">
+                  <span class="map-step-number">4</span>
+                  <span class="map-step-label">Navigation</span>
+                  <div class="map-workflow-actions">
+                    <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Navigation</button>
+                  </div>
+                </div>
+              </div>
+            </details>
 
           <section id="robot-camera-panel" class="robot-camera-panel" hidden>
             <div class="robot-map-head">
@@ -370,27 +362,6 @@
             <div id="robot-camera-meta" class="robot-map-meta">Camera stream not configured.</div>
           </section>
 
-          <section class="output-panel">
-            <div class="response-head">
-              <h2>Output Log</h2>
-            </div>
-            <div class="output-scroll">
-              <div id="chat-log" class="chat-log" aria-live="polite">
-                <article class="message message-assistant message-empty">
-                  <div id="empty-message-role" class="message-role">Assistant</div>
-                  <pre id="empty-message-bubble" class="message-bubble">Waiting for first message.</pre>
-                  <div id="empty-message-meta" class="message-meta">Prompt ready.</div>
-                </article>
-              </div>
-
-              <div class="parsed-log">
-                <div class="response-head">
-                  <h2>Parsed JSON</h2>
-                </div>
-                <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
-              </div>
-            </div>
-          </section>
         </section>
       </section>
 
@@ -427,46 +398,14 @@
           <span id="connection-chip" class="connection-chip">Not set</span>
         </div>
 
-        <section class="connection-panel">
-          <div class="settings-row connection-backend-row">
-            <label for="dogzilla-backend-url-input">Backend URL</label>
-            <input
-              id="dogzilla-backend-url-input"
-              type="url"
-              inputmode="url"
-              placeholder="http://192.168.1.10:3037"
-              autocomplete="off"
-            />
-            <button id="save-dogzilla-backend-button" type="button">Use backend</button>
-          </div>
-          <p id="connection-backend-status" class="connection-status">Using same-origin backend.</p>
-
-          <div class="connection-grid">
-            <div class="connection-field">
-              <label for="dogzilla-host-input">DOGZILLA IP</label>
-              <input id="dogzilla-host-input" type="text" inputmode="decimal" placeholder="192.168.8.88" autocomplete="off" />
-            </div>
-            <div class="connection-field">
-              <label for="dogzilla-user-input">SSH user</label>
-              <input id="dogzilla-user-input" type="text" autocomplete="username" />
-            </div>
-            <div class="connection-field">
-              <label for="dogzilla-remote-root-input">Remote root</label>
-              <input id="dogzilla-remote-root-input" type="text" autocomplete="off" />
+        <section class="connection-panel preflight-panel">
+          <div class="bridge-head">
+            <h2>Checks</h2>
+            <div class="diagnostics-actions">
+              <button id="run-dogzilla-preflight-button" type="button">Run diagnostics</button>
+              <button id="check-pi-performance-button" type="button">Pi load</button>
             </div>
           </div>
-          <button id="save-dogzilla-connection-button" type="button">Save address</button>
-          <p id="connection-status" class="connection-status">Loading connection.</p>
-        </section>
-
-      <section class="connection-panel preflight-panel">
-        <div class="bridge-head">
-          <h2>Diagnostics</h2>
-          <div class="diagnostics-actions">
-            <button id="run-dogzilla-preflight-button" type="button">Run diagnostics</button>
-            <button id="check-pi-performance-button" type="button">Pi load</button>
-          </div>
-        </div>
           <p id="dogzilla-preflight-status" class="connection-status" aria-live="polite">Not run.</p>
           <div id="dogzilla-preflight-summary" class="preflight-summary" aria-label="DOGZILLA diagnostics summary">
             <div>
@@ -483,77 +422,58 @@
             </div>
           </div>
           <div id="dogzilla-preflight-checks" class="preflight-checks"></div>
-          <pre id="dogzilla-preflight-output" class="connection-output">Diagnostics idle.</pre>
         </section>
 
-        <section class="connection-panel">
-          <div class="bridge-head">
-            <h2>Robot Link</h2>
-          </div>
-          <div class="bridge-action-grid bridge-action-grid-primary">
-            <button type="button" data-connection-action="check-ssh">Check network</button>
-            <button type="button" data-connection-action="probe-bridges">Check robot link</button>
-            <button type="button" data-connection-action="probe-support">Check extras</button>
-          </div>
-          <div class="connection-url-grid">
-            <div>
-              <span class="meta-label">Robot ID</span>
-              <strong id="dogzilla-robot-id">-</strong>
+        <details class="advanced-service-tools">
+          <summary>Connection setup</summary>
+          <section class="connection-panel">
+            <div class="settings-row connection-backend-row">
+              <label for="dogzilla-backend-url-input">Backend URL</label>
+              <input
+                id="dogzilla-backend-url-input"
+                type="url"
+                inputmode="url"
+                placeholder="http://192.168.1.10:3037"
+                autocomplete="off"
+              />
+              <button id="save-dogzilla-backend-button" type="button">Use backend</button>
             </div>
-            <div>
-              <span class="meta-label">Robot bridge</span>
-              <strong id="dogzilla-direct-url">-</strong>
-            </div>
-            <div>
-              <span class="meta-label">ROS2 bridge</span>
-              <strong id="dogzilla-ros2-url">-</strong>
-            </div>
-          </div>
-        </section>
+            <p id="connection-backend-status" class="connection-status connection-backend-status">Using same-origin backend.</p>
 
-        <section class="connection-panel">
-          <div class="bridge-head">
-            <h2>Sidecar Restarts</h2>
-          </div>
+            <div class="connection-grid">
+              <div class="connection-field">
+                <label for="dogzilla-host-input">DOGZILLA IP</label>
+                <input id="dogzilla-host-input" type="text" inputmode="decimal" placeholder="192.168.8.88" autocomplete="off" />
+              </div>
+              <div class="connection-field">
+                <label for="dogzilla-user-input">SSH user</label>
+                <input id="dogzilla-user-input" type="text" autocomplete="username" />
+              </div>
+              <div class="connection-field">
+                <label for="dogzilla-remote-root-input">Remote root</label>
+                <input id="dogzilla-remote-root-input" type="text" autocomplete="off" />
+              </div>
+            </div>
+            <button id="save-dogzilla-connection-button" type="button">Save address</button>
+            <p id="connection-status" class="connection-status">Loading connection.</p>
+          </section>
+        </details>
+
+        <details class="advanced-service-tools">
+          <summary>Repair services</summary>
           <div class="bridge-action-grid sidecar-action-grid">
             <button type="button" data-connection-action="start-direct">Restart direct bridge</button>
             <button type="button" data-connection-action="start-ros2">Restart ROS2 bridge</button>
-            <button type="button" data-connection-action="start-yolo">Restart YOLO vision</button>
             <button type="button" data-connection-action="start-audio">Restart Pi audio</button>
             <button type="button" data-connection-action="start-lidar">Restart lidar bridge</button>
-            <button type="button" data-connection-action="start-map-pose">Localize on Map</button>
           </div>
-          <details class="advanced-service-tools">
-            <summary>Maintenance controls</summary>
-            <div class="bridge-action-grid">
-              <button type="button" data-connection-action="sync-bridges">Deploy bridge code</button>
-              <button type="button" data-connection-action="start-map-pose">Re-center Here</button>
-              <button type="button" data-connection-action="stop-vendor-app">Stop vendor app</button>
-              <button type="button" data-connection-action="stop-bridges">Stop bridges</button>
-            </div>
-          </details>
           <pre id="connection-output" class="connection-output">Waiting for connection action.</pre>
-        </section>
+        </details>
       </aside>
 
       <aside id="settings-drawer" class="settings-drawer" hidden>
         <div class="settings-drawer-head">
           <h2>Settings</h2>
-        </div>
-
-        <div class="meta-grid">
-          <div class="meta-card">
-            <span class="meta-label">Profile</span>
-            <strong id="profile-name">Loading...</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Provider</span>
-            <strong id="provider-name">Loading...</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">Model</span>
-            <strong id="model-name">Loading...</strong>
-          </div>
         </div>
 
         <section class="settings-panel">
@@ -578,13 +498,6 @@
           </div>
 
           <div class="settings-row">
-            <label for="test-robot-sit-button">Robot test</label>
-            <div class="settings-static-field">sit</div>
-            <button id="test-robot-sit-button" type="button">Send sit</button>
-          </div>
-          <div id="robot-sit-test-status" class="settings-status">Ready.</div>
-
-          <div class="settings-row">
             <label for="speech-profile-select">Speech profile</label>
             <select id="speech-profile-select"></select>
             <button id="save-speech-profile-button" type="button">Use speech profile</button>
@@ -592,13 +505,6 @@
           <div id="speech-settings-status" class="settings-status">Loading speech profiles...</div>
         </section>
 
-        <section class="runtime-panel" data-state="ready">
-          <div class="runtime-head">
-            <h2>Runtime Feedback</h2>
-          </div>
-          <p id="runtime-feedback-status" class="runtime-status">Checking runtime target...</p>
-          <pre id="runtime-feedback-output" class="runtime-preview">Waiting for runtime feedback.</pre>
-        </section>
       </aside>
 
       <aside id="help-drawer" class="help-drawer" hidden>
@@ -611,46 +517,23 @@
           <div id="help-mermaid-container" class="help-mermaid-container">
             <pre class="mermaid">
 flowchart TD
-    S{Saved map exists?}
-    S -->|no| A[Open Build a New SLAM Map]
-    A --> B[New Map]
-    B --> C[Drive robot around slowly]
-    C --> D[Save Map]
-    D --> E[Auto-restart localization]
-    S -->|yes| E
-    E --> F[Mark Origin]
-    F --> G[Drive robot to waypoint spot]
-    G --> H[Wait for pose stable]
-    H --> I[Save Spot]
-    I --> J{More waypoints?}
-    J -->|yes| G
-    J -->|no| K[Check Ready]
-    K --> L{All ready?}
-    L -->|no| M[Recapture stale waypoints]
-    M --> K
-    L -->|yes| N[Restart Nav if needed]
-    N --> O[Say 'go to kitchen']
-            </pre>
+    A[Map This Floor] --> B[Robot explores LiDAR frontiers]
+    B --> C[Finish Mapping]
+    C --> D[Review candidate]
+    D --> E[Use Candidate Map]
+    E --> F[Capture verified waypoints]
+</pre>
           </div>
           <div id="help-mermaid-fallback" class="help-mermaid-fallback" hidden>
-            <p>Diagram could not be rendered. Flow:</p>
-            <ol class="help-fallback-list">
-              <li>If no saved map: open Build a New SLAM Map, click New Map</li>
-              <li>Drive robot around slowly to build the map</li>
-              <li>Click Save Map</li>
-              <li>Localization restarts automatically against the new map</li>
-              <li>If saved map exists: app auto-starts localization</li>
-              <li>Mark Origin on the charger</li>
-              <li>Drive robot to each waypoint spot</li>
-              <li>Wait for pose stable / waypointSafe</li>
-              <li>Save Spot</li>
-              <li>Repeat for more waypoints</li>
-              <li>Check Ready</li>
-              <li>Recapture stale waypoints if needed</li>
-              <li>Restart Nav if not already running</li>
-              <li>Say "go to kitchen"</li>
-            </ol>
-          </div>
+  <p>Diagram could not be rendered. Flow:</p>
+  <ol class="help-fallback-list">
+    <li>Put the robot in a bounded, stair-free area</li>
+    <li>Click Map This Floor</li>
+    <li>Robot explores reachable LiDAR frontiers autonomously</li>
+    <li>Finish Mapping, then review and use the candidate map</li>
+    <li>Capture verified waypoints after promoting the map</li>
+  </ol>
+</div>
         </section>
 
         <section class="help-panel">
@@ -661,16 +544,12 @@ flowchart TD
               <p>On a normal session, the app does this automatically. It starts Cartographer in localization mode against the saved map. Click "Localize on Map" if you need to restart it manually.</p>
             </li>
             <li>
-              <strong>Build a New SLAM Map (only first time or when replacing a stale map)</strong>
-              <p>Open the "Build a New SLAM Map" section and click "Start New Map". Cartographer enters SLAM mapping mode. Drive the robot slowly around the entire area to build the map, then click "Save Map". Localization restarts automatically against the new map.</p>
-            </li>
-            <li>
-              <strong>Mark Origin</strong>
-              <p>Place the robot on its charger. Click "Mark Origin". This establishes the (0,0) reference point for all waypoints. You only need to do this once per map, or after a remap.</p>
-            </li>
+  <strong>Map This Floor</strong>
+  <p>Put the robot in a clear, bounded, stair-free area and click "Map This Floor". It uses LiDAR and Nav2 frontier goals to explore reachable unknown space, then saves a reviewable candidate when you finish.</p>
+</li>
             <li>
               <strong>Drive robot to waypoint spot</strong>
-              <p>Use manual controls to <strong>drive</strong> the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch). Do not carry the robot — Cartographer laser-only localization cannot globally re-localize after being carried.</p>
+              <p>Use manual controls to <strong>drive</strong> the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch). Do not carry the robot â€” Cartographer laser-only localization cannot globally re-localize after being carried.</p>
             </li>
             <li>
               <strong>Wait for pose stable</strong>
@@ -683,10 +562,6 @@ flowchart TD
             <li>
               <strong>Repeat for more waypoints</strong>
               <p>Move to each waypoint location and repeat steps 7-9.</p>
-            </li>
-            <li>
-              <strong>Check waypoint readiness</strong>
-              <p>Click "Check waypoint readiness". This verifies all waypoints are valid and Nav2 is ready.</p>
             </li>
             <li>
               <strong>Recapture stale waypoints if needed</strong>

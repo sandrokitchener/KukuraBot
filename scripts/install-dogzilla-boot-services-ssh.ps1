@@ -118,7 +118,7 @@ DOGZILLA_SERIAL_PORT=__SERIAL_PORT__
 DOGZILLA_DIRECT_DRY_RUN=0
 DOGZILLA_ROSBRIDGE_PORT=9090
 DOGZILLA_MAP_TOPIC=/map
-DOGZILLA_LOCALIZATION_BACKEND=amcl
+DOGZILLA_LOCALIZATION_BACKEND=cartographer
 ENV
 
 sudo tee /etc/systemd/system/robodoge-direct-bridge.service >/dev/null <<SERVICE
@@ -133,6 +133,7 @@ Type=simple
 User=$USER_NAME
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
+Environment=DOGZILLA_NAV2_STANDBY_ENABLED=1
 ExecStartPre=+/bin/bash -lc 'systemctl stop yahboom_oled.service 2>/dev/null || true; pkill -TERM -f "[a]pp_dogzilla.py" 2>/dev/null || true; pkill -TERM -f "[o]led_dogzilla.py" 2>/dev/null || true; sleep 0.8; pkill -KILL -f "[a]pp_dogzilla.py" 2>/dev/null || true; pkill -KILL -f "[o]led_dogzilla.py" 2>/dev/null || true; sleep 0.3; if fuser -s "/dev/ttyAMA0"; then echo "/dev/ttyAMA0 still owned after vendor stop" >&2; fuser -v "/dev/ttyAMA0" >&2 || true; exit 1; fi'
 ExecStartPre=/bin/bash -lc 'pkill -f "[s]idecars/dogzilla_lib_bridge/server.py" 2>/dev/null || true'
 ExecStart=/usr/bin/python3 $REMOTE_ROOT/sidecars/dogzilla_lib_bridge/server.py --host 0.0.0.0 --port $DIRECT_PORT --live
@@ -239,9 +240,9 @@ SERVICE
 sudo tee /etc/systemd/system/robodoge-navigation.service >/dev/null <<SERVICE
 [Unit]
 Description=Robo-Doge DOGZILLA Nav2 Navigation
-After=robodoge-rosbridge.service
-Wants=robodoge-rosbridge.service
-PartOf=robodoge-rosbridge.service
+After=robodoge-rosbridge.service robodoge-map-pose.service
+Wants=robodoge-rosbridge.service robodoge-map-pose.service
+PartOf=robodoge-rosbridge.service robodoge-map-pose.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -250,7 +251,7 @@ WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
 ExecStartPre=/bin/bash -lc 'for i in \$(seq 1 60); do /usr/bin/docker inspect -f "{{.State.Running}}" robodoge-rosbridge 2>/dev/null | grep -qx true && exit 0; sleep 1; done; echo "robodoge-rosbridge container not running" >&2; exit 1'
 ExecStartPre=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "[s]tart-navigation-in-container.sh" 2>/dev/null || true'
-ExecStart=/usr/bin/docker exec robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
+ExecStart=/usr/bin/docker exec -e DOGZILLA_LOCALIZATION_BACKEND=cartographer robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
 ExecStop=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "/opt/ros/humble/lib/nav2_|[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null || true'
 Restart=on-failure
 RestartSec=10
@@ -267,7 +268,7 @@ sudo systemctl daemon-reload
 sudo systemctl stop robodoge-lidar-bridge.service 2>/dev/null || true
 sudo systemctl disable robodoge-lidar-bridge.service 2>/dev/null || true
 sudo docker rm -f robodoge-lidar-bridge 2>/dev/null || true
-sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-navigation.service
+sudo systemctl enable robodoge-direct-bridge.service robodoge-audio-cue.service robodoge-yolo-vision.service robodoge-rosbridge.service robodoge-map-pose.service robodoge-navigation.service
 # Prevent the Yahboom OLED vendor app from respawning and reclaiming /dev/ttyAMA0 on live navigation machines.
 sudo systemctl disable --now yahboom_oled.service 2>/dev/null || true
 sudo systemctl restart robodoge-audio-cue.service || true

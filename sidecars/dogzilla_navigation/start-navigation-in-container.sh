@@ -29,6 +29,9 @@ DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE="${DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE:-
 DOGZILLA_NAV2_FAILURE_TOLERANCE="${DOGZILLA_NAV2_FAILURE_TOLERANCE:-5.0}"
 DOGZILLA_NAV2_MIN_SPEED_XY="${DOGZILLA_NAV2_MIN_SPEED_XY:-0.03}"
 DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY="${DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY:-0.05}"
+DOGZILLA_NAV2_MAX_LATERAL_VELOCITY="${DOGZILLA_NAV2_MAX_LATERAL_VELOCITY:-0.06}"
+DOGZILLA_NAV2_LATERAL_ACCELERATION="${DOGZILLA_NAV2_LATERAL_ACCELERATION:-0.12}"
+DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES="${DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES:-5}"
 DOGZILLA_NAV2_SCAN_FILTER_ENABLED="${DOGZILLA_NAV2_SCAN_FILTER_ENABLED:-1}"
 DOGZILLA_NAV2_SCAN_FILTER_TOPIC="${DOGZILLA_NAV2_SCAN_FILTER_TOPIC:-/scan_nav2}"
 DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG="${DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG:-120}"
@@ -43,6 +46,7 @@ DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_T
 DOGZILLA_NAV2_SPEED_RAMP_INTERVAL="${DOGZILLA_NAV2_SPEED_RAMP_INTERVAL:-0.5}"
 DOGZILLA_NAV2_SPEED_RAMP_BUFFER="${DOGZILLA_NAV2_SPEED_RAMP_BUFFER:-10}"
 DOGZILLA_LOCALIZATION_BACKEND="${DOGZILLA_LOCALIZATION_BACKEND:-amcl}"
+DOGZILLA_NAV2_MAPPING_MODE="${DOGZILLA_NAV2_MAPPING_MODE:-0}"
 DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-}"
 DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-}"
 DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-}"
@@ -60,20 +64,23 @@ export DOGZILLA_NAV2_CONTROLLER_FREQUENCY DOGZILLA_NAV2_BT_LOOP_DURATION_MS DOGZ
 export DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS DOGZILLA_NAV2_PLANNER_FREQUENCY DOGZILLA_NAV2_SMOOTHER_FREQUENCY
 export DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE DOGZILLA_NAV2_FAILURE_TOLERANCE
 export DOGZILLA_NAV2_MIN_SPEED_XY DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY
+export DOGZILLA_NAV2_MAX_LATERAL_VELOCITY DOGZILLA_NAV2_LATERAL_ACCELERATION DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES
 export DOGZILLA_NAV2_SCAN_FILTER_ENABLED DOGZILLA_NAV2_SCAN_FILTER_TOPIC
 export DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
 export DOGZILLA_NAV2_SPEED_RAMP_INTERVAL DOGZILLA_NAV2_SPEED_RAMP_BUFFER
-export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
+export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_NAV2_MAPPING_MODE DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
 export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/logs"
 
 pkill -9 -f "ros2.*daemon" 2>/dev/null || true
 
-if [ -z "$DOGZILLA_NAV2_MAP" ] && [ -s "$DOGZILLA_MAP_METADATA" ]; then
+if [ -s "$DOGZILLA_MAP_METADATA" ]; then
+  requested_nav2_map="$DOGZILLA_NAV2_MAP"
   DOGZILLA_NAV2_MAP="$(python3 - "$DOGZILLA_MAP_METADATA" <<'PY'
+import hashlib
 import json
 import pathlib
 import sys
@@ -81,16 +88,27 @@ import sys
 md = pathlib.Path(sys.argv[1])
 try:
     m = json.loads(md.read_text(encoding="utf-8"))
-    y = (m.get("yaml") or "").strip()
-    if y:
+    artifact = (m.get("artifacts") or {}).get("yaml") or {}
+    y = (artifact.get("path") or m.get("yaml") or "").strip()
+    expected_hash = (artifact.get("sha256") or "").strip()
+    if y and len(expected_hash) == 64:
         p = pathlib.Path(y)
-        print(p if p.is_absolute() else md.parent / p)
+        p = p if p.is_absolute() else md.parent / p
+        if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == expected_hash:
+            print(p)
 except Exception:
     pass
 PY
 )"
 fi
-DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-$REMOTE_ROOT/maps/robodoge_home.yaml}"
+if [ "$DOGZILLA_NAV2_MAPPING_MODE" != "1" ]; then
+  if [ -z "$DOGZILLA_NAV2_MAP" ] || { [ -n "${requested_nav2_map:-}" ] && [ "$requested_nav2_map" != "$DOGZILLA_NAV2_MAP" ]; }; then
+    echo "Active map manifest missing, invalid, or overridden: $DOGZILLA_MAP_METADATA" >&2
+    exit 2
+  fi
+else
+  DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-/dev/null}"
+fi
 
 if [ -z "$DOGZILLA_INITIAL_POSE_X" ] || [ -z "$DOGZILLA_INITIAL_POSE_Y" ] || [ -z "$DOGZILLA_INITIAL_POSE_YAW" ]; then
   origin_file="$REMOTE_ROOT/output/app-cache/dogzilla-map-origin.json"
@@ -174,8 +192,12 @@ mta = env_f("DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE", 45.0)
 ft = env_f("DOGZILLA_NAV2_FAILURE_TOLERANCE", 5.0)
 msx = env_f("DOGZILLA_NAV2_MIN_SPEED_XY", 0.03)
 tsv = env_f("DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY", 0.05)
+mvy = max(env_f("DOGZILLA_NAV2_MAX_LATERAL_VELOCITY", 0.06), 0.0)
+lay = max(env_f("DOGZILLA_NAV2_LATERAL_ACCELERATION", 0.12), 0.0)
+vys = max(int(env_f("DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES", 5)), 1)
 st = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2")
 sfe = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_ENABLED", "1") == "1"
+mapping_mode = os.environ.get("DOGZILLA_NAV2_MAPPING_MODE", "0") == "1"
 
 def costmap_ros(name):
     return p.setdefault(name, {}).setdefault(name, {}).setdefault("ros__parameters", {})
@@ -207,6 +229,22 @@ for cname in ("local_costmap", "global_costmap"):
                         if str(src_cfg.get("data_type", "")).lower() == "laserscan":
                             src_cfg["inf_is_valid"] = True
 
+if mapping_mode:
+    global_costmap = costmap_ros("global_costmap")
+    plugins = list(global_costmap.get("plugins", []))
+    if "static_layer" not in plugins:
+        plugins.insert(0, "static_layer")
+    global_costmap["plugins"] = plugins
+    static_layer = global_costmap.setdefault("static_layer", {})
+    static_layer.update({
+        "plugin": "nav2_costmap_2d::StaticLayer",
+        "map_topic": "/map_cartographer",
+        "map_subscribe_transient_local": False,
+        "subscribe_to_updates": True,
+        "track_unknown_space": True,
+        "transform_tolerance": 0.5,
+    })
+
 ctrl = p.setdefault("controller_server", {}).setdefault("ros__parameters", {})
 ctrl["controller_frequency"] = cf
 ctrl["failure_tolerance"] = max(ft, 0.0)
@@ -217,6 +255,11 @@ for name in ctrl.get("controller_plugins", []):
         fp2["yaw_goal_tolerance"] = yaw
         fp2["min_speed_xy"] = msx
         fp2["trans_stopped_velocity"] = tsv
+        fp2["min_vel_y"] = -mvy
+        fp2["max_vel_y"] = mvy
+        fp2["acc_lim_y"] = lay
+        fp2["decel_lim_y"] = -lay
+        fp2["vy_samples"] = vys
 
 pc = p.setdefault("controller_server", {}).setdefault("ros__parameters", {}).setdefault("progress_checker", {})
 pc["required_movement_radius"] = rmr
@@ -232,6 +275,14 @@ pln["expected_planner_frequency"] = pf
 
 vs = p.setdefault("velocity_smoother", {}).setdefault("ros__parameters", {})
 vs["smoothing_frequency"] = sf
+for key in ("max_velocity", "min_velocity", "max_accel", "max_decel"):
+    vector = list(vs.get(key) or [0.0, 0.0, 0.0])
+    vector.extend([0.0] * max(0, 3 - len(vector)))
+    vs[key] = vector
+vs["max_velocity"][1] = mvy
+vs["min_velocity"][1] = -mvy
+vs["max_accel"][1] = lay
+vs["max_decel"][1] = -lay
 
 amcl = p.setdefault("amcl", {}).setdefault("ros__parameters", {})
 amcl["use_sim_time"] = False
@@ -257,11 +308,13 @@ with open(tgt, "w", encoding="utf-8") as f:
 print(f"Generated params: robot_radius={rr} inflation_radius={ir} scan_topic={st if sfe else '/scan'}")
 PY
 
-if [ ! -s "$DOGZILLA_NAV2_MAP" ]; then
+if [ "$DOGZILLA_NAV2_MAPPING_MODE" != "1" ] && [ ! -s "$DOGZILLA_NAV2_MAP" ]; then
   echo "Nav2 map yaml missing: $DOGZILLA_NAV2_MAP" >&2
   exit 2
 fi
 
+map_image=""
+if [ "$DOGZILLA_NAV2_MAPPING_MODE" != "1" ]; then
 map_image="$(python3 - "$DOGZILLA_NAV2_MAP" <<'PY'
 import os
 import sys
@@ -277,8 +330,9 @@ if img and not os.path.isabs(img):
 print(img)
 PY
 )"
+fi
 
-if [ -n "$map_image" ] && [ ! -s "$map_image" ]; then
+if [ "$DOGZILLA_NAV2_MAPPING_MODE" != "1" ] && [ -n "$map_image" ] && [ ! -s "$map_image" ]; then
   echo "Nav2 map image missing: $map_image" >&2
   exit 2
 fi
@@ -391,4 +445,5 @@ exec ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
   autostart:=true \
   use_respawn:=true \
   localization_backend:="$DOGZILLA_LOCALIZATION_BACKEND" \
+  mapping_mode:="$DOGZILLA_NAV2_MAPPING_MODE" \
   >> "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1

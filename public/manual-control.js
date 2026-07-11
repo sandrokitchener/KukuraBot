@@ -22,7 +22,6 @@ export function createManualControlController({
   isRealRobotTargetActive,
   formatError,
   setStatus,
-  runtimeFeedbackOutput,
   playBarkCue,
 } = {}) {
   let frameId = null
@@ -32,7 +31,6 @@ export function createManualControlController({
     gamepadIndex: null,
     lastVector: null,
     lastSentAt: 0,
-    lastOutputAt: 0,
     zeroSent: true,
     errorRetryAt: 0,
     forwardRampStartedAt: 0,
@@ -272,13 +270,6 @@ export function createManualControlController({
       const summary = formatManualControlSummary(payload, getRuntimeConfig())
       setManualControlStatus(summary)
       setStatus(summary, payload.dispatch?.status === 'error' ? 'error' : 'idle')
-
-      if (Date.now() - state.lastOutputAt > 1000 || state.zeroSent) {
-        runtimeFeedbackOutput.textContent = JSON.stringify({
-          manualControl: payload,
-        }, null, 2)
-        state.lastOutputAt = Date.now()
-      }
 
       return payload
     } finally {

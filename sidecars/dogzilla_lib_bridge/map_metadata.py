@@ -27,29 +27,59 @@ def read_active_map_metadata(
             "error": f"map_metadata_read_failed:{error}",
         }
 
-    yaml_path = Path(str(info.get("yaml") or default_yaml_path))
-    if not yaml_path.is_absolute():
-        yaml_path = metadata_path.parent / yaml_path
-    if not yaml_path.exists():
+    if not metadata_path.exists():
         return {
             "available": False,
             "metadataFile": str(metadata_path),
-            "yaml": str(yaml_path),
-            "error": "map_yaml_missing",
+            "error": "active_map_manifest_missing",
         }
 
+    artifacts = info.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return {
+            "available": False,
+            "metadataFile": str(metadata_path),
+            "error": "active_map_manifest_artifacts_missing",
+        }
+
+    artifact_paths: dict[str, Path] = {}
+    for key in ("yaml", "pgm"):
+        artifact = artifacts.get(key)
+        if not isinstance(artifact, dict):
+            return {"available": False, "metadataFile": str(metadata_path), "error": f"active_map_artifact_missing:{key}"}
+        value = str(artifact.get("path") or info.get(key) or "").strip()
+        expected_hash = str(artifact.get("sha256") or "").strip()
+        path = Path(value)
+        if not value or len(expected_hash) != 64:
+            return {"available": False, "metadataFile": str(metadata_path), "error": f"active_map_artifact_manifest_invalid:{key}"}
+        if not path.is_absolute():
+            path = metadata_path.parent / path
+        if not path.is_file() or sha256_file(path) != expected_hash:
+            return {"available": False, "metadataFile": str(metadata_path), "error": f"active_map_artifact_hash_mismatch:{key}"}
+        artifact_paths[key] = path
+
+    pbstream = artifacts.get("pbstream")
+    if isinstance(pbstream, dict):
+        value = str(pbstream.get("path") or info.get("pbstream") or "").strip()
+        expected_hash = str(pbstream.get("sha256") or "").strip()
+        if value or expected_hash:
+            path = Path(value)
+            if not value or len(expected_hash) != 64:
+                return {"available": False, "metadataFile": str(metadata_path), "error": "active_map_artifact_manifest_invalid:pbstream"}
+            if not path.is_absolute():
+                path = metadata_path.parent / path
+            if not path.is_file() or sha256_file(path) != expected_hash:
+                return {"available": False, "metadataFile": str(metadata_path), "error": "active_map_artifact_hash_mismatch:pbstream"}
+            artifact_paths["pbstream"] = path
+
+    yaml_path = artifact_paths["yaml"]
     try:
         yaml_info = read_ros_map_yaml(yaml_path)
         resolution = float(yaml_info["resolution"])
         origin = yaml_info["origin"]
-        pgm_path = Path(str(info.get("pgm") or yaml_info["image"]))
-        if not pgm_path.is_absolute():
-            pgm_path = yaml_path.parent / pgm_path
+        pgm_path = artifact_paths["pgm"]
         width_cells, height_cells = read_pgm_size(pgm_path)
-        pbstream_value = str(info.get("pbstream") or "").strip()
-        pbstream_path = Path(pbstream_value) if pbstream_value else None
-        if pbstream_path is not None and not pbstream_path.is_absolute():
-            pbstream_path = metadata_path.parent / pbstream_path
+        pbstream_path = artifact_paths.get("pbstream")
         files = {
             "yaml": file_identity(yaml_path),
             "pgm": file_identity(pgm_path),

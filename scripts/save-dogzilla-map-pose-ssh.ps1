@@ -10,6 +10,7 @@ param(
   [string]$ContainerName = "robodoge-map-pose",
   [int]$RosDomainId = 16,
   [string]$MapPath = "",
+  [switch]$Candidate,
   [switch]$NoSync,
   [switch]$NoHostKeyScan
 )
@@ -50,7 +51,8 @@ Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot
 Write-Output "Saving DOGZILLA Cartographer map in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_map_pose/save-map-pose-in-container.sh"
 $mapEnv = if ($MapPath) { " -e DOGZILLA_MAP_PBSTREAM=$MapPath" } else { "" }
-$remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e ROS_DOMAIN_ID=$RosDomainId$mapEnv $ContainerName bash $containerScript"
+$candidateEnv = if ($Candidate) { " -e DOGZILLA_MAP_SAVE_CANDIDATE=1" } else { "" }
+$remoteCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$candidateEnv $ContainerName bash $containerScript"
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
 if ($LASTEXITCODE -ne 0) {
   throw "DOGZILLA Cartographer map save failed"

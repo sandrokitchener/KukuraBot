@@ -1,78 +1,4 @@
-/* Robo-Doge CSS: operator-status.css - Operator status strip, safe next action, confirmation modal */
-
-.operator-status-strip {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-}
-
-.operator-status-strip[data-state="waiting"] {
-  opacity: 0.7;
-}
-
-.operator-status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.operator-status-field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 80px;
-}
-
-.operator-status-label {
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-faint);
-  font-weight: 600;
-}
-
-.operator-status-value {
-  font-size: 0.75rem;
-  color: var(--ink);
-}
-
-.operator-safe-next-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 4px 8px;
-  min-width: 0;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
-}
-
-.operator-safe-next-label {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ink-faint);
-  font-weight: 600;
-}
-
-.operator-safe-next-action {
-  min-width: 0;
-  font-size: 0.85rem;
-  color: var(--accent);
-  overflow-wrap: anywhere;
-}
-
-.operator-safe-next-blocker {
-  flex: 1 1 100%;
-  min-width: 0;
-  font-size: 0.78rem;
-  color: var(--warning);
-  font-style: italic;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
+/* Robo-Doge CSS chunk 6: emergency stop and confirmation modal */
 
 .persistent-emergency-stop {
  display: inline-flex;
@@ -172,42 +98,12 @@
   background: #c03a32;
 }
 
-@media (max-width: 900px) {
-  .operator-status-row {
-    gap: 10px;
-  }
-
-  .operator-status-field {
-    min-width: 60px;
-  }
-}
-
 @media (max-width: 600px) {
-  .operator-status-strip {
-    padding: 8px 10px;
-    margin-bottom: 8px;
-  }
-
-  .operator-status-row {
-    gap: 8px;
-  }
-
-  .operator-status-field {
-    min-width: 50px;
-  }
-
   .persistent-emergency-stop {
     padding: 8px 12px;
     font-size: 0.82rem;
     margin-bottom: 8px;
   }
-}
-
-html.android-app .operator-status-strip {
-  background: transparent;
-  border-color: var(--line);
-  border-radius: 0;
-  box-shadow: none;
 }
 
 html.android-app .persistent-emergency-stop {
@@ -216,9 +112,7 @@ html.android-app .persistent-emergency-stop {
   box-shadow: none;
 }
 
-html.android-app[data-mobile-view='chat'] .operator-status-strip,
 html.android-app[data-mobile-view='chat'] .persistent-emergency-stop,
-html.android-app[data-mobile-view='audio'] .operator-status-strip,
 html.android-app[data-mobile-view='audio'] .persistent-emergency-stop {
   display: block;
 }

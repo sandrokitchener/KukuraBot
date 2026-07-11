@@ -35,8 +35,6 @@ import {
 } from '../public/robot-map.js'
 import {
   buildNavChainComponents,
-  deriveOperatorLastCommand,
-  deriveSafeNextAction,
   getConnectionActionConfirmation,
   isDangerousConnectionAction,
   summarizeNavChain,
@@ -170,7 +168,6 @@ test('manual control right trigger calls bark callback while enabled', async () 
       isRealRobotTargetActive: () => true,
       formatError: (error) => error.message,
       setStatus: () => {},
-      runtimeFeedbackOutput: { textContent: '' },
       playBarkCue: async () => {
         barkCount += 1
       },
@@ -722,70 +719,6 @@ test('formatWaypointReadinessSummary distinguishes ready and blocked map waypoin
   }), 'Waypoints not ready: map origin not ready: missing; 12 invalid map waypoint(s) in source of truth.')
 })
 
-test('deriveOperatorLastCommand renders last command and result from dispatch payload', () => {
-  assert.equal(
-    deriveOperatorLastCommand({}, { command: 'go to the living room', result: 'sent' }),
-    'go to the living room → sent',
-  )
-  assert.equal(
-    deriveOperatorLastCommand({}, { command: 'sit-test', result: 'error' }),
-    'sit-test → error',
-  )
-  assert.equal(
-    deriveOperatorLastCommand({}, { command: 'emergency-stop', result: null }),
-    'emergency-stop',
-  )
-})
-
-test('deriveOperatorLastCommand falls back to navigation target only when no dispatch recorded', () => {
-  assert.equal(
-    deriveOperatorLastCommand({ navigationStatus: { targetWaypoint: 'kitchen' } }, null),
-    'kitchen',
-  )
-  assert.equal(deriveOperatorLastCommand({}, null), '-')
-})
-
-test('deriveOperatorLastCommand prefers real dispatch over navigationStatus.targetWaypoint', () => {
-  assert.equal(
-    deriveOperatorLastCommand(
-      { navigationStatus: { targetWaypoint: 'kitchen' } },
-      { command: 'go to garage', result: 'sent' },
-    ),
-    'go to garage → sent',
-  )
-})
-
-test('deriveSafeNextAction surfaces disabled/safe-next blocker for nav2 blocked state', () => {
-  const blocked = deriveSafeNextAction({
-    activeRobot: { uuid: 'dogzilla' },
-    nav2Stability: { state: 'blocked', currentBlocker: 'Nav2 NavigateToPose action server is not running' },
-  })
-  assert.equal(blocked.action, 'Restart Nav')
-  assert.match(blocked.blocker, /NavigateToPose action server/)
-
-  const disconnected = deriveSafeNextAction({
-    activeRobot: { uuid: 'dogzilla' },
-    nav2Stability: { state: 'disconnected', currentBlocker: 'No runtime data from bridge' },
-  })
-  assert.equal(disconnected.action, 'Restart Nav')
-  assert.match(disconnected.blocker, /No runtime data from bridge/)
-
-  const poseBlocked = deriveSafeNextAction({
-    activeRobot: { uuid: 'dogzilla' },
-    poseState: { status: 'error', error: 'Pose not waypoint-safe' },
-  })
-  assert.equal(poseBlocked.action, 'Localize on Map')
-  assert.match(poseBlocked.blocker, /Pose not waypoint-safe/)
-
-  const ready = deriveSafeNextAction({
-    activeRobot: { uuid: 'dogzilla' },
-    nav2Stability: { state: 'ready' },
-    navigationStatus: { status: 'ready' },
-  })
-  assert.equal(ready.action, 'Send movement command')
-  assert.equal(ready.blocker, null)
-})
-
 test('buildNavChainComponents renders full chain as unknown when readiness payload is missing', () => {
   const components = buildNavChainComponents(null)
   assert.equal(components.length, 6)
@@ -829,6 +762,10 @@ test('dangerous maintenance actions require confirmation with consequence text',
   assert.ok(isDangerousConnectionAction('capture-map-origin'))
   assert.ok(isDangerousConnectionAction('start-map-pose-mapping'))
   assert.ok(isDangerousConnectionAction('save-map-pose'))
+  assert.ok(isDangerousConnectionAction('start-autonomous-mapping'))
+  assert.ok(isDangerousConnectionAction('continue-autonomous-mapping'))
+  assert.ok(isDangerousConnectionAction('finish-autonomous-mapping'))
+  assert.ok(isDangerousConnectionAction('promote-map-candidate'))
 
   assert.equal(isDangerousConnectionAction('probe-bridges'), false)
   assert.equal(isDangerousConnectionAction('start-direct'), false)

@@ -187,3 +187,11 @@ rtk grep "pattern" docs
 ```
 
 Use raw shell only when RTK has no matching wrapper, exact output matters, or RTK is unavailable.
+
+## SLAM App Map Promotion
+
+Testing bridge only. Eventually Questing Beast app SLAM scanner mode should promote its map directly.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/promote-latest-slam-map.ps1
+```

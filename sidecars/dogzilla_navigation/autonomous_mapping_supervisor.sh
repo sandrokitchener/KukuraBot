@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -u
+
+REMOTE_ROOT="${REMOTE_ROOT:-/home/pi/robodoge}"
+ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
+ROS_CONTAINER="${ROS_CONTAINER:-robodoge-rosbridge}"
+STATUS_FILE="$REMOTE_ROOT/maps/autonomous-mapping-status.json"
+STOP_FILE="$REMOTE_ROOT/maps/autonomous-mapping.stop"
+FINISH_FILE="$REMOTE_ROOT/maps/autonomous-mapping.finish"
+RESULT_FILE="$REMOTE_ROOT/maps/autonomous-mapping-result.json"
+READY_FILE="$REMOTE_ROOT/maps/autonomous-mapping.ready"
+ACTIVE_FILE="$REMOTE_ROOT/maps/autonomous-mapping.active"
+EXPLORER="$REMOTE_ROOT/sidecars/dogzilla_navigation/frontier_explorer.py"
+
+write_result() {
+  python3 - "$1" "${2:-}" "${3:-}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path("/home/pi/robodoge/maps/autonomous-mapping-result.json")
+if len(sys.argv) > 1 and sys.argv[1]:
+    path = Path(sys.argv[1])
+payload = {
+    "state": sys.argv[2] if len(sys.argv) > 2 else "failed",
+    "detail": sys.argv[3] if len(sys.argv) > 3 else "",
+}
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+PY
+}
+
+stop_mapping_nav2() {
+  docker exec "$ROS_CONTAINER" bash -lc \
+    'for pid in $(pgrep -f "/opt/ros/humble/lib/nav2_|[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null); do [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ] || kill -TERM "$pid" 2>/dev/null || true; done' \
+    >/dev/null 2>&1 || true
+}
+
+restore_localization() {
+  stop_mapping_nav2
+  docker rm -f robodoge-map-pose >/dev/null 2>&1 || true
+  systemctl restart robodoge-map-pose.service >/dev/null 2>&1 || return 1
+  systemctl restart robodoge-navigation.service >/dev/null 2>&1 || return 1
+  return 0
+}
+
+save_candidate() {
+  docker exec \
+    -e REMOTE_ROOT="$REMOTE_ROOT" \
+    -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
+    -e DOGZILLA_MAP_SAVE_CANDIDATE=1 \
+    robodoge-map-pose bash "$REMOTE_ROOT/sidecars/dogzilla_map_pose/save-map-pose-in-container.sh" \
+    >/dev/null 2>&1
+}
+
+active_map_has_verified_pbstream() {
+  python3 - "$REMOTE_ROOT/maps/robodoge_home_map.json" <<'PY' >/dev/null 2>&1
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+metadata_path = Path(sys.argv[1])
+metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+artifact = (metadata.get("artifacts") or {}).get("pbstream") or {}
+value = str(artifact.get("path") or metadata.get("pbstream") or "").strip()
+expected = str(artifact.get("sha256") or "").strip()
+path = Path(value)
+if not path.is_absolute():
+    path = metadata_path.parent / path
+raise SystemExit(0 if value and len(expected) == 64 and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == expected else 1)
+PY
+}
+
+on_signal() {
+  touch "$STOP_FILE"
+  docker exec "$ROS_CONTAINER" bash -lc 'pkill -TERM -f "[f]rontier_explorer.py" 2>/dev/null || true' >/dev/null 2>&1 || true
+  if restore_localization; then
+    write_result "$RESULT_FILE" restored "mapping_supervisor_interrupted"
+  else
+    stop_mapping_nav2
+    write_result "$RESULT_FILE" failed "mapping_supervisor_interrupted_restore_failed"
+  fi
+  exit 143
+}
+
+trap on_signal TERM INT
+trap 'rm -f "$ACTIVE_FILE"' EXIT
+
+rm -f "$STOP_FILE" "$FINISH_FILE" "$RESULT_FILE"
+mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
+printf '%s\n' "$$" > "$ACTIVE_FILE"
+
+for _ in $(seq 1 180); do
+  [ -f "$STOP_FILE" ] && exit 0
+  [ -f "$READY_FILE" ] && break
+  sleep 1
+done
+if [ ! -f "$READY_FILE" ]; then
+  write_result "$RESULT_FILE" failed "mapping_start_not_ready"
+  exit 1
+fi
+
+set +e
+docker exec \
+  -e REMOTE_ROOT="$REMOTE_ROOT" \
+  -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
+  "$ROS_CONTAINER" bash -lc \
+  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 8 --scan-timeout 3 --pose-timeout 20 --max-goals 80 --max-failures 3 --complete-after-no-frontier 30" \
+  >"$REMOTE_ROOT/logs/frontier-explorer.log" 2>&1
+explorer_exit=$?
+set -e
+
+finish_requested=false
+[ -f "$FINISH_FILE" ] && finish_requested=true
+explorer_state=""
+if [ -s "$STATUS_FILE" ]; then
+  explorer_state="$(python3 - "$STATUS_FILE" <<'PY'
+import json
+import sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("state", ""))
+except Exception:
+    print("")
+PY
+)"
+fi
+
+candidate_saved=false
+if [ "$finish_requested" = true ] || [ "$explorer_exit" -eq 0 ]; then
+  if save_candidate; then
+    candidate_saved=true
+  fi
+fi
+
+if [ "$candidate_saved" = true ] && ! active_map_has_verified_pbstream; then
+  stop_mapping_nav2
+  docker rm -f robodoge-map-pose >/dev/null 2>&1 || true
+  write_result "$RESULT_FILE" candidate-ready "active_map_has_no_verified_pbstream; promote_candidate_to_resume_navigation explorer=$explorer_state exit=$explorer_exit"
+elif restore_localization; then
+  write_result "$RESULT_FILE" restored "explorer=$explorer_state exit=$explorer_exit candidate=$candidate_saved"
+else
+  stop_mapping_nav2
+  write_result "$RESULT_FILE" failed "localization_restore_failed explorer=$explorer_state exit=$explorer_exit candidate=$candidate_saved"
+  exit 1
+fi

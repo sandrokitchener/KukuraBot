@@ -76,6 +76,8 @@ class VisionState:
     labels: list[str] = field(default_factory=list)
     capture_restarts: int = 0
     last_person_bark_at: float = 0.0
+    active_streams: int = 0
+    last_demand_at: float = 0.0
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -163,6 +165,16 @@ class VisionWorker(threading.Thread):
                         self.state.latest_frame_at = time.time()
                         self.state.latest_error = ""
                         self.state.frames += 1
+                        idle = (
+                            not self.args.detection_enabled
+                            and self.state.active_streams == 0
+                            and self.state.last_demand_at > 0
+                            and time.monotonic() - self.state.last_demand_at >= self.args.capture_idle_timeout
+                        )
+
+                    if idle:
+                        self.stop_event.set()
+                        return
 
                     time.sleep(max(0.0, 1.0 / max(1.0, self.args.max_fps)))
             except Exception as error:
@@ -247,6 +259,9 @@ class VisionHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, health_payload(self.server.state, self.server.args))
             return
         if parsed.path == "/detections":
+            if self.server.args.detection_enabled:
+                mark_demand(self.server.state)
+                ensure_worker(self.server.state, self.server.args)
             self.send_json(HTTPStatus.OK, detections_payload(self.server.state))
             return
         if parsed.path == "/stream.mjpg":
@@ -256,37 +271,38 @@ class VisionHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def stream_mjpeg(self) -> None:
+        mark_stream_started(self.server.state)
         ensure_worker(self.server.state, self.server.args)
-        deadline = time.time() + self.server.args.first_frame_timeout
-        while time.time() < deadline:
-            with self.server.state.lock:
-                frame = self.server.state.latest_jpeg
-                error = self.server.state.latest_error
-            if frame:
-                break
-            if error:
-                time.sleep(0.2)
+        try:
+            deadline = time.time() + self.server.args.first_frame_timeout
+            while time.time() < deadline:
+                with self.server.state.lock:
+                    frame = self.server.state.latest_jpeg
+                    error = self.server.state.latest_error
+                if frame:
+                    break
+                if error:
+                    time.sleep(0.2)
+                else:
+                    time.sleep(0.05)
             else:
-                time.sleep(0.05)
-        else:
-            with self.server.state.lock:
-                error = self.server.state.latest_error or "No annotated frame available."
-            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": error})
-            return
+                with self.server.state.lock:
+                    error = self.server.state.latest_error or "No annotated frame available."
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": error})
+                return
 
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={BOUNDARY}")
-        self.send_header("Cache-Control", "no-store, no-transform")
-        self.send_header("Connection", "keep-alive")
-        self.end_headers()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={BOUNDARY}")
+            self.send_header("Cache-Control", "no-store, no-transform")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
 
-        last_sent_at = 0.0
-        while True:
-            with self.server.state.lock:
-                frame = self.server.state.latest_jpeg
-                frame_at = self.server.state.latest_frame_at
-            if frame and frame_at != last_sent_at:
-                try:
+            last_sent_at = 0.0
+            while True:
+                with self.server.state.lock:
+                    frame = self.server.state.latest_jpeg
+                    frame_at = self.server.state.latest_frame_at
+                if frame and frame_at != last_sent_at:
                     self.wfile.write(f"--{BOUNDARY}\r\n".encode("ascii"))
                     self.wfile.write(b"Content-Type: image/jpeg\r\n")
                     self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode("ascii"))
@@ -294,9 +310,11 @@ class VisionHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b"\r\n")
                     self.wfile.flush()
                     last_sent_at = frame_at
-                except (BrokenPipeError, ConnectionResetError):
-                    return
-            time.sleep(max(0.01, 1.0 / max(1.0, self.server.args.stream_fps)))
+                time.sleep(max(0.01, 1.0 / max(1.0, self.server.args.stream_fps)))
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        finally:
+            mark_stream_stopped(self.server.state)
 
     def send_json(self, status: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -311,6 +329,7 @@ class VisionHandler(BaseHTTPRequestHandler):
 
 
 def ensure_worker(state: VisionState, args: argparse.Namespace) -> None:
+    mark_demand(state)
     with state.lock:
         worker = state.worker
         if worker and worker.is_alive():
@@ -320,16 +339,33 @@ def ensure_worker(state: VisionState, args: argparse.Namespace) -> None:
         worker.start()
 
 
-def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, Any]:
-    ensure_worker(state, args)
+def mark_demand(state: VisionState) -> None:
     with state.lock:
+        state.last_demand_at = time.monotonic()
+
+
+def mark_stream_started(state: VisionState) -> None:
+    with state.lock:
+        state.active_streams += 1
+        state.last_demand_at = time.monotonic()
+
+
+def mark_stream_stopped(state: VisionState) -> None:
+    with state.lock:
+        state.active_streams = max(0, state.active_streams - 1)
+        state.last_demand_at = time.monotonic()
+
+
+def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, Any]:
+    with state.lock:
+        worker_active = bool(state.worker and state.worker.is_alive())
         age = time.time() - state.latest_frame_at if state.latest_frame_at else None
         stale = age is None or age > args.stale_health_seconds
         error = state.latest_error
-        if stale and state.latest_jpeg is not None and not error:
+        if worker_active and stale and state.latest_jpeg is not None and not error:
             error = f"Camera frame is stale; latest age {age:.2f}s."
         return {
-            "ok": state.latest_jpeg is not None and not error and not stale,
+            "ok": camera_source_exists(args.camera_url) and (not worker_active or (state.latest_jpeg is not None and not error and not stale)),
             "detectionEnabled": args.detection_enabled,
             "modelLoaded": state.model_loaded,
             "model": args.model,
@@ -345,6 +381,8 @@ def health_payload(state: VisionState, args: argparse.Namespace) -> dict[str, An
             "staleHealthSeconds": args.stale_health_seconds,
             "inferenceMs": state.inference_ms,
             "captureRestarts": state.capture_restarts,
+            "captureState": "active" if worker_active else "idle",
+            "activeStreams": state.active_streams,
             "error": error,
             "streamUrl": "/stream.mjpg",
             "detectionsUrl": "/detections",
@@ -744,6 +782,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stale-health-seconds", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_STALE_HEALTH_SECONDS", str(DEFAULT_STALE_HEALTH_SECONDS))))
     parser.add_argument("--jpeg-quality", type=int, default=int(os.getenv("DOGZILLA_YOLO_JPEG_QUALITY", "65")))
     parser.add_argument("--restart-delay", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_RESTART_DELAY", "2")))
+    parser.add_argument("--capture-idle-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_CAPTURE_IDLE_TIMEOUT", "15")))
     parser.add_argument("--first-frame-timeout", type=positive_float, default=float(os.getenv("DOGZILLA_YOLO_FIRST_FRAME_TIMEOUT", "15")))
     parser.add_argument("--audio-cue-url", default=os.getenv("DOGZILLA_YOLO_AUDIO_CUE_URL", "http://localhost:8895/cue"))
     return parser

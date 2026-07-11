@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import sys
 import tempfile
@@ -73,6 +74,10 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             "pgm": str(pgm_path),
             "savedAt": "2026-06-08T00:00:00Z",
             "resolution": 0.05,
+            "artifacts": {
+                "yaml": {"path": str(yaml_path), "sha256": hashlib.sha256(yaml_path.read_bytes()).hexdigest()},
+                "pgm": {"path": str(pgm_path), "sha256": hashlib.sha256(pgm_path.read_bytes()).hexdigest()},
+            },
         }), encoding="utf-8")
 
         old_metadata = dogzilla_lib_bridge.DEFAULT_MAP_METADATA_FILE
@@ -1110,6 +1115,25 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertIn("invalid_nav_mode", result["error"])
         self.assertEqual(dogzilla_lib_bridge.get_nav_mode(), "navigate")
 
+    def test_set_nav_mode_same_mode_cancels_pending_auto_demote(self):
+        class PendingTimer:
+            cancelled = False
+
+            def cancel(self):
+                self.cancelled = True
+
+        timer = PendingTimer()
+        old_timer = dogzilla_lib_bridge._NAV_MODE_AUTO_DEMOTE_TIMER
+        dogzilla_lib_bridge._NAV_MODE_AUTO_DEMOTE_TIMER = timer
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_NAV_MODE_AUTO_DEMOTE_TIMER", old_timer))
+
+        result = dogzilla_lib_bridge.set_nav_mode("navigate")
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["changed"])
+        self.assertTrue(timer.cancelled)
+        self.assertIsNone(dogzilla_lib_bridge._NAV_MODE_AUTO_DEMOTE_TIMER)
+
     def test_set_nav_mode_records_transition_history(self):
         previous = dogzilla_lib_bridge.get_nav_mode()
         result = dogzilla_lib_bridge.set_nav_mode("sleep")
@@ -1127,7 +1151,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["piOwnedNav2"])
-        self.assertIn("did not start or restart navigation", result["note"])
+        self.assertIn("Pi-owned", result["note"])
 
     def test_nav_modes_do_not_start_or_restart_pi_services(self):
         for mode_func in (
@@ -1152,10 +1176,60 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
         self.assertEqual(calls, ["idle"])
 
+    def test_goto_promotes_localize_mode_to_navigate(self):
+        dogzilla_lib_bridge._NAV_MODE = "localize"
+        transitions = []
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = "serial lib unavailable"
+        runtime.dry_run = False
+        runtime.nav2_client = FakeNav2Client()
+
+        old_set_nav_mode = dogzilla_lib_bridge.set_nav_mode
+        old_wait = dogzilla_lib_bridge.DogzillaRuntime._wait_for_nav2_readiness
+        dogzilla_lib_bridge.set_nav_mode = lambda mode: transitions.append(mode) or {
+            "ok": True,
+            "mode": mode,
+            "changed": True,
+        }
+        dogzilla_lib_bridge.DogzillaRuntime._wait_for_nav2_readiness = lambda self, timeout, poll: {
+            "ok": True,
+            "snapshot": {},
+        }
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "set_nav_mode", old_set_nav_mode))
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge.DogzillaRuntime, "_wait_for_nav2_readiness", old_wait))
+
+        result = runtime.execute({
+            "kind": "locomotion.goto",
+            "params": {"frame": "odom", "x": 0.4, "y": 0.0, "yaw": 0.0, "waypoint": "local_test"},
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertEqual(transitions, ["navigate"])
+        self.assertEqual(result["modeTransition"], {"from": "localize", "to": "navigate", "started": True})
+
     def test_healthz_lite_includes_compact_feedback(self):
         # Ensure the expected compact-feedback keys are present in the handler.
         handler = dogzilla_lib_bridge.Handler
         self.assertTrue(callable(handler.do_GET))
+
+    def test_autonomous_mapping_status_uses_active_marker_and_candidate_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            maps_dir = Path(temp_dir)
+            (maps_dir / "autonomous-mapping.active").write_text("123\n", encoding="utf-8")
+            (maps_dir / "autonomous-mapping-status.json").write_text(
+                json.dumps({"state": "navigating", "startedAt": 10, "updatedAt": 20}),
+                encoding="utf-8",
+            )
+            (maps_dir / "autonomous-mapping-result.json").write_text(
+                json.dumps({"state": "candidate-ready", "detail": "saved"}),
+                encoding="utf-8",
+            )
+
+            status = dogzilla_lib_bridge.get_autonomous_mapping_status(maps_dir)
+
+            self.assertTrue(status["active"])
+            self.assertTrue(status["candidateAvailable"])
+            self.assertEqual(status["state"], "navigating")
 
     def test_background_goto_updates_existing_record_and_detects_no_motion(self):
         import io

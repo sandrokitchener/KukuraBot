@@ -6,12 +6,16 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 
 - Live DOGZILLA battery, Pi process state, deployed service versions, and current Nav2 health are Unknown / not confirmed unless probed in the active turn.
 - End-to-end live arrival quality for the latest waypoint/Nav2 tuning is Unknown / not confirmed from docs alone.
+- Live Pi check found no registered active cooling device, thermal throttling, and repeated bogus `w1` family-0 scans. 1-wire sensor ownership remains unknown; inspect hardware before changing `dtoverlay=w1-gpio`.
 
 ## DOGZILLA Navigation
 
 - **Docker goal-split (live verified).** Docker status checks and Docker goal sending used to diverge, so the bridge could report `waypointReady=true` but fail goal sending. `can_send_goal()` now gates `waypointReady`; `/healthz-lite` exposes `canSendGoal`/`nav2Backend`. Keep Docker send-goal enabled unless a live replacement path is verified.
 - **Nav2 action discovery can be a false startup blocker.** The direct bridge reports `navigation.actionServerDiscovered` separately from `navigation.waypointReady`. If lifecycle nodes are active and `/odom` plus `/scan_nav2` are live, bridge readiness may be waypoint-ready even when Pi DDS action discovery briefly misses `/navigate_to_pose`. `send_goal` still waits for the real action server before accepting a command. See `docs/NAVIGATION.md`.
+- **Map-generation coherence is a current blocker.** Do not treat `waypointReady=true` as map-safe. Active manifests require hashed YAML/PGM; PBSTREAM is optional only for occupancy-only scanner maps. Such maps cannot use Continue Current Map or Cartographer localization; use Map This Floor to start fresh. Any orderly explorer exit saves a candidate, and an occupancy-only active map leaves that candidate in `candidate-ready` instead of restoring a mismatched PBSTREAM. Promote the candidate before normal navigation.
+- **Resolved mapping standby race:** A pending five-minute idle timer could pause a newly launched mapping Nav2 lifecycle manager, leaving action discovery but zero costmap subscribers. Mapping startup now posts `navigate`, and same-mode `navigate` cancels the pending demotion. Do not remove either half of that contract.
 - **Resolved startup blocker: `/odom` and `/scan_nav2` did not stay ready long enough for waypoint commands.** `/odom` uses `odom->base_link` when available, otherwise synthetic relative odom anchored at first `map->base_link`.
+- **Do not switch normal navigation to AMCL without live proof.** Live AMCL-only test left Nav2 without a `map` frame (`map->odom` missing) while scan messages were dropped by TF filters. Normal Pi boot keeps Cartographer as the single localization source for Nav2.
 - **Pi-owned Nav2 needs deployed map origin.** `robodoge-map-pose.service` seeds localization from `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` when present, then `robodoge-navigation.service` launches Nav2. App startup, health polling, and waypoint dispatch must report blockers only; they must not call `/mode navigate`, start map-pose/Nav2, reinstall Nav2, or recreate containers.
 - **No app-side Nav2 repair loop:** Nav2/map-pose lifetime belongs to Pi boot/systemd. App startup, server health polling, waypoint dispatch, and Pi boot scripts must not auto-run `start-map-pose`, `start-navigation`, reinstall Nav2/Cartographer packages, recreate containers, or tear containers down on timeout. Missing packages are image/setup failures, not runtime repair work. Use manual repair controls only when an operator asks.
 - **TF chain blocker:** If no physical `odom->base_link/base_footprint` TF exists, startup may use repo synthetic `/odom` anchored from `map->base_link`. This is a DOGZILLA compatibility shim, not wheel odometry. If physical odom is restored later, prefer real odom and retest Nav2 motion.
@@ -24,8 +28,8 @@ Keep this brief. Add only repeated failures, stable setup traps, or current bloc
 
 - `config/robot-waypoints.json` is authoritative. Do not let validators or heuristics silently rewrite, disable, or downgrade trusted entries.
 - Notes are human comments only. Navigation validation should use structured fields.
-- Current verified `app_map` entries include `living_room`, `kitchen`, `garage`, and `charger` in `robodoge_home`; other map entries remain unverified in the current file.
-- If saved origin is missing, the app can fall back using current map pose directly. Waypoints remain authoritative, but recapture if physical alignment drifts.
+- Current verified `app_map` entries include `living_room`, `kitchen`, `garage`, `master_bedroom`, `charger`, and `kit`; other map entries remain unverified in the current file.
+- If saved origin is missing, the app can fall back using current map pose directly. That fallback is not valid across a map-generation change; block and recapture mismatched waypoints rather than treating them as aligned.
 - For waypoint capture, drive the robot to the spot. Carrying it can make Cartographer laser-only localization lose track while `waypointSafe` still reports true.
 
 ## Startup / Runtime

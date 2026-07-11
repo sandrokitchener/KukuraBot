@@ -56,7 +56,7 @@
 }
 
 .map-workflow-panel {
-  order: 2;
+  order: 3;
   min-width: 0;
   max-width: 100%;
 }
@@ -165,21 +165,28 @@
 }
 
 .map-workflow-panel {
-  border: 1px solid rgba(63, 53, 43, 0.14);
-  border-radius: 6px;
+  border: 1px solid rgba(63, 53, 43, 0.12);
+  border-radius: 10px;
   background: rgba(255, 250, 244, 0.72);
+  overflow: hidden;
 }
 
 .map-workflow-panel[open] .map-workflow-head {
-  border-bottom: 1px solid rgba(63, 53, 43, 0.1);
+  border-radius: 6px;
 }
 
 .map-workflow-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
-  padding: 7px 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(255, 123, 86, 0.1);
+  color: var(--ink);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -191,7 +198,7 @@
 
 .map-workflow-head::after {
   content: '▸';
-  color: var(--ink-soft);
+  color: var(--accent);
   font-size: 0.85rem;
   transition: transform 0.15s ease;
 }
@@ -207,14 +214,11 @@
 }
 
 .map-workflow-status {
-  min-width: 0;
   color: var(--ink-soft);
   font-size: 0.72rem;
-  font-weight: 700;
-  overflow: hidden;
+  line-height: 1.3;
+  margin-left: auto;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .map-workflow-status[data-state='success'] {
@@ -231,18 +235,15 @@
   padding: 8px 10px;
 }
 
-.map-workflow-panel[open] .map-workflow-steps {
-  max-height: min(32vh, 260px);
-  overflow-y: auto;
-}
-
 .map-workflow-step {
   display: grid;
   grid-template-columns: 20px minmax(96px, 0.35fr) minmax(0, 1fr);
   align-items: center;
   gap: 6px 8px;
   min-height: 34px;
-  padding: 6px 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.56);
 }
 
 .map-step-number {
@@ -297,6 +298,18 @@
 .map-workflow-button:focus-visible {
   border-color: rgba(255, 123, 86, 0.72);
   background: #fff0e5;
+}
+
+.map-workflow-button-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fffaf4;
+}
+
+.map-workflow-button-primary:hover:not(:disabled),
+.map-workflow-button-primary:focus-visible {
+  border-color: #df6543;
+  background: #df6543;
 }
 
 .map-slam-button {
@@ -961,59 +974,6 @@
   min-height: 22px;
   color: rgba(255, 255, 255, 0.45);
   font-size: 0.86rem;
-}
-
-.robot-nav-badge {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  z-index: 6;
-  display: none;
-  max-width: calc(100% - 12px);
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(22, 22, 24, 0.82);
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.2;
-  pointer-events: none;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.robot-nav-badge:not(:empty) {
-  display: inline-block;
-}
-
-.robot-nav-badge[data-severity='green'] {
-  background: rgba(40, 120, 60, 0.88);
-  color: rgba(240, 255, 240, 0.95);
-}
-
-.robot-nav-badge[data-severity='yellow'] {
-  background: rgba(180, 140, 30, 0.9);
-  color: rgba(255, 250, 230, 0.95);
-}
-
-.robot-nav-badge[data-severity='orange'] {
-  background: rgba(200, 100, 20, 0.92);
-  color: rgba(255, 245, 230, 0.95);
-}
-
-.robot-nav-badge[data-severity='red'] {
-  background: rgba(170, 40, 40, 0.92);
-  color: rgba(255, 235, 230, 0.95);
-}
-
-.robot-nav-badge[data-severity='blue'] {
-  background: rgba(40, 80, 160, 0.9);
-  color: rgba(230, 240, 255, 0.95);
-}
-
-.robot-nav-badge[data-severity='gray'] {
-  background: rgba(70, 70, 75, 0.88);
-  color: rgba(225, 225, 230, 0.85);
 }
 
 .robot-state-panel[data-state='stale'] .robot-state-chip {

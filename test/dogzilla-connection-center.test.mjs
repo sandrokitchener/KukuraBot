@@ -5,6 +5,7 @@ import {
   buildDogzillaActionPlan,
   ensureDogzillaRobotIdentity,
   normalizeDogzillaConnectionConfig,
+  runDogzillaConnectionAction,
   saveDogzillaRobotName,
 } from '../lib/dogzilla-connection-center.mjs'
 
@@ -294,6 +295,50 @@ test('buildDogzillaActionPlan exposes explicit map mapping and save actions', ()
   assert.ok(mappingPlan.args.includes('-ForceRestart'))
   assert.equal(savePlan.action, 'save-map-pose')
   assert.ok(savePlan.args.some((arg) => arg.endsWith('save-dogzilla-map-pose-ssh.ps1')))
+})
+
+test('buildDogzillaActionPlan keeps autonomous mapping and candidate promotion explicit', () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: { host: '192.168.8.88', user: 'pi', alias: 'dogzilla' },
+    remoteRoot: '/home/pi/robodoge',
+    lidar: { enabled: true, rosbridgePort: 9090 },
+  })
+  const startPlan = buildDogzillaActionPlan('start-autonomous-mapping', config)
+  const continuePlan = buildDogzillaActionPlan('continue-autonomous-mapping', config)
+  const finishPlan = buildDogzillaActionPlan('finish-autonomous-mapping', config)
+  const promotePlan = buildDogzillaActionPlan('promote-map-candidate', config)
+
+  assert.ok(startPlan.args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
+  assert.ok(continuePlan.args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
+  assert.ok(continuePlan.args.includes('-ContinueCurrentMap'))
+  assert.ok(finishPlan.args.some((arg) => arg.endsWith('finish-dogzilla-autonomous-mapping-ssh.ps1')))
+  assert.ok(promotePlan.args.some((arg) => arg.endsWith('promote-dogzilla-map-candidate-ssh.ps1')))
+  assert.equal(startPlan.timeoutMs, 240_000)
+  assert.equal(finishPlan.timeoutMs, 240_000)
+})
+
+test('connection actions do not gate the requested script on a second identity SSH command', async () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: { host: '192.168.8.88', user: 'pi', alias: 'dogzilla' },
+    remoteRoot: '/home/pi/robodoge',
+    lidar: { enabled: true, rosbridgePort: 9090 },
+  })
+  const calls = []
+
+  const result = await runDogzillaConnectionAction('start-autonomous-mapping', {
+    config,
+    noSync: true,
+    obstacleAvoidance: {},
+    execFilePromiseImpl: async (command, args) => {
+      calls.push({ command, args })
+      return { exitCode: 0, stdout: 'started', stderr: '' }
+    },
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
+  assert.ok(!calls[0].args.some((arg) => arg.endsWith('dogzilla-ssh.ps1')))
 })
 
 test('buildDogzillaActionPlan stops the vendor DOGZILLA app before direct control', () => {

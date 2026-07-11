@@ -649,20 +649,6 @@ export function createRobotMapRenderer({
     updateMeta()
   }
 
-  let navStatusBadge = ''
-
-  function setNavStatusBadge(text, severity) {
-    navStatusBadge = String(text || '').trim()
-    if (elements?.navStatusBadge) {
-      elements.navStatusBadge.textContent = navStatusBadge
-      if (navStatusBadge) {
-        elements.navStatusBadge.dataset.severity = severity || elements.navStatusBadge.dataset.severity || 'yellow'
-      } else {
-        delete elements.navStatusBadge.dataset.severity
-      }
-    }
-  }
-
   function updateMeta() {
     const staleInfo = staleWaypointCount > 0
       ? `${staleWaypointCount} stale waypoint(s) hidden`
@@ -1041,9 +1027,7 @@ export function createRobotMapRenderer({
     setLidarSummary,
     setMapData,
     setMeta,
-    setNavStatusBadge: (text) => { navStatusBadge = text || '' },
     setPoseReadout,
-    setNavStatusBadge,
     setWaypointReadiness,
     setZoom,
     streamPath: () => getRuntimeConfig?.().robotRuntime?.stateStreamPath || defaultRobotRuntime?.stateStreamPath,

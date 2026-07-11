@@ -17,6 +17,11 @@ spec.loader.exec_module(tf_odom_publisher)
 
 
 class TfOdomPublisherMathTests(unittest.TestCase):
+    def test_lookup_loop_catches_runtime_tf_exceptions(self):
+        source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("except Exception as error:", source)
+
     def test_yaw_from_quaternion_reads_planar_rotation(self):
         yaw = math.radians(90)
 

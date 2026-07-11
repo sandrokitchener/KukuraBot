@@ -6,6 +6,7 @@ ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-$REMOTE_ROOT/maps/robodoge_home.pbstream}"
 DOGZILLA_MAP_RESOLUTION="${DOGZILLA_MAP_RESOLUTION:-0.05}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
+DOGZILLA_MAP_SAVE_CANDIDATE="${DOGZILLA_MAP_SAVE_CANDIDATE:-0}"
 export ROS_DOMAIN_ID
 
 mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
@@ -40,7 +41,15 @@ if [ "$current_mode" = "localization" ] && [ "${DOGZILLA_MAP_SAVE_ALLOW_LOCALIZA
 fi
 
 map_id="${DOGZILLA_MAP_ID:-robodoge_home_$(date -u +%Y%m%dT%H%M%SZ)}"
-map_stem="$REMOTE_ROOT/maps/$map_id"
+if [ "$DOGZILLA_MAP_SAVE_CANDIDATE" = "1" ]; then
+  map_id="${DOGZILLA_MAP_ID:-candidate_$(date -u +%Y%m%dT%H%M%SZ)}"
+  candidate_dir="$REMOTE_ROOT/maps/candidates/$map_id"
+  mkdir -p "$candidate_dir"
+  map_stem="$candidate_dir/map"
+  candidate_metadata="$candidate_dir/candidate.json"
+else
+  map_stem="$REMOTE_ROOT/maps/$map_id"
+fi
 target_pbstream="$map_stem.pbstream"
 tmp_pbstream="$target_pbstream.tmp"
 rm -f "$tmp_pbstream"
@@ -83,6 +92,34 @@ if [ "$conversion_status" != "ok" ] || [ ! -s "$map_stem.yaml" ] || [ ! -s "$map
   exit 2
 fi
 
+if [ "$DOGZILLA_MAP_SAVE_CANDIDATE" = "1" ]; then
+  pbstream_sha256="$(sha256sum "$target_pbstream" | awk '{print $1}')"
+  yaml_sha256="$(sha256sum "$map_stem.yaml" | awk '{print $1}')"
+  pgm_sha256="$(sha256sum "$map_stem.pgm" | awk '{print $1}')"
+  cat > "$candidate_metadata" <<JSON
+{
+  "schemaVersion": 1,
+  "id": "$map_id",
+  "backend": "cartographer",
+  "pbstream": "$target_pbstream",
+  "yaml": "$map_stem.yaml",
+  "pgm": "$map_stem.pgm",
+  "artifacts": {
+    "pbstream": { "path": "$target_pbstream", "sha256": "$pbstream_sha256" },
+    "yaml": { "path": "$map_stem.yaml", "sha256": "$yaml_sha256" },
+    "pgm": { "path": "$map_stem.pgm", "sha256": "$pgm_sha256" }
+  },
+  "savedAt": "$(date -Iseconds)",
+  "resolution": $DOGZILLA_MAP_RESOLUTION,
+  "sourceMode": "${current_mode:-unknown}",
+  "rosMapConversion": "$conversion_status",
+  "state": "candidate"
+}
+JSON
+  printf '{"status":"ok","state":"candidate","id":"%s","candidate":"%s","pbstream":"%s","yaml":"%s","rosMapConversion":"%s"}\n' "$map_id" "$candidate_metadata" "$target_pbstream" "$map_stem.yaml" "$conversion_status"
+  exit 0
+fi
+
 cp "$target_pbstream" "$REMOTE_ROOT/maps/robodoge_home.pbstream"
 cp "$map_stem.yaml" "$REMOTE_ROOT/maps/robodoge_home.yaml"
 cp "$map_stem.pgm" "$REMOTE_ROOT/maps/robodoge_home.pgm"
@@ -94,12 +131,22 @@ else
   rm -f "$previous_metadata"
 fi
 
+pbstream_sha256="$(sha256sum "$target_pbstream" | awk '{print $1}')"
+yaml_sha256="$(sha256sum "$map_stem.yaml" | awk '{print $1}')"
+pgm_sha256="$(sha256sum "$map_stem.pgm" | awk '{print $1}')"
 cat > "$DOGZILLA_MAP_METADATA" <<JSON
 {
+  "schemaVersion": 1,
   "id": "$map_id",
+  "backend": "cartographer",
   "pbstream": "$target_pbstream",
   "yaml": "$map_stem.yaml",
   "pgm": "$map_stem.pgm",
+  "artifacts": {
+    "pbstream": { "path": "$target_pbstream", "sha256": "$pbstream_sha256" },
+    "yaml": { "path": "$map_stem.yaml", "sha256": "$yaml_sha256" },
+    "pgm": { "path": "$map_stem.pgm", "sha256": "$pgm_sha256" }
+  },
   "savedAt": "$(date -Iseconds)",
   "resolution": $DOGZILLA_MAP_RESOLUTION,
   "sourceMode": "${current_mode:-unknown}",

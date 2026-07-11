@@ -7,6 +7,22 @@ export const DANGEROUS_CONNECTION_ACTIONS = Object.freeze({
     title: 'Start New SLAM Map',
     message: 'This switches Cartographer into live mapping. Drive slowly, save only when the map is stable, then recapture waypoints that no longer align.',
   },
+  'start-autonomous-mapping': {
+    title: 'Map This Floor',
+    message: 'Robot will autonomously navigate to conservative LiDAR frontiers. Keep stairs, people, pets, and fragile objects out of its reachable area. Finish Mapping saves a candidate only; it does not replace the active map.',
+  },
+  'continue-autonomous-mapping': {
+    title: 'Continue Current Map',
+    message: 'Robot will extend the active Cartographer map from its saved PBSTREAM. Start only when the robot is localized in a recognizable part of that map.',
+  },
+  'finish-autonomous-mapping': {
+    title: 'Finish Autonomous Mapping',
+    message: 'Robot will stop, save a candidate map, and restore the previous active map for normal navigation.',
+  },
+  'promote-map-candidate': {
+    title: 'Use Candidate Map',
+    message: 'This replaces the active map with the latest candidate and restarts localization and navigation. Existing waypoints may no longer align.',
+  },
   'save-map-pose': {
     title: 'Save SLAM Map',
     message: 'This commits the current SLAM map and restarts localization against it. Existing waypoints may need recapture if the map origin or walls shifted.',
@@ -32,73 +48,6 @@ export function getConnectionActionConfirmation(action) {
 
 export function isDangerousConnectionAction(action) {
   return Object.prototype.hasOwnProperty.call(DANGEROUS_CONNECTION_ACTIONS, action)
-}
-
-const SAFE_NEXT_ACTION_PRIORITY = [
-  {
-    test: (snapshot) => !snapshot?.activeRobot,
-    action: 'Check robot link',
-    blocker: null,
-  },
-  {
-    test: (snapshot) => {
-      const pose = snapshot?.poseState
-      return pose?.status === 'error' || pose?.waypointSafe === false
-    },
-    action: 'Localize on Map',
-    blocker: (snapshot) => snapshot?.poseState?.error || 'Pose not available or not waypoint-safe',
-  },
-  {
-    test: (snapshot) => {
-      const nav2 = snapshot?.nav2Stability
-      return nav2?.state === 'disconnected' || nav2?.state === 'blocked'
-    },
-    action: 'Restart Nav',
-    blocker: (snapshot) => snapshot?.nav2Stability?.currentBlocker || 'Nav2 not ready',
-  },
-  {
-    test: (snapshot) => {
-      const nav = snapshot?.navigationStatus
-      return nav?.status === 'blocked' || nav?.status === 'stuck'
-    },
-    action: 'Check Ready',
-    blocker: (snapshot) => snapshot?.navigationStatus?.text || 'Navigation blocked',
-  },
-  {
-    test: (snapshot) => {
-      const nav = snapshot?.navigationStatus
-      return nav?.status === 'stuck' || nav?.status === 'navigating'
-    },
-    action: 'Emergency stop',
-    blocker: null,
-  },
-  {
-    test: () => true,
-    action: 'Send movement command',
-    blocker: null,
-  },
-]
-
-export function deriveSafeNextAction(snapshot) {
-  for (const rule of SAFE_NEXT_ACTION_PRIORITY) {
-    if (rule.test(snapshot)) {
-      const blocker = typeof rule.blocker === 'function' ? rule.blocker(snapshot) : rule.blocker
-      return { action: rule.action, blocker }
-    }
-  }
-  return { action: 'Send movement command', blocker: null }
-}
-
-export function deriveOperatorLastCommand(snapshot, lastOperatorCommand) {
-  if (lastOperatorCommand && lastOperatorCommand.command) {
-    const result = lastOperatorCommand.result ? ` → ${lastOperatorCommand.result}` : ''
-    return `${lastOperatorCommand.command}${result}`
-  }
-  const nav = snapshot?.navigationStatus
-  if (nav?.targetWaypoint) {
-    return nav.targetWaypoint
-  }
-  return '-'
 }
 
 export const NAV_CHAIN_COMPONENTS = Object.freeze([

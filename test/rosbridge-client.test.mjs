@@ -7,7 +7,7 @@ test('RosbridgeClient defaults avoid streaming occupancy grids', () => {
   const topics = client.topics.map((sub) => sub.topic)
 
   assert.deepEqual(topics, ['/scan', '/tf', '/tf_static', '/odom'])
-  assert.equal(client.topics.find((sub) => sub.topic === '/scan')?.throttle_rate, 250)
+  assert.equal(client.topics.find((sub) => sub.topic === '/scan')?.throttle_rate, 500)
   assert.equal(client.topics.find((sub) => sub.topic === '/scan')?.queue_length, 1)
 })
 
@@ -24,7 +24,7 @@ test('RosbridgeClient forwards rosbridge throttle and queue options', () => {
   client.sendSubscribe({
     topic: '/scan',
     type: 'sensor_msgs/LaserScan',
-    throttle_rate: 250,
+    throttle_rate: 500,
     queue_length: 1,
   })
 
@@ -33,10 +33,10 @@ test('RosbridgeClient forwards rosbridge throttle and queue options', () => {
       op: 'subscribe',
       topic: '/scan',
       type: 'sensor_msgs/LaserScan',
-      throttle_rate: 250,
+      throttle_rate: 500,
       queue_length: 1,
     },
   ])
-  assert.equal(client.subscriptions.get('/scan')?.throttle_rate, 250)
+  assert.equal(client.subscriptions.get('/scan')?.throttle_rate, 500)
   assert.equal(client.subscriptions.get('/scan')?.queue_length, 1)
 })

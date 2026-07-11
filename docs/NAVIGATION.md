@@ -75,6 +75,28 @@ The live Cartographer grid contains raw probabilities (`0-100`), while saved `.p
 - `51-64` -> unknown.
 - `65-100` -> occupied.
 
+## Autonomous floor mapping
+
+`Map This Floor` is an explicit mapping-only workflow. It is not enabled during normal AMCL/Nav2 operation.
+
+1. Start the robot in clear, level open space and confirm the safety prompt.
+2. Cartographer runs in mapping mode. Nav2 runs without `map_server` or AMCL and uses `/map_cartographer` as its global static costmap layer.
+   Mapping must replace the systemd-owned localization container with a dedicated mapping container; force-restarting Cartographer through `docker exec` can make systemd restore localization before the explorer starts. The supervisor ready signal is sent only after action, odom, and filtered-scan readiness have each been observed; these DDS checks are latched across retries because Pi discovery can miss individual probes.
+3. `frontier_explorer.py` chooses reachable, clear free cells adjacent to unknown space, then sends only `NavigateToPose` actions. It never publishes direct velocity.
+   Its map subscription must match Cartographer's reliable/transient-local QoS, while `/scan_nav2` must use best-effort/volatile QoS; mismatched defaults leave the explorer at zero goals.
+   Clearance rejects occupied cells but permits unknown cells beside a sufficiently large free patch; requiring every clearance cell to be known-free rejects every frontier by definition.
+4. It stops on stale SLAM or scan data, missing `map -> base_link` TF, repeated Nav2 failures, goal timeout, goal limit, no safe frontier, or the Finish Mapping stop file. Any orderly explorer exit saves a candidate before cleanup, including a safety stop after repeated frontier failures, so partial SLAM work remains reviewable instead of being discarded.
+5. Finish Mapping saves `maps/candidates/<id>/` only. It restores the previous map only when that active manifest has a verified Cartographer PBSTREAM. For an occupancy-only scanner map, it stops in `candidate-ready`; promote the candidate to resume localization/navigation.
+6. Use Candidate Map is a separate, confirmed promotion step. Candidate metadata records SHA-256 for all three artifacts; promotion rejects missing or altered artifacts, updates `robodoge_home.*`, clears the stored origin, and restarts localization and Nav2. Review the live map before finishing and recapture waypoints if geometry moved.
+
+Finish Mapping succeeds only when the supervisor is still active and its result proves a candidate was saved. A finished or failed explorer session must return a direct error instead of waiting on or accepting an old result file. Windows-launched SSH commands are non-interactive (`ssh -n`) so an open Node stdin pipe cannot keep the HTTP action pending after the remote command exits.
+
+Map-control button state comes from Pi-owned `autonomous-mapping.active`, status, and result files exposed by the direct bridge. App refresh must restore active/candidate state from `/api/robot/health`: active mapping disables Map This Floor and Continue Current Map, enables Finish Mapping, and a saved candidate enables Use Candidate Map.
+
+The mapping launcher explicitly posts `navigate` to the direct bridge after starting mapping Nav2. A same-mode `navigate` request cancels any pending standby timer so an old timer cannot pause the replacement lifecycle manager during exploration.
+
+This workflow still requires live Pi validation before unattended use. Test collision stopping, stair boundaries, scan freshness, Cartographer TF, Nav2 action results, and real robot motion in an empty, bounded area first.
+
 ## Direct bridge Nav2 readiness
 
 Direct bridge runtime truth distinguishes action discovery from waypoint-ready stack truth:
@@ -168,7 +190,9 @@ The direct bridge exposes navigation-mode state (`idle` / `localize` / `navigate
 Control modes via bridge:
 
 - `GET /mode` returns current mode transition history.
-- `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` updates bridge logical mode only. It must not start, stop, reinstall, recreate, or delete Nav2/map-pose services.
+- `POST /mode` with `{"mode": "localize|navigate|idle|sleep"}` updates bridge mode and, when standby is enabled, Nav2 lifecycle state. It must not start, stop, reinstall, recreate, or delete Nav2/map-pose services.
+- When `DOGZILLA_NAV2_STANDBY_ENABLED=1`, `idle`, `localize`, and `sleep` pause Nav2 through `/lifecycle_manager_navigation/manage_nodes`; Cartographer, LiDAR, rosbridge, and systemd service ownership remain active. `navigate` resumes Nav2. `idle`/`localize` waypoint dispatch auto-wakes; `sleep` still requires explicit wake.
+- Posting the current `navigate` mode is meaningful: it cancels a pending idle demotion. Keep this behavior for long-running operator-owned mapping sessions.
 - `locomotion.goto` talks to already-running Pi-owned Nav2, waits bounded readiness (45 s timeout, 2 s poll, latest blockers returned on timeout), and sends goal synchronously.
 - If Nav2 is unavailable, app/server reports blockers. It does not auto-repair or auto-start navigation.
 - Default startup mode is `navigate`, matching the Pi boot contract: Nav2 should already be running before the app starts.
@@ -230,7 +254,7 @@ npm run dogzilla:validate-waypoints
 
 In UI Mini Map > Map Controls:
 
-Primary mapping row: Start New Map, then Save Map. Advanced Setup contains Localize Saved Map, Mark Origin, Save Spot, Check Ready, and Restart Nav.
+Map Controls keeps mapping, alignment, waypoint capture, and navigation restart in one panel. `Map This Floor` starts fresh autonomous mapping; `Continue Current Map` reopens the active verified PBSTREAM with Cartographer `continue_mapping`, then runs the same frontier explorer. Finish Mapping saves either session as a reviewable candidate. The operator UI no longer exposes origin capture or the redundant waypoint-readiness button.
 
 Use the primary Build / Save Map row for SLAM: Start New Map -> drive slow overlapping loops -> Save Map. Save Map promotes the new default only after Cartographer writes `.pbstream` and conversion produces Nav2 `.yaml`/`.pgm`; otherwise the previous default stays active. Successful Save Map restarts localization against the saved map.
 
@@ -256,6 +280,8 @@ Chat command handling must use the same resolved runtime and ROS2 config for pre
 
 `config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance. Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`.
 
+Nav2 DWB is configured as a conservative holonomic controller so DOGZILLA can strafe during path following. Defaults are `DOGZILLA_NAV2_MAX_LATERAL_VELOCITY=0.06`, `DOGZILLA_NAV2_LATERAL_ACCELERATION=0.12`, and `DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES=5`; the velocity smoother receives matching Y-axis limits. Keep `DOGZILLA_NAV2_GAIT_MAX_Y_STEP=3` for initial live testing, and verify `/cmd_vel_nav.linear.y`, adapter `y_step`, odometry, clearance, and physical stability before increasing lateral speed.
+
 Cartographer fresh-mapping configs use widened online correlative scan matching (`linear_search_window = 0.6`, `angular_search_window = 45 deg`, constraint scores `0.65`) because DOGZILLA has no reliable wheel odom/IMU; narrow `0.1 m / 15 deg` matching can collapse a whole-house drive into a first-room trajectory.
 
 ## Known live-work rules
@@ -269,6 +295,8 @@ Cartographer fresh-mapping configs use widened online correlative scan matching 
 ## Cartographer load notes
 
 `DOGZILLA_MAP_POSE_OCCUPANCY_GRID=auto` starts `cartographer_occupancy_grid_node` only for `mapping` / `continue_mapping`. Keep localization mode grid-off by default; force grid only when debugging live SLAM/localization display.
+
+The autonomous mapping explorer runs under transient host systemd supervision. Normal completion or Finish Mapping saves a candidate when possible, then restores localization and Nav2. Explorer failure, timeout, or restore failure still stops mapping Nav2 processes so a stale mapping session cannot leave the Pi at mapping load indefinitely.
 
 Cartographer localization configs keep same scan-match window but process half of rangefinder messages, publish submaps/trajectory less often, optimize less often, and sample pose-graph constraints less aggressively. Do not set `TRAJECTORY_BUILDER.pure_localization` on this Humble Cartographer build; live test showed it aborts startup with `Key 'pure_localization' was used the wrong number of times`. Preserve split: mapping configs favor recovery/coverage, localization configs favor lower Pi CPU while keeping `map->odom/base_link` fresh enough for Nav2.
 
