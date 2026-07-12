@@ -288,10 +288,12 @@ export function createManualControlController({
       return false
     }
 
-    state.barkPending = true
-    playBarkCue()
-      .then(() => {
-        setManualControlStatus('Bark cue sent.')
+  state.barkPending = true
+  setManualControlStatus('Sending bark cue...')
+  setStatus?.('Sending bark cue...')
+  playBarkCue()
+    .then(() => {
+      setManualControlStatus('Bark cue sent.')
         setStatus?.('Bark cue sent.')
       })
       .catch((error) => {
@@ -303,8 +305,6 @@ export function createManualControlController({
         state.barkPending = false
       })
 
-    setManualControlStatus('Bark cue sent.')
-    setStatus?.('Bark cue sent.')
     return true
   }
 

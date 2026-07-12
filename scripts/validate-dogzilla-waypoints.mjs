@@ -100,6 +100,7 @@ export function validateDogzillaWaypoints({
     bridgeHealthUrl,
     map: normalizedMap,
     mapError,
+    autonomousMapping: bridgeHealth?.autonomousMapping || null,
     mapOrigin: mapOriginStatus,
     navigation: {
       ready: navigation.ready,

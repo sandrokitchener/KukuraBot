@@ -2151,7 +2151,7 @@ async function ensureDogzillaRobotLinkReady() {
     })
     const payload = await response.json()
 
-    if (!response.ok || payload.status === 'error') {
+    if (!response.ok || payload.status === 'error' || payload.health?.status !== 'ok') {
       throw new Error(payload.error || payload.stderr || 'Robot link repair failed.')
     }
 
@@ -2754,6 +2754,7 @@ function renderNavigationChainHealth(readinessPayload) {
   for (const dot of chainDots.querySelectorAll('.robot-nav-chain-dot')) {
     const componentId = dot.dataset.component
     const component = components.find((c) => c.id === componentId)
+    dot.hidden = component?.relevant === false
     if (component) {
       dot.dataset.status = component.status
       dot.title = `${component.label}: ${component.detail}`
@@ -2765,13 +2766,15 @@ function renderNavigationChainHealth(readinessPayload) {
   chainSummary.textContent = summarizeNavChain(components)
 
   if (chainDetail && chainDetailContent) {
-    const rowsToShow = components.filter((c) => c.status !== 'ok')
+    const rowsToShow = components.filter((c) => c.relevant !== false && c.status !== 'ok')
     const detailRows = rowsToShow
       .map((c) => {
         const statusIcon = statusIconFor(c.status)
         let actions = ''
         if (c.status !== 'ok') {
-          if (c.id === 'localization') {
+          if (c.action === 'promote-map-candidate') {
+            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="promote-map-candidate">Use Candidate Map</button></div>'
+          } else if (c.id === 'localization') {
             actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-map-pose">Localize on Map</button></div>'
           } else if (c.id === 'action') {
             actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-navigation">Restart Nav</button></div>'

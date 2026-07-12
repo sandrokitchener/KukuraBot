@@ -87,7 +87,7 @@ The live Cartographer grid contains raw probabilities (`0-100`), while saved `.p
    Clearance rejects occupied cells but permits unknown cells beside a sufficiently large free patch; requiring every clearance cell to be known-free rejects every frontier by definition.
 4. It stops on stale SLAM or scan data, missing `map -> base_link` TF, repeated Nav2 failures, goal timeout, goal limit, no safe frontier, or the Finish Mapping stop file. Any orderly explorer exit saves a candidate before cleanup, including a safety stop after repeated frontier failures, so partial SLAM work remains reviewable instead of being discarded.
 5. Finish Mapping saves `maps/candidates/<id>/` only. It restores the previous map only when that active manifest has a verified Cartographer PBSTREAM. For an occupancy-only scanner map, it stops in `candidate-ready`; promote the candidate to resume localization/navigation.
-6. Use Candidate Map is a separate, confirmed promotion step. Candidate metadata records SHA-256 for all three artifacts; promotion rejects missing or altered artifacts, updates `robodoge_home.*`, clears the stored origin, and restarts localization and Nav2. Review the live map before finishing and recapture waypoints if geometry moved.
+6. Use Candidate Map is a separate, confirmed promotion step. Candidate metadata records SHA-256 for all three artifacts; promotion rejects missing or altered artifacts, updates `robodoge_home.*` through the persistent `robodoge-rosbridge` container (the mapping workflow may have stopped `robodoge-map-pose`), clears the stored origin, and restarts localization and Nav2. Review the live map before finishing and recapture waypoints if geometry moved.
 
 Finish Mapping succeeds only when the supervisor is still active and its result proves a candidate was saved. A finished or failed explorer session must return a direct error instead of waiting on or accepting an old result file. Windows-launched SSH commands are non-interactive (`ssh -n`) so an open Node stdin pipe cannot keep the HTTP action pending after the remote command exits.
 
@@ -130,6 +130,8 @@ Startup/preflight readiness is based on:
 4. `/scan_nav2` has a live publisher and costmap subscribers.
 5. `/navigate_to_pose` action discovery is reported, but Pi DDS discovery misses are tolerated at bridge readiness if the rest of the stack is proven.
 
+The operator Nav chain keeps these signals distinct: `LiDAR` is raw `/scan` health, `Localization` is a fresh waypoint-safe `map->base_link` pose, and `Filtered scan` is Nav2's `/scan_nav2` publisher/subscriber readiness. Missing probe data is `unknown`, not failed. When the active map lacks the verified Cartographer PBSTREAM required for localization, show that root blocker and suppress downstream Nav2 symptoms until the map is promoted.
+
 For direct-bridge `locomotion.goto`, `obstacleAvoidance.mode = "nav2_costmap"` must validate `/scan_nav2`, not raw `/scan`. Raw `/scan` remains for rosbridge/LiDAR transport and non-Nav2 avoidance flows only.
 
 The app rosbridge client intentionally subscribes only to throttled `/scan`, `/tf`, `/tf_static`, and `/odom` by default. Do not add `/map_cartographer` back to default `rosbridgeTopics`; full occupancy grids are large JSON payloads and can make `rosbridge_websocket` memory climb on the Pi.
@@ -165,6 +167,8 @@ The original internal delivery name (e.g. `"Nav2 NavigateToPose"`) is preserved 
 **Single goal send invariant:** The synchronous phase sends the goal exactly once. The background thread (`_monitor_background_motion`) only monitors motion — it must NOT call `runtime.execute()` or `nav2_client.send_goal()` again.
 
 **Motion status values** (set by the background monitor):
+
+Operator UI status must use current runtime evidence: `motionStatus: "moving"` for walking, fresh connected `/scan` frames for live LiDAR, initialized speech provider/microphone state for speech readiness, and verified bridge health for repair. Do not report live, ready, repaired, walking, or idle from elapsed time, cached scan presence, config presence, command acceptance, process launch, PID, or launcher exit alone.
 
 | `motionStatus` | Meaning |
 | --- | --- |
@@ -280,7 +284,7 @@ Chat command handling must use the same resolved runtime and ROS2 config for pre
 
 `config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance. Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`.
 
-Nav2 DWB is configured as a conservative holonomic controller so DOGZILLA can strafe during path following. Defaults are `DOGZILLA_NAV2_MAX_LATERAL_VELOCITY=0.06`, `DOGZILLA_NAV2_LATERAL_ACCELERATION=0.12`, and `DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES=5`; the velocity smoother receives matching Y-axis limits. Keep `DOGZILLA_NAV2_GAIT_MAX_Y_STEP=3` for initial live testing, and verify `/cmd_vel_nav.linear.y`, adapter `y_step`, odometry, clearance, and physical stability before increasing lateral speed.
+Nav2 lateral motion is disabled by default because the first physical holonomic test made DOGZILLA fall. Defaults are `DOGZILLA_NAV2_MAX_LATERAL_VELOCITY=0.0`, `DOGZILLA_NAV2_LATERAL_ACCELERATION=0.0`, and `DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES=1`; the velocity smoother receives matching zero Y-axis limits. The environment variables remain calibration knobs, but do not enable them until a supported physical test verifies `/cmd_vel_nav.linear.y`, adapter `y_step`, odometry, clearance, and stability. Manual gamepad strafing is a separate path.
 
 Cartographer fresh-mapping configs use widened online correlative scan matching (`linear_search_window = 0.6`, `angular_search_window = 45 deg`, constraint scores `0.65`) because DOGZILLA has no reliable wheel odom/IMU; narrow `0.1 m / 15 deg` matching can collapse a whole-house drive into a first-room trajectory.
 

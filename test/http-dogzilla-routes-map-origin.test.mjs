@@ -189,6 +189,13 @@ test('waypoint-readiness route returns validator report without requiring writes
       return true
     },
     getDogzillaPoseTrack: () => [],
+    getDogzillaLidarHealthImpl: async () => ({ ok: true, topic: '/scan' }),
+    getDogzillaRobotPoseImpl: async () => ({
+      ok: false,
+      status: 'stale',
+      waypointSafe: false,
+      error: 'Pose frame is stale.',
+    }),
     validateDogzillaWaypointsFromFilesImpl: async () => ({
       ok: false,
       readyForMapWaypoints: false,
@@ -202,6 +209,15 @@ test('waypoint-readiness route returns validator report without requiring writes
   })
 
   assert.equal(handled, true)
+  assert.deepEqual(sent[0].payload.sensors, {
+    lidar: { ok: true, topic: '/scan' },
+    localization: {
+      ok: false,
+      status: 'stale',
+      waypointSafe: false,
+      error: 'Pose frame is stale.',
+    },
+  })
   assert.equal(sent.length, 1)
   assert.equal(sent[0].statusCode, 200)
   assert.equal(sent[0].payload.readyForMapWaypoints, false)

@@ -120,15 +120,42 @@ describe('deriveNavigationStatus', () => {
     assert.equal(result.text, 'Nav2 ready')
   })
 
-  it('returns navigating when dispatch active and pose moving', () => {
+  it('returns pending dispatch until matching motion feedback proves movement', () => {
     const t = now()
     const result = deriveNavigationStatus({
-      dispatchState: { status: 'navigating', waypointName: 'kitchen', dispatchedAt: t - 15000 },
+      dispatchState: { status: 'navigating', waypointName: 'kitchen', commandId: 'cmd-1', dispatchedAt: t - 15000 },
       poseTrack: [
         pose(1, 0, t - 9000),
         pose(2, 0, t - 5000),
         pose(3, 0, t - 1000),
       ],
+    })
+    assert.equal(result.status, 'finding_waypoint')
+    assert.equal(result.severity, 'yellow')
+    assert.match(result.text, /Waiting for motion evidence/)
+    assert.equal(result.targetWaypoint, 'kitchen')
+  })
+
+  it('shows proven movement instead of ready preflight state', () => {
+    const result = deriveNavigationStatus({
+      dispatchState: { status: 'navigating', waypointName: 'kitchen', commandId: 'cmd-1', dispatchedAt: now() - 6000 },
+      dogzillaWaypointReadiness: { ready: true },
+      robotFeedback: { recentCommands: [{ commandId: 'cmd-1', motionStatus: 'moving' }] },
+    })
+
+    assert.equal(result.status, 'navigating')
+    assert.equal(result.text, 'Walking to kitchen')
+  })
+
+  it('returns walking only when matching feedback reports moving', () => {
+    const t = now()
+    const result = deriveNavigationStatus({
+      dispatchState: { status: 'navigating', waypointName: 'kitchen', commandId: 'cmd-1', dispatchedAt: t - 15000 },
+      robotFeedback: {
+        recentCommands: [
+          { commandId: 'cmd-1', motionStatus: 'moving' },
+        ],
+      },
     })
     assert.equal(result.status, 'navigating')
     assert.equal(result.severity, 'blue')
@@ -136,10 +163,15 @@ describe('deriveNavigationStatus', () => {
     assert.equal(result.targetWaypoint, 'kitchen')
   })
 
-  it('returns stuck when dispatch active but no pose progress', () => {
+  it('returns stuck only when matching feedback reports no motion', () => {
     const t = now()
     const result = deriveNavigationStatus({
-      dispatchState: { status: 'navigating', waypointName: 'garage', dispatchedAt: t - 20000 },
+      dispatchState: { status: 'navigating', waypointName: 'garage', commandId: 'cmd-2', dispatchedAt: t - 20000 },
+      robotFeedback: {
+        recentCommands: [
+          { commandId: 'cmd-2', motionStatus: 'no-motion' },
+        ],
+      },
       poseTrack: [
         pose(1.5, 0.5, t - 12000),
         pose(1.51, 0.5, t - 8000),
@@ -204,10 +236,15 @@ describe('deriveNavigationStatus', () => {
     assert.equal(result.severity, 'green')
   })
 
-  it('reports stuck when dispatch active but no pose movement (not falsely arrived)', () => {
+  it('reports stuck when dispatch feedback has no motion (not falsely arrived)', () => {
     const t = now()
     const result = deriveNavigationStatus({
-      dispatchState: { status: 'navigating', waypointName: 'charger', dispatchedAt: t - 20000 },
+      dispatchState: { status: 'navigating', waypointName: 'charger', commandId: 'cmd-3', dispatchedAt: t - 20000 },
+      robotFeedback: {
+        recentCommands: [
+          { commandId: 'cmd-3', motionStatus: 'no-motion' },
+        ],
+      },
       poseTrack: [
         pose(2.0, 1.0, t - 11000),
         pose(2.01, 1.0, t - 7000),

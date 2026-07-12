@@ -55,6 +55,9 @@
   .robot-map,
   .robot-camera-frame-wrap {
     height: auto;
+  }
+
+  .robot-camera-frame-wrap {
     aspect-ratio: 16 / 9;
   }
 }

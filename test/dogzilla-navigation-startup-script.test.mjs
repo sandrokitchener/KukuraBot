@@ -189,12 +189,12 @@ test('DOGZILLA map-pose startup resolves active pbstream from map metadata', asy
   assert.doesNotMatch(script, /robodoge_home_\*\.pbstream/)
 })
 
-test('DOGZILLA Nav2 startup enables conservative holonomic strafing', async () => {
+test('DOGZILLA Nav2 startup disables unverified lateral motion by default', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /DOGZILLA_NAV2_MAX_LATERAL_VELOCITY="\$\{DOGZILLA_NAV2_MAX_LATERAL_VELOCITY:-0\.06\}"/)
-  assert.match(script, /DOGZILLA_NAV2_LATERAL_ACCELERATION="\$\{DOGZILLA_NAV2_LATERAL_ACCELERATION:-0\.12\}"/)
-  assert.match(script, /DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES="\$\{DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES:-5\}"/)
+  assert.match(script, /DOGZILLA_NAV2_MAX_LATERAL_VELOCITY="\$\{DOGZILLA_NAV2_MAX_LATERAL_VELOCITY:-0\.0\}"/)
+  assert.match(script, /DOGZILLA_NAV2_LATERAL_ACCELERATION="\$\{DOGZILLA_NAV2_LATERAL_ACCELERATION:-0\.0\}"/)
+  assert.match(script, /DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES="\$\{DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES:-1\}"/)
   assert.match(script, /fp2\["min_vel_y"\] = -mvy/)
   assert.match(script, /fp2\["max_vel_y"\] = mvy/)
   assert.match(script, /fp2\["acc_lim_y"\] = lay/)

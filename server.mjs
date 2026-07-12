@@ -35,7 +35,7 @@ import { tryHandleReconRoute } from './lib/http-recon-routes.mjs'
 import { tryHandleRuntimeRoute } from './lib/http-runtime-routes.mjs'
 import { warmModel } from './lib/model-client.mjs'
 import { resolveActiveModelProfile } from './lib/model-profile-config.mjs'
-import { fetchRobotBridgeState, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
+import { fetchRobotBridgeState, getRobotRuntimeFeedback, probeRobotSidecarHealth } from './lib/robot-sidecar-client.mjs'
 import {
   loadRobotRos2Config,
   loadRobotRuntimeConfig,
@@ -100,18 +100,23 @@ const dogzillaBatteryStateTracker = createDogzillaBatteryStateTracker({
 const DOGZILLA_POSE_TRACK_LIMIT = 80
 const DOGZILLA_HEALTH_CACHE_MAX_AGE_MS = 30_000
 const DOGZILLA_HEALTH_REFRESH_TIMEOUT_MS = Number(process.env.APP_DOGZILLA_HEALTH_REFRESH_TIMEOUT_MS || 20_000)
+const DOGZILLA_FEEDBACK_CACHE_MAX_AGE_MS = 5_000
 const dogzillaPoseTrack = []
 let lastDogzillaBridgeHealth = null
 let dogzillaBridgeHealthRefresh = null
+let lastDogzillaRuntimeFeedback = null
+let dogzillaRuntimeFeedbackRefresh = null
 const navigationDispatch = {
   waypointName: null,
+  commandId: null,
   dispatchedAt: null,
   arrivedAt: null,
   status: 'idle',
 }
 
-function recordNavigationDispatch({ waypointName, waypoint, arrivalTolerance } = {}) {
+function recordNavigationDispatch({ waypointName, waypoint, commandId, arrivalTolerance } = {}) {
   navigationDispatch.waypointName = String(waypointName || waypoint || '').trim() || null
+  navigationDispatch.commandId = String(commandId || '').trim() || null
   navigationDispatch.dispatchedAt = Date.now()
   navigationDispatch.arrivedAt = null
   navigationDispatch.status = 'navigating'
@@ -119,6 +124,7 @@ function recordNavigationDispatch({ waypointName, waypoint, arrivalTolerance } =
 
 function resetNavigationDispatch() {
   navigationDispatch.waypointName = null
+  navigationDispatch.commandId = null
   navigationDispatch.dispatchedAt = null
   navigationDispatch.arrivedAt = null
   navigationDispatch.status = 'idle'
@@ -404,7 +410,8 @@ async function buildCurrentRobotStateSnapshot() {
   const robotStateProbeConfig = withRobotStateProbeTimeout(robotRos2Config, 4000)
   const streamSnapshot = getRobotStateSnapshot()
   void refreshDogzillaBridgeHealth(robotRuntimeConfig, robotRos2Config)
-const [bridgeState, poseState, mapOrigin, waypointConfig] = await Promise.all([
+  void refreshDogzillaRuntimeFeedback()
+  const [bridgeState, poseState, mapOrigin, waypointConfig] = await Promise.all([
   fetchRobotBridgeState(robotRuntimeConfig, robotStateProbeConfig),
   getDogzillaRobotPose({ timeoutMs: 1200 }),
   loadDogzillaMapOrigin(),
@@ -462,6 +469,7 @@ const bridgeHealth = cachedBridgeHealth
 
   const currentBridgeHealthBody = null
   const bridgeHealthCachedForDisplay = !!cachedBridgeHealth
+  const runtimeFeedback = getFreshDogzillaRuntimeFeedback()
 
   if (isNav2StabilityTrackerEnabled() && effectiveBridgeHealthBody) {
     deriveNav2StabilityFromHealth(effectiveBridgeHealthBody, {
@@ -488,6 +496,7 @@ const bridgeHealth = cachedBridgeHealth
       dispatchState: navigationDispatch,
       mapOriginStatus,
       bridgeRuntime,
+      robotFeedback: runtimeFeedback?.feedback || null,
       poseState,
       dogzillaWaypointReadiness,
     }),
@@ -503,6 +512,44 @@ function getFreshDogzillaBridgeHealth(now = Date.now()) {
     return null
   }
   return lastDogzillaBridgeHealth
+}
+
+function getFreshDogzillaRuntimeFeedback(now = Date.now()) {
+  if (!lastDogzillaRuntimeFeedback) {
+    return null
+  }
+  if (now - lastDogzillaRuntimeFeedback.receivedAt > DOGZILLA_FEEDBACK_CACHE_MAX_AGE_MS) {
+    return null
+  }
+  return lastDogzillaRuntimeFeedback
+}
+
+function refreshDogzillaRuntimeFeedback() {
+  if (dogzillaRuntimeFeedbackRefresh) {
+    return dogzillaRuntimeFeedbackRefresh
+  }
+  dogzillaRuntimeFeedbackRefresh = getRobotRuntimeFeedback()
+    .then((result) => {
+      lastDogzillaRuntimeFeedback = {
+        ...result,
+        receivedAt: Date.now(),
+      }
+      return lastDogzillaRuntimeFeedback
+    })
+    .catch((error) => {
+      lastDogzillaRuntimeFeedback = {
+        attempted: true,
+        status: 'error',
+        feedback: null,
+        error: error instanceof Error ? error.message : String(error),
+        receivedAt: Date.now(),
+      }
+      return lastDogzillaRuntimeFeedback
+    })
+    .finally(() => {
+      dogzillaRuntimeFeedbackRefresh = null
+    })
+  return dogzillaRuntimeFeedbackRefresh
 }
 
 function refreshDogzillaBridgeHealth(runtimeConfig = {}, ros2Config = {}) {
@@ -732,7 +779,7 @@ function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState = 
     uuid: normalizeString(state.robot_id || state.robotId) || robotRuntimeConfig.robotId || 'dogzilla-local',
     name: normalizeString(state.robot_name || state.robotName) || robotRuntimeConfig.robotName || 'Questing Beast',
     pose: mapPose,
-    task: 'IDLE',
+    task: null,
     timestamp,
     seq: robotBridgeStateSeq,
     receivedAt: new Date().toISOString(),

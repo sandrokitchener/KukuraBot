@@ -157,8 +157,13 @@ test('manual control right trigger calls bark callback while enabled', async () 
   })
 
   try {
+    let resolveBark
+    const barkPromise = new Promise((resolve) => {
+      resolveBark = resolve
+    })
+    const elements = createManualControlElements()
     const controller = createManualControlController({
-      elements: createManualControlElements(),
+      elements,
       apiFetch: async () => ({
         ok: true,
         json: async () => ({ dispatch: { status: 'idle' }, preview: { canonicalPlan: { params: {} } } }),
@@ -170,6 +175,7 @@ test('manual control right trigger calls bark callback while enabled', async () 
       setStatus: () => {},
       playBarkCue: async () => {
         barkCount += 1
+        await barkPromise
       },
     })
 
@@ -177,6 +183,11 @@ test('manual control right trigger calls bark callback while enabled', async () 
     frameCallback()
     await Promise.resolve()
     assert.equal(barkCount, 1)
+    assert.equal(elements.status.textContent, 'Sending bark cue...')
+    resolveBark()
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.equal(elements.status.textContent, 'Bark cue sent.')
 
     frameCallback()
     await Promise.resolve()
@@ -731,6 +742,14 @@ test('buildNavChainComponents renders full chain as unknown when readiness paylo
 
 test('buildNavChainComponents reports ok/fail/unknown for every chain step', () => {
   const components = buildNavChainComponents({
+    sensors: {
+      lidar: { ok: true, topic: '/scan' },
+      localization: {
+        ok: true,
+        waypointSafe: true,
+        mapPose: { frame: 'map' },
+      },
+    },
     navigation: {
       scanReady: true,
       odomReady: false,
@@ -753,6 +772,41 @@ test('buildNavChainComponents reports ok/fail/unknown for every chain step', () 
     ],
   )
   assert.match(summarizeNavChain(components), /4\/6 ready \(Odom \+ TF, Nav2 lifecycle\)/)
+})
+
+test('buildNavChainComponents keeps raw LiDAR separate from localization and filtered scan', () => {
+  const components = buildNavChainComponents({
+    autonomousMapping: {
+      candidateAvailable: true,
+      detail: 'active_map_has_no_verified_pbstream; promote_candidate_to_resume_navigation',
+    },
+    sensors: {
+      lidar: { ok: true, topic: '/scan', frames: 13000 },
+      localization: {
+        ok: false,
+        status: 'stale',
+        waypointSafe: false,
+        pose: { frame: 'map', ageSec: 4107.9 },
+        error: 'Pose frame is stale.',
+      },
+    },
+    navigation: {
+      scanReady: false,
+      odomReady: false,
+      odomTfAvailable: false,
+      actionAvailable: false,
+      lifecycleActive: false,
+    },
+  })
+
+  assert.deepEqual(
+    components.filter((c) => c.relevant !== false).map((c) => ({ id: c.id, status: c.status })),
+    [{ id: 'localization', status: 'fail' }],
+  )
+  assert.equal(components[1].label, 'Active map')
+  assert.match(components[1].detail, /no verified Cartographer PBSTREAM/i)
+  assert.equal(components[1].action, 'promote-map-candidate')
+  assert.equal(summarizeNavChain(components), 'Blocked: active map cannot start Cartographer localization')
 })
 
 test('dangerous maintenance actions require confirmation with consequence text', () => {

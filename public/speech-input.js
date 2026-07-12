@@ -755,7 +755,7 @@ export async function createSpeechInputController({
       if (activeProfile.autoStart) {
         await provider.start()
       } else {
-        onStatus(`${activeProfile.label} ready. Auto-start disabled.`, false)
+        onStatus(`${activeProfile.label} configured. Auto-start disabled.`, false)
       }
     },
     async prepareInputForSubmit() {

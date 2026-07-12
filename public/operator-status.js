@@ -69,18 +69,31 @@ export function buildNavChainComponents(readinessPayload) {
   }
 
   const nav = readinessPayload.navigation
-  const mapOrigin = readinessPayload.mapOrigin
+  const lidar = readinessPayload.sensors?.lidar
+  const localization = readinessPayload.sensors?.localization
+  const localizedPose = localization?.mapPose || localization?.pose || localization
+  const lidarStatus = lidar ? (lidar.ok === true ? 'ok' : 'fail') : 'unknown'
+  const localizationReady = localization?.ok === true
+    && localization?.waypointSafe === true
+    && localizedPose?.frame === 'map'
+  const localizationStatus = localization ? (localizationReady ? 'ok' : 'fail') : 'unknown'
 
-  return [
+  const components = [
     {
       ...NAV_CHAIN_COMPONENTS[0],
-      status: nav.scanReady === true ? 'ok' : 'fail',
-      detail: nav.scanReady ? 'Scan data flowing' : 'Scan not ready',
+      status: lidarStatus,
+      detail: lidar
+        ? (lidar.ok === true
+            ? `Raw scan flowing on ${lidar.topic || '/scan'}`
+            : lidar.error || `Raw scan unavailable on ${lidar.topic || '/scan'}`)
+        : 'Raw LiDAR status not reported',
     },
     {
       ...NAV_CHAIN_COMPONENTS[1],
-      status: mapOrigin?.configured === true && nav.scanReady === true ? 'ok' : 'fail',
-      detail: mapOrigin?.configured ? (nav.scanReady ? 'Map origin + scan OK' : 'Map origin set, scan not ready') : 'Map origin not set',
+      status: localizationStatus,
+      detail: localization
+        ? (localizationReady ? 'Fresh map->base_link pose' : localization.error || 'Fresh map-frame pose unavailable')
+        : 'Localization status not reported',
     },
     {
       ...NAV_CHAIN_COMPONENTS[2],
@@ -103,20 +116,47 @@ export function buildNavChainComponents(readinessPayload) {
       detail: nav.scanReady ? 'OK' : 'Scan not ready',
     },
   ]
+
+  const activeMapNeedsPromotion = readinessPayload.autonomousMapping?.candidateAvailable === true
+    && String(readinessPayload.autonomousMapping?.detail || '').includes('active_map_has_no_verified_pbstream')
+  if (activeMapNeedsPromotion) {
+    for (const component of components) {
+      component.relevant = component.id === 'localization'
+    }
+    Object.assign(components[1], {
+      label: 'Active map',
+      status: 'fail',
+      detail: 'Active map has no verified Cartographer PBSTREAM. Promote the saved candidate map to resume localization and navigation.',
+      action: 'promote-map-candidate',
+      rootCause: true,
+      summary: 'Blocked: active map cannot start Cartographer localization',
+    })
+  }
+
+  return components
 }
 
 export function summarizeNavChain(components) {
-  const total = components.length
-  const okCount = components.filter((c) => c.status === 'ok').length
-  const unknownCount = components.filter((c) => c.status === 'unknown').length
-  const failed = components.filter((c) => c.status === 'fail')
+  const rootCause = components.find((component) => component.rootCause === true)
+  if (rootCause) return rootCause.summary
+
+  const relevant = components.filter((component) => component.relevant !== false)
+  const total = relevant.length
+  const okCount = relevant.filter((c) => c.status === 'ok').length
+  const unknownCount = relevant.filter((c) => c.status === 'unknown').length
+  const failed = relevant.filter((c) => c.status === 'fail')
   const summary = `${okCount}/${total} ready`
   if (unknownCount === total) {
     return `${summary} (unknown)`
   }
   if (failed.length > 0) {
     const labels = failed.map((c) => c.label).join(', ')
-    return `${summary} (${labels})`
+    const unknown = relevant.filter((c) => c.status === 'unknown').map((c) => c.label).join(', ')
+    return `${summary} (${labels}${unknown ? `; unknown: ${unknown}` : ''})`
+  }
+  if (unknownCount > 0) {
+    const unknown = relevant.filter((c) => c.status === 'unknown').map((c) => c.label).join(', ')
+    return `${summary} (unknown: ${unknown})`
   }
   return summary
 }

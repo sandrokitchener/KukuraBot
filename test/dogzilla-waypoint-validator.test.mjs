@@ -61,6 +61,10 @@ test('validateDogzillaWaypoints reports operator blocker when Nav2 readiness is 
       },
     },
   })
+  health.autonomousMapping = {
+    candidateAvailable: true,
+    detail: 'active_map_has_no_verified_pbstream; promote_candidate_to_resume_navigation',
+  }
   const report = validateDogzillaWaypoints({
     waypointConfig: waypointConfig({
       kitchen: mapWaypoint({
@@ -79,6 +83,7 @@ test('validateDogzillaWaypoints reports operator blocker when Nav2 readiness is 
   assert.match(report.blockers.join('\n'), /navigation not ready/)
   assert.doesNotMatch(report.blockers.join('\n'), /map origin not ready/)
   assert.equal(report.navigation.ready, false)
+  assert.deepEqual(report.autonomousMapping, health.autonomousMapping)
   assert.equal(report.mapOrigin.status, 'missing')
 })
 

@@ -12,6 +12,7 @@ import test from 'node:test'
 const execFileAsync = promisify(execFile)
 const TEST_DIR = dirname(fileURLToPath(import.meta.url))
 const PROMOTION_SCRIPT = join(TEST_DIR, '..', 'sidecars', 'dogzilla_map_pose', 'promote-candidate-map-in-container.sh')
+const PROMOTION_SSH_SCRIPT = join(TEST_DIR, '..', 'scripts', 'promote-dogzilla-map-candidate-ssh.ps1')
 const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash'
 const canRunBash = process.platform !== 'win32' || existsSync(bash)
 
@@ -22,6 +23,12 @@ function bashPath(value) {
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
 }
+
+test('candidate promotion uses persistent rosbridge container', async () => {
+  const script = await readFile(PROMOTION_SSH_SCRIPT, 'utf8')
+  assert.match(script, /docker exec .* robodoge-rosbridge bash/)
+  assert.doesNotMatch(script, /docker exec .* robodoge-map-pose bash/)
+})
 
 async function writeActiveMap(mapsDir) {
   await Promise.all([

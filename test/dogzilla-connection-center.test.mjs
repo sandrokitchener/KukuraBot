@@ -481,3 +481,42 @@ test('saveDogzillaRobotName writes robot_name.txt and preserves robot_id.txt as 
     robotName: 'Shop Scout',
   })
 })
+
+test('start-direct succeeds only after health proof', async () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: { host: '192.168.8.88', user: 'pi', alias: 'dogzilla' },
+    remoteRoot: '/home/pi/robodoge',
+  })
+
+  const result = await runDogzillaConnectionAction('start-direct', {
+    config,
+    noSync: true,
+    obstacleAvoidance: {},
+    execFilePromiseImpl: async () => ({ exitCode: 0, stdout: 'started', stderr: '' }),
+    directHealthProbeImpl: async () => ({ status: 'ok', body: { ok: true } }),
+    directHealthTimeoutMs: 0,
+  })
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.health.status, 'ok')
+})
+
+test('start-direct reports failure when health proof never arrives', async () => {
+  const config = normalizeDogzillaConnectionConfig({
+    ssh: { host: '192.168.8.88', user: 'pi', alias: 'dogzilla' },
+    remoteRoot: '/home/pi/robodoge',
+  })
+
+  const result = await runDogzillaConnectionAction('start-direct', {
+    config,
+    noSync: true,
+    obstacleAvoidance: {},
+    execFilePromiseImpl: async () => ({ exitCode: 0, stdout: 'started', stderr: '' }),
+    directHealthProbeImpl: async () => ({ status: 'error', error: 'ECONNREFUSED' }),
+    directHealthTimeoutMs: 0,
+  })
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.health.status, 'error')
+  assert.match(result.error, /ECONNREFUSED/)
+})
