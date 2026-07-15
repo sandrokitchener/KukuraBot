@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -98,7 +98,7 @@ export async function migrateMapFrameWaypoints({
     await writeFile(backupPath, configRaw, 'utf-8')
 
     config.sets[activeSetId].waypoints = waypoints
-    await writeFile(waypointFile, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
+    await writeJsonAtomically(waypointFile, config)
 
     return {
       ok: true,
@@ -121,6 +121,16 @@ export async function migrateMapFrameWaypoints({
     skipped,
     origin: { x: mapOrigin.x, y: mapOrigin.y, yaw: mapOrigin.yaw, label: mapOrigin.label },
     preview: 'Run with --no-dry-run to apply.',
+  }
+}
+
+async function writeJsonAtomically(file, value) {
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf-8')
+    await rename(temporary, file)
+  } finally {
+    await rm(temporary, { force: true })
   }
 }
 

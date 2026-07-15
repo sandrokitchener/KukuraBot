@@ -143,7 +143,15 @@ if ($Background) {
   $stopPatternQuoted = ConvertTo-RemoteSingleQuote $stopPattern
   $stopCommand = 'for pid in $(pgrep -f ' + $stopPatternQuoted + ' 2>/dev/null || true); do if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi; kill -TERM "$pid" 2>/dev/null || true; done; sleep 0.8; for pid in $(pgrep -f ' + $stopPatternQuoted + ' 2>/dev/null || true); do if [ "$pid" = "$$" ] || [ "$pid" = "$PPID" ]; then continue; fi; kill -KILL "$pid" 2>/dev/null || true; done'
   $stopCommandQuoted = ConvertTo-RemoteSingleQuote $stopCommand
-  $remoteCommand = "cd $remoteRootQuoted && mkdir -p logs && $releaseVendorCameraCommand && if [ -f logs/yolo-vision.pid ]; then kill `$(cat logs/yolo-vision.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/yolo-vision.log 2>&1 < /dev/null & echo `$! > logs/yolo-vision.pid) && sleep 2 && cat logs/yolo-vision.pid && tail -n 20 logs/yolo-vision.log"
+  $systemdFlag = if ($DetectionEnabled) { "--detection-enabled" } else { "--raw-stream" }
+  $systemdFlagQuoted = ConvertTo-RemoteSingleQuote "YOLO_DETECTION_FLAG=$systemdFlag"
+  $manualStart = "cd $remoteRootQuoted && mkdir -p logs && $releaseVendorCameraCommand && if [ -f logs/yolo-vision.pid ]; then kill `$(cat logs/yolo-vision.pid) 2>/dev/null || true; fi && bash -lc $stopCommandQuoted && sleep 1; (nohup bash -lc $serverCommandQuoted > logs/yolo-vision.log 2>&1 < /dev/null & echo `$! > logs/yolo-vision.pid) && sleep 2 && cat logs/yolo-vision.pid && tail -n 20 logs/yolo-vision.log"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "systemctl cat robodoge-yolo-vision.service >/dev/null 2>&1"
+  $remoteCommand = if ($LASTEXITCODE -eq 0) {
+    "sudo mkdir -p /etc/robodoge && printf '%s\n' $systemdFlagQuoted | sudo tee /etc/robodoge/yolo-vision.env >/dev/null && sudo systemctl restart robodoge-yolo-vision.service && sleep 3 && systemctl is-active robodoge-yolo-vision.service"
+  } else {
+    $manualStart
+  }
   Write-Host "Starting DOGZILLA YOLO vision sidecar on $Alias port $Port in remote background."
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
   exit $LASTEXITCODE

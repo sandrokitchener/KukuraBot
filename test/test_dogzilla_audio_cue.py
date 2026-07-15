@@ -96,6 +96,21 @@ class DogzillaAudioCueTests(unittest.TestCase):
         self.assertTrue(thinking_process.terminated)
         self.assertIn("robot-bark-normal-103.wav", str(popen.call_args.args[0][-1]))
 
+    def test_mapping_start_cue_uses_supplied_sound(self):
+        state = server.AudioState(Path("public/sounds"), "aplay", "")
+        process = FakeProcess()
+
+        with (
+            patch.object(server, "resolve_player", return_value="/usr/bin/aplay"),
+            patch.object(Path, "exists", return_value=True),
+            patch.object(server.subprocess, "Popen", return_value=process) as popen,
+            patch.object(server.time, "sleep", return_value=None),
+        ):
+            result = server.play_cue(state, "mapping-start")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("mapping-start.wav", str(popen.call_args.args[0][-1]))
+
     def test_bark_cue_uses_scaled_temp_file_when_volume_is_lowered(self):
         state = server.AudioState(Path("public/sounds"), "aplay", "")
         bark_process = FakeProcess()

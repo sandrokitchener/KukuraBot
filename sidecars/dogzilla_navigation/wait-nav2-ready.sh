@@ -13,10 +13,25 @@ export PATH="/opt/ros/humble/bin:$PATH"
 action_ready=false
 odom_ready=false
 scan_ready=false
-for i in $(seq 1 180); do
-  $action_ready || timeout --kill-after=2 5 ros2 action list 2>/dev/null | grep '^/navigate_to_pose$' >/dev/null && action_ready=true
-  $odom_ready || timeout --kill-after=2 5 ros2 topic info /odom 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null && odom_ready=true
-  $scan_ready || timeout --kill-after=2 5 ros2 topic info "$SCAN_TOPIC" 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null && scan_ready=true
+for i in $(seq 1 40); do
+  action_pid=""
+  odom_pid=""
+  scan_pid=""
+  if ! $action_ready; then
+    timeout --kill-after=1 2 ros2 action list 2>/dev/null | grep '^/navigate_to_pose$' >/dev/null &
+    action_pid=$!
+  fi
+  if ! $odom_ready; then
+    timeout --kill-after=1 2 ros2 topic info /odom 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null &
+    odom_pid=$!
+  fi
+  if ! $scan_ready; then
+    timeout --kill-after=1 2 ros2 topic info "$SCAN_TOPIC" 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null &
+    scan_pid=$!
+  fi
+  [ -z "$action_pid" ] || { wait "$action_pid" && action_ready=true || true; }
+  [ -z "$odom_pid" ] || { wait "$odom_pid" && odom_ready=true || true; }
+  [ -z "$scan_pid" ] || { wait "$scan_pid" && scan_ready=true || true; }
   if $action_ready && $odom_ready && $scan_ready; then
     echo "READY"
     exit 0

@@ -6,6 +6,25 @@ import test from 'node:test'
 
 import { tryHandleDogzillaRoute } from '../lib/http-dogzilla-routes.mjs'
 
+test('autonomous mapping start plays robot speaker cue after startup succeeds', async () => {
+  const cues = []
+  const sent = []
+
+  await tryHandleDogzillaRoute({
+    request: { method: 'POST' },
+    requestUrl: new URL('http://localhost/api/dogzilla/connection/action'),
+    response: {},
+    readJsonBody: async () => ({ action: 'start-autonomous-mapping', live: true }),
+    sendJson: async (_response, statusCode, payload) => { sent.push({ statusCode, payload }); return true },
+    getDogzillaPoseTrack: () => [],
+    runDogzillaConnectionActionImpl: async () => ({ status: 'ok' }),
+    sendDogzillaAudioCueImpl: async (cue) => { cues.push(cue); return { status: 'ok', ok: true, cue } },
+  })
+
+  assert.deepEqual(cues, ['mapping-start'])
+  assert.equal(sent[0].payload.audioCue.ok, true)
+})
+
 test('save-map-pose route saves map, restarts localization, and captures origin', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-map-save-'))
   const actions = []

@@ -10,8 +10,8 @@ import {
 test('DOGZILLA battery tracker keeps last valid battery when current read fails', () => {
   const tracker = createDogzillaBatteryStateTracker()
 
-  const valid = tracker.resolve(normalizeDogzillaBatterySample(73), '2026-06-04T10:00:00.000Z')
-  const failed = tracker.resolve(normalizeDogzillaBatterySample(0), '2026-06-04T10:00:01.000Z')
+  const valid = tracker.resolve(normalizeDogzillaBatterySample({ value: 73, unit: 'percent' }), '2026-06-04T10:00:00.000Z')
+  const failed = tracker.resolve(normalizeDogzillaBatterySample({ value: 0, unit: 'percent' }), '2026-06-04T10:00:01.000Z')
 
   assert.equal(valid.value, 73)
   assert.equal(valid.status, 'ok')
@@ -23,25 +23,23 @@ test('DOGZILLA battery tracker keeps last valid battery when current read fails'
 test('DOGZILLA battery tracker stays unavailable until a real number has been seen', () => {
   const tracker = createDogzillaBatteryStateTracker()
 
-  const failed = tracker.resolve(normalizeDogzillaBatterySample(0), '2026-06-04T10:00:01.000Z')
+  const failed = tracker.resolve(normalizeDogzillaBatterySample({ value: 0, unit: 'percent' }), '2026-06-04T10:00:01.000Z')
 
   assert.equal(failed.value, null)
   assert.equal(failed.status, 'read-failed')
 })
 
-test('DOGZILLA battery tracker keeps positive out-of-range readings displayable', () => {
+test('DOGZILLA battery tracker does not cache voltage as percent', () => {
   const tracker = createDogzillaBatteryStateTracker()
 
-  const raw = tracker.resolve(normalizeDogzillaBatterySample(118.4), '2026-06-04T10:00:00.000Z')
+  const raw = tracker.resolve(normalizeDogzillaBatterySample({ value: 12.4, unit: 'volts' }), '2026-06-04T10:00:00.000Z')
   const failed = tracker.resolve(normalizeDogzillaBatterySample(Number.NaN), '2026-06-04T10:00:01.000Z')
 
-  assert.equal(raw.value, 118.4)
-  assert.equal(raw.status, 'out-of-range')
-  assert.equal(raw.unit, 'raw')
-  assert.equal(failed.value, 118.4)
-  assert.equal(failed.status, 'last-known')
-  assert.equal(failed.unit, 'raw')
-  assert.equal(failed.lastKnownAt, '2026-06-04T10:00:00.000Z')
+  assert.equal(raw.value, 12.4)
+  assert.equal(raw.status, 'unsupported-unit')
+  assert.equal(raw.unit, 'volts')
+  assert.equal(failed.value, null)
+  assert.equal(failed.status, 'unavailable')
 })
 
 test('DOGZILLA battery tracker can seed last-known battery from persisted state', () => {
@@ -68,8 +66,8 @@ test('DOGZILLA battery tracker reports valid samples to persistence callback', (
     onUpdate: (state) => updates.push(state),
   })
 
-  tracker.resolve(normalizeDogzillaBatterySample(62), '2026-06-04T10:00:00.000Z')
-  tracker.resolve(normalizeDogzillaBatterySample(0), '2026-06-04T10:00:01.000Z')
+  tracker.resolve(normalizeDogzillaBatterySample({ value: 62, unit: 'percent' }), '2026-06-04T10:00:00.000Z')
+  tracker.resolve(normalizeDogzillaBatterySample({ value: 0, unit: 'percent' }), '2026-06-04T10:00:01.000Z')
 
   assert.deepEqual(updates, [
     {
@@ -81,7 +79,27 @@ test('DOGZILLA battery tracker reports valid samples to persistence callback', (
   ])
 })
 
+test('cached battery telemetry stays visibly last-known', () => {
+  const tracker = createDogzillaBatteryStateTracker()
+  tracker.resolve({ value: 73, unit: 'percent', status: 'ok' }, '2026-06-04T10:00:00.000Z')
+
+  const cached = tracker.resolve({ value: 72, unit: 'percent', status: 'cached' }, '2026-06-04T10:00:01.000Z')
+
+  assert.equal(cached.value, 73)
+  assert.equal(cached.status, 'last-known')
+  assert.equal(cached.readStatus, 'cached')
+})
+
 test('normalizeLastKnownBattery rejects empty persisted state', () => {
   assert.equal(normalizeLastKnownBattery({ value: 0, lastKnownAt: 'bad' }), null)
   assert.equal(normalizeLastKnownBattery(null), null)
+})
+
+test('untyped numeric battery data is not treated as percent', () => {
+  assert.deepEqual(normalizeDogzillaBatterySample(73), {
+    value: 73,
+    raw: 73,
+    status: 'untyped',
+    unit: 'raw',
+  })
 })

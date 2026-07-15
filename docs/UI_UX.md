@@ -191,16 +191,14 @@ Avoid generic `Disconnected` unless the evidence is truly transport failure.
 
 ### Probe Interference Check
 
-The startup monitor currently checks periodically. If the Pi is slow, repeated health, lifecycle, SSH, or startup probes may increase load and look like random Nav2 flapping.
+The startup monitor currently checks every 12 seconds. If the Pi is slow, repeated health, lifecycle, SSH, or startup probes may increase load and look like random Nav2 flapping. `APP_DOGZILLA_STARTUP_MONITOR=0` disables only this log monitor; it does not stop rosbridge reconnects. The rosbridge client retries its WebSocket every 3 seconds after an unintentional close.
 
 Add an explicit verification step:
 
-- compare behavior at current monitor interval
-- test `APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS=20000`
-- test `APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS=30000`
+- compare behavior with the monitor enabled and disabled
 - compare Nav2 transition frequency and command success
 
-Do not lower monitor intervals below 8 seconds without proving lifecycle and bridge checks stay fast under load.
+Do not document or rely on `APP_DOGZILLA_STARTUP_MONITOR_INTERVAL_MS` until code adds support for it. Reconnect frequency is controlled by `RosbridgeClient.reconnectIntervalMs` (default 3 seconds).
 
 ## Implementation Order
 

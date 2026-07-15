@@ -14,6 +14,29 @@
   "selectedMotionProfile": "default",
   "selectedWaypointSet": "home",
   "selectedActionMap": "default",
+  "activePerformanceProfile": "balanced",
+  "performanceProfiles": {
+    "balanced": {
+      "label": "Balanced",
+      "feedbackPollMs": 2500,
+      "statePollMs": 1000,
+      "lidarPollMs": 750,
+      "cameraStream": "raw",
+      "visionEnabled": true,
+      "localizationMode": "continuous",
+      "notes": ["Keep localization and safety telemetry continuous; use raw camera on demand."]
+    },
+    "endurance": {
+      "label": "Endurance",
+      "feedbackPollMs": 5000,
+      "statePollMs": 2500,
+      "lidarPollMs": 1500,
+      "cameraStream": "off",
+      "visionEnabled": false,
+      "localizationMode": "continuous",
+      "notes": ["Reduce UI polling and disable camera/YOLO display; never pause localization or safety telemetry."]
+    }
+  },
   "targets": {
     "isaacsim": {
       "label": "Isaac Sim",

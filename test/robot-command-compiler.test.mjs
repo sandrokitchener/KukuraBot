@@ -45,6 +45,70 @@ test('compileRobotRuntimePreview maps move command to named waypoint goto plan',
   assert.equal(preview.payload.planTopic, '/dogzilla/command_plan')
 })
 
+test('compileRobotRuntimePreview blocks operator follow until a dispatchable waypoint exists', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'follow',
+        waypoint: 'source',
+      },
+    },
+    waypoints: {
+      source: {
+        kind: 'special',
+        mode: 'operator_source',
+      },
+    },
+  }))
+
+  assert.equal(preview.status, 'unsupported')
+  assert.equal(preview.action, 'dogzilla.follow_operator')
+  assert.equal(preview.canonicalPlan, null)
+  assert.match(preview.warnings.join('\n'), /dispatchable map waypoint/i)
+})
+
+test('compileRobotRuntimePreview maps explicit YOLO vision state changes', () => {
+  for (const enabled of [true, false]) {
+    const preview = compileRobotRuntimePreview(runtimePreviewInput({
+      source: { parsed: { command: 'vision', enabled } },
+    }))
+
+    assert.equal(preview.status, 'ready')
+    assert.equal(preview.action, 'dogzilla.vision_toggle')
+    assert.equal(preview.canonicalPlan.kind, 'vision.toggle')
+    assert.deepEqual(preview.canonicalPlan.params, { enabled })
+  }
+})
+
+test('compileRobotRuntimePreview rejects implicit YOLO vision state', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: { parsed: { command: 'vision' } },
+  }))
+
+  assert.equal(preview.status, 'invalid')
+  assert.equal(preview.action, 'dogzilla.vision_toggle')
+  assert.deepEqual(preview.missingRequired, ['fields.enabled'])
+  assert.match(preview.warnings.join('\n'), /explicit boolean enabled/i)
+})
+
+test('compileRobotRuntimePreview never emits an unsupported follow bridge plan for map waypoints', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'follow',
+        waypoint: 'living_room',
+      },
+    },
+    waypoints: {
+      living_room: mapWaypoint(),
+    },
+  }))
+
+  assert.equal(preview.status, 'unsupported')
+  assert.equal(preview.canonicalPlan, null)
+  assert.match(preview.warnings.join('\n'), /not integrated yet/i)
+})
+
 test('compileRobotRuntimePreview blocks space-separated waypoint names when config says unverified', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
@@ -111,7 +175,7 @@ test('compileRobotRuntimePreview accepts stored pose as source of truth over sta
   assert.equal(preview.canonicalPlan.params.x, 9.2)
 })
 
-test('compileRobotRuntimePreview converts app_map waypoint through saved origin', () => {
+test('compileRobotRuntimePreview refuses mutable current origin as app_map position authority', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
@@ -138,14 +202,9 @@ test('compileRobotRuntimePreview converts app_map waypoint through saved origin'
     },
   }))
 
-  assert.equal(preview.status, 'ready')
-  assert.equal(preview.canonicalPlan.params.frame, 'map')
-  assert.equal(preview.canonicalPlan.params.sourceFrame, 'app_map')
-  assert.equal(preview.canonicalPlan.params.x, 10)
-  assert.equal(preview.canonicalPlan.params.y, 21)
-  assert.equal(preview.canonicalPlan.params.yaw, 3.14159)
-  assert.equal(preview.canonicalPlan.params.mapId, 'test_map')
-  assert.equal(preview.canonicalPlan.params.mapFingerprint, 'test-map-fingerprint')
+  assert.equal(preview.status, 'invalid')
+  assert.deepEqual(preview.missingRequired, ['waypoint.capturedMapPose'])
+  assert.match(preview.warnings.at(-1), /no immutable captured map pose or waypoint origin/)
 })
 
 test('compileRobotRuntimePreview keeps app_map waypoint fixed when current origin is reset', () => {
@@ -244,7 +303,7 @@ test('compileRobotRuntimePreview uses captured map pose for legacy app_map waypo
   assert.match(preview.warnings.join('\n'), /using its captured map pose/)
 })
 
-test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', () => {
+test('compileRobotRuntimePreview blocks app_map waypoint without immutable capture metadata', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
@@ -261,11 +320,11 @@ test('compileRobotRuntimePreview blocks app_map waypoint without saved origin', 
   }))
 
   assert.equal(preview.status, 'invalid')
-  assert.deepEqual(preview.missingRequired, ['waypoint.mapOrigin'])
-  assert.match(preview.warnings.at(-1), /no saved DOGZILLA map origin/)
+  assert.deepEqual(preview.missingRequired, ['waypoint.capturedMapPose'])
+  assert.match(preview.warnings.at(-1), /no immutable captured map pose or waypoint origin/)
 })
 
-test('compileRobotRuntimePreview accepts app_map waypoint even when saved origin has no map identity', () => {
+test('compileRobotRuntimePreview does not use mutable origin even when its coordinates are finite', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {
       parsed: {
@@ -287,7 +346,8 @@ test('compileRobotRuntimePreview accepts app_map waypoint even when saved origin
     },
   }))
 
-  assert.equal(preview.status, 'ready')
+  assert.equal(preview.status, 'invalid')
+  assert.deepEqual(preview.missingRequired, ['waypoint.capturedMapPose'])
 })
 
 test('compileRobotRuntimePreview rejects trick actions without verified numeric ids', () => {
@@ -440,6 +500,20 @@ test('compileRobotManualControlPreview maps gamepad axes to DOGZILLA relative mo
     source: 'gamepad',
   })
   assert.equal(preview.payload.canonicalPlan, preview.canonicalPlan)
+})
+
+test('compileRobotManualControlPreview gives Android touch the same bounded lateral path', () => {
+  const preview = compileRobotManualControlPreview(manualControlInput({
+    control: {
+      forward: 0,
+      strafe: 1,
+      turn: 0,
+      source: 'touch',
+    },
+  }))
+
+  assert.equal(preview.canonicalPlan.params.y_step, 18)
+  assert.equal(preview.canonicalPlan.params.source, 'touch')
 })
 
 test('compileRobotManualControlPreview deadbands neutral gamepad drift', () => {

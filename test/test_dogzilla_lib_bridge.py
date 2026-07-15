@@ -82,16 +82,50 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
         old_metadata = dogzilla_lib_bridge.DEFAULT_MAP_METADATA_FILE
         old_yaml = dogzilla_lib_bridge.DEFAULT_MAP_YAML_FILE
+        old_localization_status = dogzilla_lib_bridge.LOCALIZATION_STATUS_FILE
+        old_map_pose_mode = dogzilla_lib_bridge.MAP_POSE_MODE_FILE
+        localization_status_path = map_dir / "localization-status.json"
+        map_pose_mode_path = map_dir / "map-pose-mode.json"
+        localization_status_path.write_text(json.dumps({
+            "trusted": True,
+            "phase": "tracking",
+        }), encoding="utf-8")
+        map_pose_mode_path.write_text(json.dumps({"mode": "localization"}), encoding="utf-8")
         dogzilla_lib_bridge.DEFAULT_MAP_METADATA_FILE = metadata_path
         dogzilla_lib_bridge.DEFAULT_MAP_YAML_FILE = yaml_path
+        dogzilla_lib_bridge.LOCALIZATION_STATUS_FILE = localization_status_path
+        dogzilla_lib_bridge.MAP_POSE_MODE_FILE = map_pose_mode_path
         self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_MAP_METADATA_FILE", old_metadata))
         self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_MAP_YAML_FILE", old_yaml))
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "LOCALIZATION_STATUS_FILE", old_localization_status))
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "MAP_POSE_MODE_FILE", old_map_pose_mode))
 
         # Preserve nav mode across tests — default is now "idle" but existing
         # goto tests expect "navigate" to avoid triggering Docker promotion.
         old_nav_mode = dogzilla_lib_bridge._NAV_MODE
         dogzilla_lib_bridge._NAV_MODE = "navigate"
         self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "_NAV_MODE", old_nav_mode))
+
+    def test_localization_status_fails_closed_without_global_match_proof(self):
+        dogzilla_lib_bridge.LOCALIZATION_STATUS_FILE.unlink()
+
+        status = dogzilla_lib_bridge.read_localization_status()
+        prerequisites = dogzilla_lib_bridge.get_nav2_waypoint_prerequisites(FakeMissingOdomNav2Client())
+
+        self.assertFalse(status["trusted"])
+        self.assertFalse(prerequisites["ok"])
+        self.assertIn("Localization proof unavailable", prerequisites["message"])
+
+    def test_mapping_pose_is_trusted_without_saved_map_relocalization(self):
+        dogzilla_lib_bridge.MAP_POSE_MODE_FILE.write_text(
+            json.dumps({"mode": "mapping"}), encoding="utf-8"
+        )
+
+        status = dogzilla_lib_bridge.read_localization_status()
+
+        self.assertTrue(status["trusted"])
+        self.assertFalse(status["required"])
+        self.assertEqual(status["phase"], "mapping")
 
     def test_state_read_aliases_accept_study_page_method_names(self):
         fake = FakeRobot()
@@ -286,6 +320,116 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertIsNone(state["battery"])
         self.assertIn("failure sentinel 0", state["readErrors"]["battery"])
 
+    def test_low_battery_blocks_motion_and_applies_safe_stop(self):
+        runtime = battery_safety_runtime(9)
+
+        result = runtime.execute({
+            "kind": "locomotion.relative",
+            "params": {"x_step": 8, "y_step": 0, "turn_rate": 0},
+        })
+
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["delivery"], "battery-safety-blocked")
+        self.assertEqual(result["batterySafety"]["status"], "cutoff")
+        self.assertIn(("stop",), runtime.robot.calls)
+
+    def test_low_battery_still_allows_neutral_stop(self):
+        runtime = battery_safety_runtime(9)
+
+        result = runtime.execute({
+            "kind": "locomotion.relative",
+            "params": {"x_step": 0, "y_step": 0, "turn_rate": 0},
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertIn(("stop",), runtime.robot.calls)
+
+    def test_stop_label_cannot_hide_moving_action_id(self):
+        runtime = battery_safety_runtime(9)
+
+        result = runtime.execute({
+            "kind": "action.once",
+            "params": {"actionName": "stop", "actionId": 14},
+        })
+
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["delivery"], "battery-safety-blocked")
+        self.assertNotIn(("action", 14), runtime.robot.calls)
+
+    def test_malformed_action_id_returns_error_without_aborting_execution(self):
+        runtime = battery_safety_runtime(100)
+
+        result = runtime.execute({
+            "kind": "action.once",
+            "params": {"actionId": "not-an-id"},
+        })
+
+        self.assertFalse(result["executed"])
+        self.assertIn("missing actionId", result["error"])
+        self.assertFalse(any(call[0] == "action" for call in runtime.robot.calls))
+
+    def test_battery_read_serializes_stop_and_restores_serial_timeout(self):
+        runtime = battery_safety_runtime(100)
+        runtime.robot = FakeBlockingBatteryRobot()
+        previous_timeout = dogzilla_lib_bridge.DEFAULT_BATTERY_READ_TIMEOUT_SEC
+        dogzilla_lib_bridge.DEFAULT_BATTERY_READ_TIMEOUT_SEC = 0.05
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "DEFAULT_BATTERY_READ_TIMEOUT_SEC", previous_timeout))
+
+        read_thread = threading.Thread(
+            target=runtime._read_battery_with_timeout,
+            args=(runtime.robot,),
+        )
+        started = time.monotonic()
+        read_thread.start()
+        self.assertTrue(runtime.robot.read_started.wait(0.2))
+        result = runtime._execute_emergency_stop(reason="test")
+        read_thread.join(0.2)
+        elapsed = time.monotonic() - started
+
+        self.assertTrue(result["executed"])
+        self.assertLess(elapsed, 0.3)
+        self.assertFalse(read_thread.is_alive())
+        self.assertFalse(runtime.robot.uart_overlap)
+        self.assertEqual(runtime.robot.ser.timeout, 0.5)
+        self.assertIn(("stop",), runtime.robot.calls)
+
+    def test_battery_timeout_restore_failure_still_releases_robot_lock(self):
+        runtime = battery_safety_runtime(100)
+        runtime.robot.ser = FakeRestoreFailureSerial()
+
+        raw, error = runtime._read_battery_with_timeout(runtime.robot)
+
+        self.assertIsNone(raw)
+        self.assertEqual(error, "restore failed")
+        self.assertTrue(runtime._lock.acquire(blocking=False))
+        runtime._lock.release()
+
+    def test_battery_motion_recovers_only_at_hysteresis_threshold(self):
+        runtime = battery_safety_runtime(9)
+        runtime.execute({"kind": "locomotion.relative", "params": {"x_step": 8}})
+
+        runtime.robot.battery = 12
+        runtime.battery_last_read_monotonic = 0
+        recovering = runtime.execute({"kind": "locomotion.relative", "params": {"x_step": 8}})
+        self.assertFalse(recovering["executed"])
+        self.assertEqual(recovering["batterySafety"]["status"], "recovering")
+
+        runtime.robot.battery = 15
+        runtime.battery_last_read_monotonic = 0
+        recovered = runtime.execute({"kind": "locomotion.relative", "params": {"x_step": 8}})
+        self.assertTrue(recovered["executed"])
+
+    def test_voltage_like_battery_reading_is_not_treated_as_percent(self):
+        runtime = battery_safety_runtime(12.4)
+
+        state = runtime.read_state()
+
+        self.assertIsNone(state["battery"])
+        self.assertEqual(state["batteryUnit"], "unknown")
+        self.assertEqual(state["batterySafety"]["status"], "invalid")
+        self.assertFalse(state["batterySafety"]["motionAllowed"])
+        self.assertIn("integer percentage", state["readErrors"]["battery"])
+
     def test_runtime_snapshot_reuses_one_nav2_sample(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
         runtime.import_error = None
@@ -328,6 +472,52 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["waypoint"], "living_room")
         self.assertTrue(result["waypointSafe"])
         self.assertAlmostEqual(runtime.nav2_client.goal["yaw"], 7 - 6.283185307179586)
+
+    def test_goto_can_require_verified_nav2_completion(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = "serial lib unavailable"
+        runtime.dry_run = False
+        runtime.nav2_client = FakeNav2Client()
+
+        result = runtime.execute({
+            "kind": "locomotion.goto",
+            "params": {
+                "frame": "map",
+                "x": 1,
+                "y": -2,
+                "yaw": 0.2,
+                "waypoint": "mapping_resume_pose",
+                "waitForResult": True,
+                "resultTimeoutSec": 600,
+            },
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["goalCompleted"])
+        self.assertEqual(result["goalStatus"], "succeeded")
+        self.assertEqual(result["status"], "arrived")
+        self.assertTrue(runtime.nav2_client.goal["waitForResult"])
+        self.assertEqual(runtime.nav2_client.goal["resultTimeoutSec"], 600)
+
+    def test_goto_skips_redundant_resume_when_nav2_is_already_ready(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = "serial lib unavailable"
+        runtime.dry_run = False
+        runtime.nav2_client = FakeNav2Client()
+        runtime.nav2_client.snapshot = lambda: {"waypointReady": True}
+        dogzilla_lib_bridge._NAV_MODE = "idle"
+        original_set_nav_mode = dogzilla_lib_bridge.set_nav_mode
+        dogzilla_lib_bridge.set_nav_mode = lambda _mode: self.fail("redundant Nav2 resume")
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "set_nav_mode", original_set_nav_mode))
+
+        result = runtime.execute({
+            "kind": "locomotion.goto",
+            "params": {"frame": "map", "x": 1, "y": -2, "yaw": 0},
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["modeTransition"]["alreadyActive"])
+        self.assertEqual(dogzilla_lib_bridge.get_nav_mode(), "navigate")
 
     def test_goto_blocks_goal_outside_active_map(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -786,6 +976,42 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertIn("lifecycle_warning", calls[0]["script"])
         self.assertIn("Lifecycle state probe timed out", calls[0]["script"])
 
+    def test_nav2_client_waits_for_docker_goal_result_when_requested(self):
+        previous = dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED
+        dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = True
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge.nav2_client_module, "DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED", previous))
+
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        client.action_name = "navigate_to_pose"
+        client.wait_timeout = 2.0
+        client.goal_response_timeout = 3.0
+        client.backend = "docker-rclpy"
+        client.available = True
+        client.docker_container = "robodoge-rosbridge"
+        calls = []
+
+        def fake_run_docker_python(script, *, timeout):
+            calls.append({"script": script, "timeout": timeout})
+            return dogzilla_lib_bridge.subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout='{"executed": true, "delivery": "Nav2 NavigateToPose", "goalAccepted": true, "goalCompleted": true, "goalStatus": "succeeded"}\n',
+                stderr="",
+            )
+
+        client._run_docker_python = fake_run_docker_python
+        result = client.send_goal(
+            frame="map", x=1.25, y=-0.5, yaw=0.2,
+            wait_for_result=True, result_timeout=600,
+        )
+
+        self.assertTrue(result["goalCompleted"])
+        self.assertEqual(result["goalStatus"], "succeeded")
+        self.assertGreater(calls[0]["timeout"], 600)
+        self.assertIn('request["waitForResult"]', calls[0]["script"])
+        self.assertIn("get_result_async", calls[0]["script"])
+        self.assertIn('"cancelConfirmed": cancel_confirmed', calls[0]["script"])
+
     def test_docker_nav2_goal_timeout_returns_structured_error(self):
         previous = dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED
         dogzilla_lib_bridge.nav2_client_module.DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED = True
@@ -901,6 +1127,54 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             ("turn", 0.0),
         ])
 
+    def test_locomotion_blocks_lateral_step_by_default(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+
+        result = runtime.execute({
+            "kind": "locomotion.relative",
+            "params": {"x_step": 0, "y_step": 18, "turn_rate": 0, "gait": "trot", "pace": "slow"},
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertIn(("move", "y", 0.0), runtime.robot.calls)
+
+    def test_gamepad_locomotion_caps_lateral_step_at_manual_limit(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+
+        result = runtime.execute({
+            "kind": "locomotion.relative",
+            "params": {"x_step": 0, "y_step": -18, "turn_rate": 0, "gait": "trot", "pace": "slow", "source": "gamepad"},
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertIn(("move", "y", -1.0), runtime.robot.calls)
+
+    def test_touch_locomotion_caps_lateral_step_at_manual_limit(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+
+        result = runtime.execute({
+            "kind": "locomotion.relative",
+            "params": {"x_step": 0, "y_step": 18, "turn_rate": 0, "gait": "trot", "pace": "slow", "source": "touch"},
+        })
+
+        self.assertTrue(result["executed"])
+        self.assertIn(("move", "y", 1.0), runtime.robot.calls)
+
     def test_nav2_cmd_vel_to_locomotion_preserves_forward_motion_with_stable_walk(self):
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
             "linear": {"x": 0.13, "y": 0.0},
@@ -908,7 +1182,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         })
 
         self.assertGreater(params["x_step"], 0)
-        self.assertEqual(params["mapping"]["maxXStep"], 14.0)
+        self.assertEqual(params["mapping"]["maxXStep"], 8.0)
         self.assertEqual(params["y_step"], 0.0)
         self.assertEqual(params["gait"], "walk")
         self.assertEqual(params["pace"], "slow")
@@ -917,7 +1191,35 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertFalse(params["mapping"]["allowTrot"])
         self.assertEqual(params["source"], "nav2_cmd_vel")
 
-    def test_nav2_cmd_vel_to_locomotion_trot_is_opt_in(self):
+    def test_nav2_cmd_vel_to_locomotion_blocks_lateral_motion_by_default(self):
+        params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
+            "linear": {"x": 0.0, "y": 0.06},
+            "angular": {"z": 0.0},
+        })
+
+        self.assertEqual(params["x_step"], 0.0)
+        self.assertEqual(params["y_step"], 0.0)
+        self.assertEqual(params["gait"], "walk")
+        self.assertEqual(params["pace"], "slow")
+
+    def test_nav2_gait_safety_cannot_be_overridden(self):
+        globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
+        config = globals_["_SPEED_CONFIG"]
+        previous = dict(config)
+        self.addCleanup(lambda: config.update(previous))
+        config.update({"maxXStep": 18, "maxYStep": 18, "allowTrot": True})
+
+        params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
+            "linear": {"x": 0.26, "y": 0.2},
+            "angular": {"z": 0.0},
+        })
+
+        self.assertEqual(params["x_step"], 8.0)
+        self.assertEqual(params["y_step"], 0.0)
+        self.assertEqual(params["gait"], "walk")
+        self.assertEqual(params["pace"], "slow")
+
+    def test_nav2_cmd_vel_to_locomotion_rejects_trot_override(self):
         globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
         previous = globals_["_SPEED_CONFIG"]["allowTrot"]
         globals_["_SPEED_CONFIG"]["allowTrot"] = True
@@ -928,9 +1230,9 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             "angular": {"z": 0.2},
         })
 
-        self.assertEqual(params["gait"], "trot")
-        self.assertEqual(params["pace"], "normal")
-        self.assertTrue(params["mapping"]["allowTrot"])
+        self.assertEqual(params["gait"], "walk")
+        self.assertEqual(params["pace"], "slow")
+        self.assertFalse(params["mapping"]["allowTrot"])
 
     def test_nav2_cmd_vel_to_locomotion_allows_in_place_turn_when_nav2_requests_it(self):
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
@@ -1183,6 +1485,8 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         runtime.import_error = "serial lib unavailable"
         runtime.dry_run = False
         runtime.nav2_client = FakeNav2Client()
+        snapshots = iter(({"waypointReady": False}, {"waypointReady": True}))
+        runtime.nav2_client.snapshot = lambda: next(snapshots, {"waypointReady": True})
 
         old_set_nav_mode = dogzilla_lib_bridge.set_nav_mode
         old_wait = dogzilla_lib_bridge.DogzillaRuntime._wait_for_nav2_readiness
@@ -1215,6 +1519,9 @@ class DogzillaLibBridgeTests(unittest.TestCase):
     def test_autonomous_mapping_status_uses_active_marker_and_candidate_result(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             maps_dir = Path(temp_dir)
+            proc_root = maps_dir / "proc"
+            (proc_root / "123").mkdir(parents=True)
+            (proc_root / "123" / "cmdline").write_bytes(b"/bin/bash\0/home/pi/robodoge/sidecars/dogzilla_navigation/autonomous_mapping_supervisor.sh\0")
             (maps_dir / "autonomous-mapping.active").write_text("123\n", encoding="utf-8")
             (maps_dir / "autonomous-mapping-status.json").write_text(
                 json.dumps({"state": "navigating", "startedAt": 10, "updatedAt": 20}),
@@ -1224,12 +1531,36 @@ class DogzillaLibBridgeTests(unittest.TestCase):
                 json.dumps({"state": "candidate-ready", "detail": "saved"}),
                 encoding="utf-8",
             )
+            (maps_dir / "robodoge_home_map.json").write_text(
+                json.dumps({
+                    "resumePose": {
+                        "frame": "map",
+                        "x": 1.25,
+                        "y": -0.75,
+                        "yaw": 0.4,
+                        "capturedAt": "2026-07-12T12:00:00Z",
+                    },
+                }),
+                encoding="utf-8",
+            )
 
-            status = dogzilla_lib_bridge.get_autonomous_mapping_status(maps_dir)
+            status = dogzilla_lib_bridge.get_autonomous_mapping_status(maps_dir, proc_root)
+            self.assertFalse(status["active"])
+            (maps_dir / "autonomous-mapping.ready").touch()
+            status = dogzilla_lib_bridge.get_autonomous_mapping_status(maps_dir, proc_root)
 
             self.assertTrue(status["active"])
             self.assertTrue(status["candidateAvailable"])
             self.assertEqual(status["state"], "navigating")
+            self.assertEqual(status["resumePose"]["x"], 1.25)
+
+            self.assertTrue(dogzilla_lib_bridge.autonomous_mapping_marker_is_live(
+                maps_dir / "autonomous-mapping.active", proc_root,
+            ))
+            (proc_root / "123" / "cmdline").write_bytes(b"python3\0unrelated.py\0")
+            self.assertFalse(dogzilla_lib_bridge.autonomous_mapping_marker_is_live(
+                maps_dir / "autonomous-mapping.active", proc_root,
+            ))
 
     def test_background_goto_updates_existing_record_and_detects_no_motion(self):
         import io
@@ -1306,8 +1637,12 @@ class FakeZeroBatteryRobot:
 
 
 class FakeActionRobot:
-    def __init__(self):
+    def __init__(self, battery=100):
         self.calls = []
+        self.battery = battery
+
+    def read_Battery(self):
+        return self.battery
 
     def gait_type(self, value):
         self.calls.append(("gait_type", value))
@@ -1331,6 +1666,62 @@ class FakeActionRobot:
         self.calls.append(("turn", value))
 
 
+class FakeBlockingBatteryRobot(FakeActionRobot):
+    def __init__(self):
+        super().__init__()
+        self.ser = FakeSerial()
+        self.read_started = threading.Event()
+        self.read_active = False
+        self.uart_overlap = False
+
+    def read_Battery(self):
+        self.read_active = True
+        self.read_started.set()
+        time.sleep(self.ser.timeout)
+        self.read_active = False
+        return self.battery
+
+    def stop(self):
+        self.uart_overlap = self.uart_overlap or self.read_active
+        super().stop()
+
+
+class FakeSerial:
+    def __init__(self):
+        self.timeout = 0.5
+
+
+class FakeRestoreFailureSerial:
+    def __init__(self):
+        self._timeout = 0.5
+        self._writes = 0
+
+    @property
+    def timeout(self):
+        return self._timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self._writes += 1
+        if self._writes == 2:
+            raise OSError("restore failed")
+        self._timeout = value
+
+
+def battery_safety_runtime(battery):
+    runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+    runtime.import_error = None
+    runtime.robot_error = None
+    runtime.robot = FakeActionRobot(battery)
+    runtime.dry_run = False
+    runtime._lock = threading.Lock()
+    runtime.battery_safety_enforced = True
+    runtime.nav2_client = FakeNav2Client()
+    runtime.nav2_cmd_vel_blocked = False
+    runtime.nav2_cmd_vel_blocked_reason = None
+    return runtime
+
+
 class FakeNav2Client:
     def _scan_snapshot(self):
         return {
@@ -1341,11 +1732,19 @@ class FakeNav2Client:
             "checkedAt": 123.0,
         }
 
-    def send_goal(self, *, frame, x, y, yaw):
-        self.goal = {"frame": frame, "x": x, "y": y, "yaw": yaw}
+    def send_goal(self, *, frame, x, y, yaw, wait_for_result=False, result_timeout=0):
+        self.goal = {
+            "frame": frame,
+            "x": x,
+            "y": y,
+            "yaw": yaw,
+            "waitForResult": wait_for_result,
+            "resultTimeoutSec": result_timeout,
+        }
         return {
             "executed": True,
             "delivery": "Nav2 NavigateToPose",
+            **({"goalCompleted": True, "goalStatus": "succeeded"} if wait_for_result else {}),
             **self.goal,
         }
 

@@ -1,6 +1,6 @@
 # DOGZILLA Navigation Notes
 
-Read this for SLAM, Nav2, waypoints, saved map origin, pose, robot movement, and route dispatch.
+Read this for SLAM, Nav2, waypoints, map localization, pose, robot movement, and route dispatch.
 
 ## Source-of-truth order
 
@@ -30,16 +30,16 @@ Stable facts captured in repo docs:
 ## Current Robo-Doge
 
 ```text
-capture live map pose -> mapPoseToAppPose() -> save waypoint frame: app_map -> dispatch resolves app_map back to current map pose -> Nav2 NavigateToPose
+trusted map -> base_link pose -> save waypoint in map frame with active-map identity -> Nav2 NavigateToPose
 ```
 
 Key files:
 
 | File | Role |
 | --- | --- |
-| `lib/dogzilla-map-frame.mjs` | `mapPoseToAppPose()` and `appPoseToMapPose()` |
+| `lib/dogzilla-map-frame.mjs` | Resolves legacy `app_map` waypoints from their immutable captured pose/origin metadata |
 | `scripts/capture-dogzilla-map-pose.mjs` | Captures current pose into `config/robot-waypoints.json` |
-| `scripts/set-dogzilla-map-origin.mjs` | Saves current pose as map origin |
+| `sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py` | Proves automatic frozen-map matches before localization becomes trusted |
 | `lib/robot-command-compiler.mjs` | Resolves waypoint pose and builds dispatch plan |
 | `lib/app-service.mjs` | Uses the same resolved runtime/ROS2 config for chat preview and robot dispatch |
 | `lib/dogzilla-navigation-readiness.mjs` | App-side readiness evaluation |
@@ -52,12 +52,13 @@ Key files:
 ## Map and waypoint authority
 
 - `config/robot-waypoints.json` is authoritative for real coordinates and trust fields.
+- Registry contract: `activeSet -> sets[set].waypoints[name]`; each `map_pose` stores finite `x`, `y`, `yaw`, `frame`, `verified`, and, for trusted map entries, `mapId` plus `mapFingerprint`. `special` entries remain semantic targets and never dispatch as poses.
+- The waypoint API accepts either a live waypoint-safe pose or an explicit `map`-frame pose. Explicit poses must be finite, within active-map bounds, and match supplied active-map ID/fingerprint; waypoint writes replace the JSON file atomically.
 - Do not rewrite, downgrade, disable, or "correct" trusted waypoints without explicit user instruction.
-- Diagnostics may warn about drift or stale origin without editing config.
+- Legacy `app_map` entries are preserved during migration and may resolve only from their immutable `capturedMapPose`; a mutable current origin cannot make stale data trusted. `node scripts/migrate-waypoints-to-appmap.mjs` is dry-run by default, makes a timestamped source backup when applied, and writes the registry atomically.
+- Charger-origin records are legacy waypoint metadata only. They do not move the live dot, seed Cartographer, or resolve new waypoints.
 - Notes are never authoritative for dispatch or validation.
-- Current verified `app_map` waypoints include `living_room`, `kitchen`, `garage`, and `charger` with `mapId: robodoge_home`.
-
-Map-identity fingerprint checks no longer block dispatch by themselves. If saved origin is missing, the app can fall back to the current map pose, but physical alignment may still be wrong and should be recaptured when it drifts.
+Active map identity is authoritative for dispatch. New waypoints are stored in the `map` frame with active map ID/fingerprint. Legacy `app_map` waypoints resolve only from immutable `capturedMapPose` or waypoint-owned origin metadata; no mutable current-origin fallback is allowed.
 
 ## Topic contract
 
@@ -65,7 +66,7 @@ Two independent topics carry occupancy grids on the DOGZILLA Pi:
 
 | Topic | Publisher | Purpose |
 | --- | --- | --- |
-| `/map` | Nav2 `map_server` + AMCL | Default static map for navigation and normal minimap polling |
+| `/map` | Nav2 `map_server` | Default static map for navigation and normal minimap polling |
 | `/map_cartographer` | Cartographer occupancy grid | Explicit SLAM-only grid for advanced mapping sessions |
 
 The live Cartographer grid contains raw probabilities (`0-100`), while saved `.pgm` output is thresholded into free/unknown/occupied. `public/robot-map.js` thresholds live cells so the minimap looks like the saved map:
@@ -85,13 +86,20 @@ The live Cartographer grid contains raw probabilities (`0-100`), while saved `.p
 3. `frontier_explorer.py` chooses reachable, clear free cells adjacent to unknown space, then sends only `NavigateToPose` actions. It never publishes direct velocity.
    Its map subscription must match Cartographer's reliable/transient-local QoS, while `/scan_nav2` must use best-effort/volatile QoS; mismatched defaults leave the explorer at zero goals.
    Clearance rejects occupied cells but permits unknown cells beside a sufficiently large free patch; requiring every clearance cell to be known-free rejects every frontier by definition.
+   A failed frontier is quarantined within 0.75 m so exploration tries another region instead of exhausting retries on one unreachable goal. Any successful goal clears that quarantine. Goal timeout means 45 seconds without at least 0.1 m of approach, with a five-minute hard ceiling; six distinct consecutive failed regions stop the run.
 4. It stops on stale SLAM or scan data, missing `map -> base_link` TF, repeated Nav2 failures, goal timeout, goal limit, no safe frontier, or the Finish Mapping stop file. Any orderly explorer exit saves a candidate before cleanup, including a safety stop after repeated frontier failures, so partial SLAM work remains reviewable instead of being discarded.
 5. Finish Mapping saves `maps/candidates/<id>/` only. It restores the previous map only when that active manifest has a verified Cartographer PBSTREAM. For an occupancy-only scanner map, it stops in `candidate-ready`; promote the candidate to resume localization/navigation.
 6. Use Candidate Map is a separate, confirmed promotion step. Candidate metadata records SHA-256 for all three artifacts; promotion rejects missing or altered artifacts, updates `robodoge_home.*` through the persistent `robodoge-rosbridge` container (the mapping workflow may have stopped `robodoge-map-pose`), clears the stored origin, and restarts localization and Nav2. Review the live map before finishing and recapture waypoints if geometry moved.
 
 Finish Mapping succeeds only when the supervisor is still active and its result proves a candidate was saved. A finished or failed explorer session must return a direct error instead of waiting on or accepting an old result file. Windows-launched SSH commands are non-interactive (`ssh -n`) so an open Node stdin pipe cannot keep the HTTP action pending after the remote command exits.
 
-Map-control button state comes from Pi-owned `autonomous-mapping.active`, status, and result files exposed by the direct bridge. App refresh must restore active/candidate state from `/api/robot/health`: active mapping disables Map This Floor and Continue Current Map, enables Finish Mapping, and a saved candidate enables Use Candidate Map.
+Map-control button state comes from Pi-owned `autonomous-mapping.active`, ready, status, and result files exposed by the direct bridge. Mapping counts as active only after the ready signal exists and the marker's supervisor PID still belongs to `autonomous_mapping_supervisor.sh`; the hidden transient starting unit reserves the launch during the Cartographer handoff. Initial load and recurring `/api/robot/health?lite=1` polling must restore active/candidate state: active mapping disables Map This Floor and Continue Current Map, enables Finish Mapping, and a self-stopped session with a saved candidate disables Finish Mapping and enables Use Candidate Map.
+
+Map save captures a fresh `map -> base_link` pose while Cartographer is still in `mapping` or `continue_mapping`, before `/write_state` and before localization restoration. Candidate promotion preserves this `resumePose` only as history and an optional global-matching search hint; it is never a destination or localization proof.
+
+Continue Current Map performs no pre-mapping drive. After battery/gait safety and duplicate-job checks, it reserves the job, stops Nav2, and runs bounded global scan matching against the frozen active PBSTREAM from the robot's current location. A successful match supplies a fresh recovered `map -> base_link` pose. Cartographer then reloads every saved trajectory as frozen and starts a new mapping trajectory at that recovered pose, anchored to the root map-frame trajectory; a later matched trajectory is recorded as proof but is not incorrectly treated as the map coordinate frame. Failure leaves the active map unchanged, stops the mapping supervisor, restores one normal localization process, releases the recovery lock, and leaves Nav2 blocked until localization trust is proven again. The robot may start anywhere inside the mapped area, but LiDAR still needs enough distinctive, unchanged geometry to prove the match.
+
+Nav2 velocity now has an independent last-line collision gate: controllers publish `/cmd_vel_nav`, the smoother publishes `/cmd_vel_raw`, `nav2_collision_monitor` consumes `/scan_nav2` and publishes guarded `/cmd_vel`, and only `/cmd_vel` reaches the gait adapter. The stop polygon covers front and rear around the robot; stale LiDAR fails closed. DOGZILLA's Pi scan timestamps have observed ~0.55 s scheduling jitter, so the default collision source timeout is 0.75 s (`DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT`) — still fail-closed for longer gaps. Keep the collision monitor in the navigation lifecycle manager and never route smoother output directly to hardware.
 
 The mapping launcher explicitly posts `navigate` to the direct bridge after starting mapping Nav2. A same-mode `navigate` request cancels any pending standby timer so an old timer cannot pause the replacement lifecycle manager during exploration.
 
@@ -110,11 +118,11 @@ When startup or preflight says the action server is blocked but lifecycle, `/odo
 
 ## Waypoint capture requires continuous tracking
 
-DOGZILLA runs Cartographer in laser-only localization mode (`use_imu_data = false`, `use_odometry = false`). The real-time correlative scan matcher searches only a local window around the last known pose; it is not global localization.
+DOGZILLA runs Cartographer in laser-only localization mode (`use_imu_data = false`, `use_odometry = false`). Normal tracking uses a local scan-matching window; `Relocalize on Map` is the separate bounded global matcher for carried or otherwise lost robots.
 
 The robot must be driven to each waypoint spot before capture so pose tracking stays continuous. Carrying the robot and setting it down can leave `waypointSafe: true` while the pose is wrong because that flag only proves fresh `map`-frame TF, not physical correctness.
 
-If Nav2 cannot drive to a spot, use manual controls. If the robot was carried, restart localization at a known reference such as the charger before driving to the waypoint spot.
+If Nav2 cannot drive to a spot, use manual controls. If the robot was carried, run `Relocalize on Map`. When automatic frozen-map matching cannot prove a safe match, localization stays untrusted: the floor-plan dot remains hidden and waypoint navigation remains blocked instead of guessing a pose.
 
 ## Readiness checks
 
@@ -138,7 +146,7 @@ The app rosbridge client intentionally subscribes only to throttled `/scan`, `/t
 
 The repo odom helper first uses `odom->base_link`; if absent, it anchors the first live `map->base_link` pose and publishes synthetic relative `/odom`. Do not publish raw global map pose as odom.
 
-The scan filter and odom helper run as direct background processes inside the rosbridge container. ROS2 CLI calls are bounded because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
+The scan filter and odom helper run as direct background processes inside the rosbridge container. Nav2 readiness latches action/odom/scan discovery across 40 bounded, parallel probe rounds (120 seconds worst case); ROS2 CLI calls are capped at 2 seconds because `ros2 topic info` and `ros2 action list` can hang under Pi DDS/daemon load.
 
 Nav2 startup must not fail solely on a short `ros2 topic info /scan_nav2` miss. The scan filter gate waits up to 45 seconds and accepts either publisher discovery or a one-message `/scan_nav2` sample before launching Nav2; otherwise DDS discovery lag can leave only partial helpers running and no lifecycle nodes.
 
@@ -152,6 +160,8 @@ The bridge distinguishes two stop paths:
 
 - `emergency_stop` (reason `emergency_stop`): latches `/nav2/cmd_vel` blocked until an explicit unlatch path is used. A subsequent `locomotion.goto` does **not** silently clear this safety block.
 - `command_preempt` (reason `command_preempt`): cancels the active Nav2 goal and stops robot motion, but does **not** latch `/nav2/cmd_vel` blocked. A fresh `locomotion.goto` clears any stale command-preempt gate before readiness checks. `_execute_command_preempt()` also defensively clears any stale `command_preempt` block before returning.
+
+The app Stop button mirrors live `/healthz-lite` latch state. It is red and labeled `Stop` when clear; while `gaitBlockedReason=emergency_stop`, it becomes gray and says `Stopped`. Clicking `Stopped` sends the explicit `clear_emergency_stop` command and never relies on a waypoint command to unlatch safety. The button starts and falls back to disabled `Unknown` whenever live latch state cannot be confirmed; click results never update it optimistically.
 
 ## Navigation execution contract
 
@@ -228,13 +238,11 @@ npm run dogzilla:start-navigation
 
 Normal app startup and command-time waypoint dispatch do not start map-pose or Nav2. `lib/robot-sidecar-client.mjs` reports readiness blockers when the Pi-owned stack is down. Use the manual scripts below only for explicit operator repair.
 
-`scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar, reads saved origin, and runs `docker exec robodoge-map-pose` to publish initial pose. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge` with `DOGZILLA_LOCALIZATION_BACKEND=cartographer`.
+`scripts/start-dogzilla-map-pose-ssh.ps1` copies the map-pose sidecar and starts bounded Cartographer localization. `scripts/start-dogzilla-navigation-ssh.ps1` copies `sidecars/dogzilla_navigation` and `sidecars/dogzilla_map_pose` to the Pi, then runs `start-navigation-in-container.sh` inside `robodoge-rosbridge` with `DOGZILLA_LOCALIZATION_BACKEND=cartographer`.
 
 Startup scripts are Windows PowerShell-driven SSH launchers. Avoid PowerShell heredocs sent through SSH, serialize apt work through startup locks, and use parent-safe `pgrep` stop loops for background services.
 
 `start-navigation-in-container.sh` must stop any stale Nav2 launch, AMCL, and Nav2 lifecycle executables before starting a new stack. Leaving an old `map_server` active makes the new lifecycle manager collide on `/map_server` and abort bringup even when the replacement map loads correctly.
-
-Normal app startup and command-time waypoint dispatch do not start map-pose or Nav2. `lib/robot-sidecar-client.mjs` reports readiness blockers when the Pi-owned stack is down. Use the manual scripts below only for explicit operator repair or SLAM mapping workflows.
 
 ## Cartographer/Nav2 Docker image
 
@@ -252,17 +260,16 @@ Key files:
 
 ```powershell
 npm run dogzilla:start-map-pose
-npm run dogzilla:set-origin
 npm run dogzilla:validate-waypoints
 ```
 
 In UI Mini Map > Map Controls:
 
-Map Controls keeps mapping, alignment, waypoint capture, and navigation restart in one panel. `Map This Floor` starts fresh autonomous mapping; `Continue Current Map` reopens the active verified PBSTREAM with Cartographer `continue_mapping`, then runs the same frontier explorer. Finish Mapping saves either session as a reviewable candidate. The operator UI no longer exposes origin capture or the redundant waypoint-readiness button.
+Map Controls keeps mapping, alignment, waypoint capture, and navigation restart in one panel. `Map This Floor` starts fresh autonomous mapping; `Continue Current Map` globally relocalizes at the robot's current position, starts a new mapping trajectory on the verified frozen PBSTREAM, and runs the same frontier explorer without first walking to a saved point. Finish Mapping saves either session as a reviewable candidate. The operator UI no longer exposes origin capture or the redundant waypoint-readiness button.
 
 Use the primary Build / Save Map row for SLAM: Start New Map -> drive slow overlapping loops -> Save Map. Save Map promotes the new default only after Cartographer writes `.pbstream` and conversion produces Nav2 `.yaml`/`.pgm`; otherwise the previous default stays active. Successful Save Map restarts localization against the saved map.
 
-`Localize on Map` seeds Cartographer localization from the saved charger origin (`output/app-cache/dogzilla-map-origin.json` locally, deployed to `/home/pi/robodoge/output/app-cache/dogzilla-map-origin.json` on the Pi), defaulting to no initial pose when no origin exists. It is local refinement, not global relocalization.
+`Relocalize on Map` performs bounded global scan matching against the active frozen PBSTREAM. The active manifest's `resumePose` is only a search hint; it never grants trust. Recovery temporarily consumes every scan, adds at most one node per second, and preserves its recovered trajectory when handing state to normal localization. The recovery `FinishTrajectory` RPC and its finished-state poll use the longer finish timeout so Cartographer's final optimization can settle under Pi load. Trust still requires at least three distinct cross-trajectory constraint matches at or above 55%; fresh TF alone is insufficient. Nav2 must be proven inactive or paused before TF changes; prior active state is restored only after normal localization produces stable fresh map TF without losing the recovered pose, while intentionally inactive state remains inactive. Failure keeps localization untrusted, hides the floor-plan dot, and blocks waypoint navigation.
 
 The UI map panel must make SLAM state explicit: Start New Map switches the mini-map into top-down mode, shows occupancy-grid, live LiDAR, and waypoint layer states, then keeps Save Map available for the active SLAM session. If the grid is not ready yet, the save action should fail with bridge evidence instead of silently staying grayed out. Use the Manual Control forward-gait slider for slow mapping passes; it scales only positive forward gamepad motion before `/api/robot/manual-control` dispatch.
 
@@ -272,19 +279,27 @@ During an active SLAM pass, `/api/dogzilla/map?stream=slam` subscribes to config
 
 When a saved waypoint no longer aligns with physical space, recapture it explicitly. Cartographer laser-only localization does not require Nav2 or odometry, but it cannot globally relocalize after the robot is carried.
 
-Drive the robot to the physical waypoint spot, wait for `waypointSafe: true`, then use `Recapture here`. The endpoint requires a waypoint-safe pose and overwrites that waypoint in `config/robot-waypoints.json` as `app_map` using the current pose.
+Drive the robot to the physical waypoint spot, wait for trusted localization plus `waypointSafe: true`, then use `Recapture here`. The endpoint overwrites that waypoint in `config/robot-waypoints.json` in the active `map` frame with current map identity.
 
 There is no batch recapture: the robot must physically be at each waypoint spot. Recapture is always explicit; waypoints are never silently rewritten or downgraded.
 
+## Waypoint registry controls
+
+The Map Controls waypoint registry exposes rename, confirmed delete, and revalidate actions. Rename moves the existing definition without changing its pose or provenance. Delete removes only the named entry after browser confirmation. Revalidate requires live active-map metadata and the existing pose to pass the same map-bounds validator; it then refreshes map metadata and marks the entry verified. Stale entries remain visible but are not dispatchable until revalidated or recaptured.
+
+The matching API routes are `PATCH`/`DELETE /api/dogzilla/waypoints/:name` and `POST /api/dogzilla/waypoints/:name/revalidate`. `config/robot-waypoints.json` remains the authoritative store.
+
 ## Chat waypoint dispatch
 
-Chat command handling must use the same resolved runtime and ROS2 config for preview and dispatch. The direct DOGZILLA target should not stop at "Robot preview ready" when `dispatchOnChat` is enabled and a ready waypoint command compiles. Verify with `robotDispatch.status`, not just assistant text.
+Chat command handling must use the same resolved runtime and ROS2 config for preview and dispatch. The direct DOGZILLA target should not stop at "Robot preview ready" when `dispatchOnChat` is enabled and a ready waypoint command compiles. Verify with `robotDispatch.status`, not just assistant text. Follow requests remain unsupported until the operator resolves to a dispatchable map waypoint; do not emit `behavior.follow_*` plans to the bridge.
 
 ## Tuning
 
 `config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance. Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`.
 
-Nav2 lateral motion is disabled by default because the first physical holonomic test made DOGZILLA fall. Defaults are `DOGZILLA_NAV2_MAX_LATERAL_VELOCITY=0.0`, `DOGZILLA_NAV2_LATERAL_ACCELERATION=0.0`, and `DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES=1`; the velocity smoother receives matching zero Y-axis limits. The environment variables remain calibration knobs, but do not enable them until a supported physical test verifies `/cmd_vel_nav.linear.y`, adapter `y_step`, odometry, clearance, and stability. Manual gamepad strafing is a separate path.
+Autonomous gait is hard-limited to the earlier conservative behavior: forward stride cannot exceed `8`, lateral commands and Nav2 Y velocity are always zero, and gait stays `walk/slow` with trot disabled. Runtime/environment overrides cannot re-enable strafing or exceed the stride ceiling. Prior larger/crab steps made DOGZILLA fall.
+
+Direct-bridge relative motion keeps non-gamepad lateral movement disabled by default (`DOGZILLA_LOCOMOTION_MAX_LATERAL_STEP=0`), while explicit gamepad input has a separate conservative cap (`DOGZILLA_MANUAL_MAX_LATERAL_STEP=1`). This manual exception does not enable Nav2 lateral motion.
 
 Cartographer fresh-mapping configs use widened online correlative scan matching (`linear_search_window = 0.6`, `angular_search_window = 45 deg`, constraint scores `0.65`) because DOGZILLA has no reliable wheel odom/IMU; narrow `0.1 m / 15 deg` matching can collapse a whole-house drive into a first-room trajectory.
 
@@ -303,6 +318,8 @@ Cartographer fresh-mapping configs use widened online correlative scan matching 
 The autonomous mapping explorer runs under transient host systemd supervision. Normal completion or Finish Mapping saves a candidate when possible, then restores localization and Nav2. Explorer failure, timeout, or restore failure still stops mapping Nav2 processes so a stale mapping session cannot leave the Pi at mapping load indefinitely.
 
 Cartographer localization configs keep same scan-match window but process half of rangefinder messages, publish submaps/trajectory less often, optimize less often, and sample pose-graph constraints less aggressively. Do not set `TRAJECTORY_BUILDER.pure_localization` on this Humble Cartographer build; live test showed it aborts startup with `Key 'pure_localization' was used the wrong number of times`. Preserve split: mapping configs favor recovery/coverage, localization configs favor lower Pi CPU while keeping `map->odom/base_link` fresh enough for Nav2.
+
+Continue Current Map is one remote `docker exec` transaction. A nonzero relocalization result must not trigger a second exec or a second global relocalization during rollback. Failed recovery cleans orphaned recovery-namespace Cartographer processes, restores one normal localization process, releases its lock, and leaves Nav2 blocked until localization trust is proven again.
 
 ## More detail
 

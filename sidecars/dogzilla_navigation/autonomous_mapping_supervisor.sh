@@ -92,7 +92,14 @@ mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
 printf '%s\n' "$$" > "$ACTIVE_FILE"
 
 for _ in $(seq 1 180); do
-  [ -f "$STOP_FILE" ] && exit 0
+  if [ -f "$STOP_FILE" ]; then
+    if restore_localization; then
+      write_result "$RESULT_FILE" restored "mapping_start_cancelled"
+      exit 0
+    fi
+    write_result "$RESULT_FILE" failed "mapping_start_cancelled_restore_failed"
+    exit 1
+  fi
   [ -f "$READY_FILE" ] && break
   sleep 1
 done
@@ -106,7 +113,7 @@ docker exec \
   -e REMOTE_ROOT="$REMOTE_ROOT" \
   -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
   "$ROS_CONTAINER" bash -lc \
-  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 8 --scan-timeout 3 --pose-timeout 20 --max-goals 80 --max-failures 3 --complete-after-no-frontier 30" \
+  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 8 --scan-timeout 3 --pose-timeout 20 --goal-timeout 45 --goal-max-duration 300 --goal-progress-distance 0.1 --failed-goal-radius 0.75 --max-goals 80 --max-failures 6 --complete-after-no-frontier 30" \
   >"$REMOTE_ROOT/logs/frontier-explorer.log" 2>&1
 explorer_exit=$?
 set -e

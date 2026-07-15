@@ -6,16 +6,12 @@ POSE_PORT="${POSE_PORT:-9090}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}"
 DOGZILLA_MAP_POSE_OCCUPANCY_GRID="${DOGZILLA_MAP_POSE_OCCUPANCY_GRID:-auto}"
+DOGZILLA_MAP_POSE_RESTORE_ONLY="${DOGZILLA_MAP_POSE_RESTORE_ONLY:-0}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-}"
 DOGZILLA_IMU_AVAILABLE="${DOGZILLA_IMU_AVAILABLE:-false}"
-DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-}"
-DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-}"
-DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-}"
-DOGZILLA_INITIAL_POSE_SKIP="${DOGZILLA_INITIAL_POSE_SKIP:-0}"
 export ROS_DOMAIN_ID
 export REMOTE_ROOT
-export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW DOGZILLA_INITIAL_POSE_SKIP
 
 mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
 
@@ -57,8 +53,10 @@ done
 
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only.lua"
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_localization.lua"
+cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization_recovery.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_localization_recovery.lua"
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_noimu.lua"
 cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu_localization.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_noimu_localization.lua"
+cp "$REMOTE_ROOT/sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu_localization_recovery.lua" "$REMOTE_ROOT/maps/robodoge_dogzilla_laser_only_noimu_localization_recovery.lua"
 
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
@@ -223,39 +221,6 @@ case "$DOGZILLA_MAP_POSE_OCCUPANCY_GRID" in
     ;;
 esac
 
-if [ "$mode" = "localization" ] && [ "$DOGZILLA_INITIAL_POSE_SKIP" != "1" ]; then
-  if [ -z "$DOGZILLA_INITIAL_POSE_X" ] || [ -z "$DOGZILLA_INITIAL_POSE_Y" ] || [ -z "$DOGZILLA_INITIAL_POSE_YAW" ]; then
-    origin_file="$REMOTE_ROOT/output/app-cache/dogzilla-map-origin.json"
-    if [ -s "$origin_file" ]; then
-      eval "$(
-        python3 - "$origin_file" <<'PY'
-import json
-import shlex
-import sys
-
-try:
-    origin = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
-
-def emit(name, value):
-    if value is not None:
-        print(f"{name}={shlex.quote(str(value))}")
-
-emit("DOGZILLA_INITIAL_POSE_X", origin.get("x"))
-emit("DOGZILLA_INITIAL_POSE_Y", origin.get("y"))
-emit("DOGZILLA_INITIAL_POSE_YAW", origin.get("yaw"))
-PY
-      )"
-      echo "Loaded saved DOGZILLA initial pose from $origin_file: x=${DOGZILLA_INITIAL_POSE_X:-0} y=${DOGZILLA_INITIAL_POSE_Y:-0} yaw=${DOGZILLA_INITIAL_POSE_YAW:-0}" >&2
-    fi
-  fi
-fi
-DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-0}"
-DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-0}"
-DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-0}"
-export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
-
 MODE_FILE="$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
 SHOULD_RESTART=false
 
@@ -276,7 +241,11 @@ stop_existing_cartographer() {
   pkill -KILL -f "[c]artographer_occupancy_grid_node" 2>/dev/null || true
 }
 
-if [ "${DOGZILLA_FORCE_RESTART:-0}" = "1" ]; then
+if [ "$mode" = "continue_mapping" ]; then
+  # The relocalizer owns the localization-to-mapping handoff. Keep the current
+  # localization process alive until frozen-map matching succeeds.
+  SHOULD_RESTART=false
+elif [ "${DOGZILLA_FORCE_RESTART:-0}" = "1" ]; then
   echo "DOGZILLA_FORCE_RESTART=1 requested; forcing Cartographer restart." >&2
   SHOULD_RESTART=true
 elif pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&1; then
@@ -301,6 +270,9 @@ fi
 
 if [ "$SHOULD_RESTART" = "true" ]; then
   stop_existing_cartographer
+  if [ "$mode" = "localization" ]; then
+    rm -f "$REMOTE_ROOT/maps/robodoge_localization_status.json"
+  fi
 
   (
     exec 8>&- 2>/dev/null || true
@@ -316,12 +288,6 @@ if [ "$SHOULD_RESTART" = "true" ]; then
       -configuration_basename "robodoge_dogzilla_laser_only${IMU_CONFIG}_localization.lua"
       -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
       -load_frozen_state true
-    )
-  elif [ "$mode" = "continue_mapping" ]; then
-    cartographer_args+=(
-      -configuration_basename "robodoge_dogzilla_laser_only${IMU_CONFIG}.lua"
-      -load_state_filename "$DOGZILLA_MAP_PBSTREAM"
-      -load_frozen_state false
     )
   else
     cartographer_args+=(
@@ -341,49 +307,39 @@ if [ "$SHOULD_RESTART" = "true" ]; then
   sleep 2
 fi
 
-# Always publish initial pose in localization mode, even when Cartographer is
-# already running, so "Localize on Map" is not a no-op after localization is lost.
-if [ "$mode" = "localization" ] && [ "$DOGZILLA_INITIAL_POSE_SKIP" != "1" ]; then
-  echo "Publishing initial pose for localization: x=$DOGZILLA_INITIAL_POSE_X y=$DOGZILLA_INITIAL_POSE_Y yaw=$DOGZILLA_INITIAL_POSE_YAW" >&2
-  python3 - <<'PY'
-import math
-import os
-import time
-import rclpy
-from geometry_msgs.msg import PoseWithCovarianceStamped
-from std_msgs.msg import Header
-
-x = float(os.environ.get("DOGZILLA_INITIAL_POSE_X", "0"))
-y = float(os.environ.get("DOGZILLA_INITIAL_POSE_Y", "0"))
-yaw = float(os.environ.get("DOGZILLA_INITIAL_POSE_YAW", "0"))
-
-rclpy.init(args=None)
-node = rclpy.create_node("robodoge_initial_pose_publisher")
-publisher = node.create_publisher(PoseWithCovarianceStamped, "/initialpose", 1)
-
-msg = PoseWithCovarianceStamped()
-msg.header = Header()
-msg.header.stamp = node.get_clock().now().to_msg()
-msg.header.frame_id = "map"
-msg.pose.pose.position.x = x
-msg.pose.pose.position.y = y
-msg.pose.pose.position.z = 0.0
-msg.pose.pose.orientation.x = 0.0
-msg.pose.pose.orientation.y = 0.0
-msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
-msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
-msg.pose.covariance[0] = 0.05
-msg.pose.covariance[7] = 0.05
-msg.pose.covariance[35] = 0.05
-
-for _ in range(5):
-    publisher.publish(msg)
-    rclpy.spin_once(node, timeout_sec=0.2)
-    time.sleep(0.2)
-
-node.destroy_node()
-rclpy.shutdown()
-PY
+if [ "$mode" = "continue_mapping" ]; then
+  recovery_args=(
+    python3 "$REMOTE_ROOT/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py"
+    --remote-root "$REMOTE_ROOT"
+    --normal-config "robodoge_dogzilla_laser_only${IMU_CONFIG}_localization.lua"
+    --handoff-config "robodoge_dogzilla_laser_only${IMU_CONFIG}.lua"
+  )
+  if [ "${DOGZILLA_NAV2_PROVEN_INACTIVE:-0}" = "1" ]; then
+    recovery_args+=(--no-pause-nav2)
+  fi
+  if "${recovery_args[@]}"; then
+    printf '{"mode":"%s","pbstream":"%s","startedAt":"%s"}\n' "$mode" "$DOGZILLA_MAP_PBSTREAM" "$(date -Iseconds)" > "$MODE_FILE"
+    echo "Continue mapping anchored at the globally recovered current pose" >&2
+  else
+    echo "Continue mapping could not prove and preserve the robot pose; normal localization was restored." >&2
+    exit 3
+  fi
+elif [ "$mode" = "localization" ] && [ "$DOGZILLA_MAP_POSE_RESTORE_ONLY" != "1" ]; then
+  recovery_args=(
+    python3 "$REMOTE_ROOT/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py"
+    --remote-root "$REMOTE_ROOT"
+  )
+  if [ "${DOGZILLA_NAV2_PROVEN_INACTIVE:-0}" = "1" ] || [ -z "$DOGZILLA_DOCKER_EXEC" ]; then
+    recovery_args+=(--no-pause-nav2)
+  fi
+  if "${recovery_args[@]}"; then
+    echo "Cartographer global relocalization proved against the frozen map." >&2
+  else
+    echo "Cartographer global relocalization was not proved; navigation remains blocked." >&2
+    if [ -n "$DOGZILLA_DOCKER_EXEC" ]; then
+      exit 3
+    fi
+  fi
 fi
 
 if [ "$START_OCCUPANCY_GRID" = "true" ]; then

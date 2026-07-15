@@ -18,10 +18,14 @@ const SSH_COMMON_SCRIPT_PATH = new URL('../scripts/dogzilla-ssh-common.ps1', imp
 const SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-navigation-ssh.ps1', import.meta.url)
 const BRIDGE_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-bridge-ssh.ps1', import.meta.url)
 const YOLO_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-yolo-vision-ssh.ps1', import.meta.url)
+const BOOT_SERVICES_SCRIPT_PATH = new URL('../scripts/install-dogzilla-boot-services-ssh.ps1', import.meta.url)
 const AUDIO_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-audio-cue-ssh.ps1', import.meta.url)
 const MAP_POSE_SSH_SCRIPT_PATH = new URL('../scripts/start-dogzilla-map-pose-ssh.ps1', import.meta.url)
 const NOIMU_LOCALIZATION_LUA_PATH = new URL('../sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu_localization.lua', import.meta.url)
 const IMU_LOCALIZATION_LUA_PATH = new URL('../sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization.lua', import.meta.url)
+const NOIMU_RECOVERY_LUA_PATH = new URL('../sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_noimu_localization_recovery.lua', import.meta.url)
+const IMU_RECOVERY_LUA_PATH = new URL('../sidecars/dogzilla_map_pose/robodoge_dogzilla_laser_only_localization_recovery.lua', import.meta.url)
+const RELOCALIZE_SCRIPT_PATH = new URL('../sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py', import.meta.url)
 const YOLO_SERVER_PATH = new URL('../sidecars/dogzilla_yolo_vision/server.py', import.meta.url)
 
 test('DOGZILLA scan self filter uses sensor data QoS for LiDAR compatibility', async () => {
@@ -103,18 +107,29 @@ test('DOGZILLA Nav2 launch routes controller and recovery cmd_vel through veloci
 
   assert.match(controllerBlock, /remappings=remappings \+ \[\("cmd_vel", "cmd_vel_nav"\)\]/)
   assert.match(behaviorBlock, /remappings=remappings \+ \[\("cmd_vel", "cmd_vel_nav"\)\]/)
-  assert.match(smootherBlock, /\("cmd_vel", "cmd_vel_nav"\), \("cmd_vel_smoothed", "cmd_vel"\)/)
+  assert.match(smootherBlock, /\("cmd_vel", "cmd_vel_nav"\), \("cmd_vel_smoothed", "cmd_vel_raw"\)/)
   assert.match(amclBlock, /package="nav2_amcl"/)
   assert.match(launch, /DeclareLaunchArgument\("localization_backend", default_value="amcl"\)/)
 })
 
 test('DOGZILLA Nav2 startup uses cmd_vel gait adapter as the default base consumer', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
+  const launch = await readFile(LAUNCH_PATH, 'utf-8')
 
   assert.match(script, /DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED="\$\{DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED:-1\}"/)
   assert.match(script, /cmd_vel_gait_adapter\.py/)
   assert.match(script, /DOGZILLA_NAV2_GAIT_ADAPTER_URL/)
   assert.match(script, /--input-topic "\$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC"/)
+  assert.match(script, /collision_monitor/)
+  assert.match(script, /"cmd_vel_in_topic": "cmd_vel_raw"/)
+  assert.match(script, /"cmd_vel_out_topic": "cmd_vel"/)
+  assert.match(script, /DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT="\$\{DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT:-0\.75\}"/)
+  assert.match(script, /"source_timeout": env_f\("DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT", 0\.75\)/)
+  assert.match(script, /"topic": "\/scan_nav2"/)
+  assert.match(script, /"action_type": "stop"/)
+  assert.match(launch, /"collision_monitor"/)
+  assert.match(launch, /\("cmd_vel_smoothed", "cmd_vel_raw"\)/)
+  assert.match(launch, /package="nav2_collision_monitor"/)
 })
 
 test('DOGZILLA Nav2 starts scan filter and odom helper directly', async () => {
@@ -189,12 +204,13 @@ test('DOGZILLA map-pose startup resolves active pbstream from map metadata', asy
   assert.doesNotMatch(script, /robodoge_home_\*\.pbstream/)
 })
 
-test('DOGZILLA Nav2 startup disables unverified lateral motion by default', async () => {
+test('DOGZILLA Nav2 startup disables lateral motion after sustained-walk falls', async () => {
   const script = await readFile(SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /DOGZILLA_NAV2_MAX_LATERAL_VELOCITY="\$\{DOGZILLA_NAV2_MAX_LATERAL_VELOCITY:-0\.0\}"/)
-  assert.match(script, /DOGZILLA_NAV2_LATERAL_ACCELERATION="\$\{DOGZILLA_NAV2_LATERAL_ACCELERATION:-0\.0\}"/)
-  assert.match(script, /DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES="\$\{DOGZILLA_NAV2_LATERAL_VELOCITY_SAMPLES:-1\}"/)
+  assert.match(script, /mvy = 0\.0/)
+  assert.match(script, /lay = 0\.0/)
+  assert.match(script, /vys = 1/)
+  assert.doesNotMatch(script, /DOGZILLA_NAV2_MAX_LATERAL_VELOCITY/)
   assert.match(script, /fp2\["min_vel_y"\] = -mvy/)
   assert.match(script, /fp2\["max_vel_y"\] = mvy/)
   assert.match(script, /fp2\["acc_lim_y"\] = lay/)
@@ -241,6 +257,9 @@ test('candidate save and promotion never overwrite the active map until promotio
   assert.match(save, /DOGZILLA_MAP_SAVE_CANDIDATE/)
   assert.match(save, /maps\/candidates\/\$map_id/)
   assert.match(save, /"state": "candidate"/)
+  assert.match(save, /robodoge_mapping_resume_pose_capture/)
+  assert.match(save, /resumePose/)
+  assert.ok(save.indexOf('lookup_transform("map", "base_link"') < save.indexOf('ros2 service call \/write_state'))
   assert.match(save, /sha256sum/)
   assert.match(save, /exit 0/)
   assert.match(promote, /robodoge_home\.pbstream/)
@@ -269,6 +288,7 @@ test('autonomous mapping refuses duplicate jobs before restarting mapping servic
   assert.match(supervisor, /candidate-ready/)
   assert.match(supervisor, /\[ "\$explorer_exit" -eq 0 \]/)
   assert.match(supervisor, /autonomous-mapping\.active/)
+  assert.match(supervisor, /mapping_start_cancelled/)
   assert.match(script, /\$common = @\{/)
   assert.doesNotMatch(script, /\$common = @\('-PiIp'/)
   assert.match(supervisor, /source \/opt\/ros\/humble\/setup\.bash/)
@@ -278,8 +298,26 @@ test('autonomous mapping refuses duplicate jobs before restarting mapping servic
   assert.ok(script.indexOf('pgrep -f') < script.indexOf('start-dogzilla-map-pose-ssh.ps1'))
   assert.match(script, /127\.0\.0\.1:8893\/mode/)
   assert.match(script, /navigate/)
+  assert.doesNotMatch(script, /mapping_resume_pose|resumeGoalPython|resumeAccepted/)
+  assert.match(script, /127\.0\.0\.1:8893\/healthz/)
+  assert.match(script, /batterySafety/)
+  assert.match(script, /Last status/)
+  assert.doesNotMatch(script, /127\.0\.0\.1:8893\/commands|waitForResult|goalCompleted|command_preempt/)
+  assert.match(script, /No motion is needed before mapping resumes/)
+  assert.doesNotMatch(script, /ros2 action send_goal/)
+  assert.ok(script.indexOf('ConvertTo-RemoteSingleQuote $preflightPython') < script.indexOf('RemoteCommand $reserveCommand'))
+  assert.ok(script.indexOf('--unit=robodoge-autonomous-mapping --property') < script.indexOf('start-dogzilla-map-pose-ssh.ps1'))
+  assert.match(script, /systemctl stop robodoge-navigation\.service/)
+  assert.ok(script.indexOf('systemctl stop robodoge-navigation.service') < script.indexOf('start-dogzilla-map-pose-ssh.ps1'))
+  assert.match(script, /systemctl stop \$startingUnit/)
+  assert.match(script, /catch \{/)
+  assert.match(script, /systemctl stop robodoge-autonomous-mapping/)
+  assert.match(script, /-Mode localization -ForceRestart -RestoreOnly/)
+  assert.match(script, /normal localization rollback also failed/)
+  assert.doesNotMatch(script, /Normal Nav2 failed to restart/)
+  assert.doesNotMatch(script, /clear.*emergency|emergency.*clear/i)
   assert.doesNotMatch(script, /-SkipReadinessWait/)
-  assert.ok(script.indexOf('systemd-run') < script.indexOf('127.0.0.1:8893/mode'))
+  assert.ok(script.indexOf('-RemoteCommand $launchCommand') < script.lastIndexOf('-RemoteCommand $navModeCommand'))
 })
 
 test('Finish Mapping fails fast for dead sessions and accepts only candidate proof', async () => {
@@ -337,6 +375,7 @@ test('DOGZILLA direct bridge background startup avoids nested SSH heredocs', asy
 
 test('DOGZILLA support service background startups avoid nested SSH heredocs', async () => {
   const yoloScript = await readFile(YOLO_SSH_SCRIPT_PATH, 'utf-8')
+  const bootServicesScript = await readFile(BOOT_SERVICES_SCRIPT_PATH, 'utf-8')
   const audioScript = await readFile(AUDIO_SSH_SCRIPT_PATH, 'utf-8')
 
   assert.doesNotMatch(yoloScript, /python3 - <<'PY'/)
@@ -352,6 +391,10 @@ test('DOGZILLA support service background startups avoid nested SSH heredocs', a
   assert.match(yoloScript, /\[ "\$pid" = "\$\$" \] \|\| \[ "\$pid" = "\$PPID" \]/)
   assert.match(yoloScript, /kill -TERM "\$pid"/)
   assert.match(yoloScript, /kill -KILL "\$pid"/)
+  assert.match(yoloScript, /systemctl restart robodoge-yolo-vision\.service/)
+  assert.match(yoloScript, /YOLO_DETECTION_FLAG=/)
+  assert.match(bootServicesScript, /EnvironmentFile=-\/etc\/robodoge\/yolo-vision\.env/)
+  assert.match(bootServicesScript, /\\\$YOLO_DETECTION_FLAG/)
 
   assert.doesNotMatch(audioScript, /python3 - <<'PY'/)
   assert.match(audioScript, /\$stopPattern = "\[s\]idecars\/dogzilla_audio_cue\/server\.py"/)
@@ -401,7 +444,10 @@ test('DOGZILLA cmd_vel gait adapter forwards Nav2 Twist to the non-preempting br
   assert.match(adapter, /http:\/\/127\.0\.0\.1:8893\/nav2\/cmd_vel/)
   assert.match(adapter, /stale-stop/)
   assert.match(adapter, /DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ/)
-  assert.match(mapping, /DOGZILLA_NAV2_GAIT_MAX_X_STEP", "14"/)
+  assert.match(mapping, /DOGZILLA_NAV2_GAIT_MAX_X_STEP", "8"/)
+  assert.match(mapping, /y_step = 0\.0/)
+  assert.match(mapping, /gait = "walk"/)
+  assert.match(mapping, /pace = "slow"/)
   assert.match(adapter, /DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC", "0\.8"/)
 })
 
@@ -465,17 +511,13 @@ test('DOGZILLA localization lua configs widen real-time scan matcher window', as
   }
 })
 
-test('DOGZILLA map-pose startup publishes /initialpose in localization mode', async () => {
+test('DOGZILLA map-pose startup never seeds localization from charger origin or /initialpose', async () => {
   const script = await readFile(MAP_POSE_SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /origin_file="\$REMOTE_ROOT\/output\/app-cache\/dogzilla-map-origin\.json"/)
-  assert.match(script, /Loaded saved DOGZILLA initial pose/)
-  assert.match(script, /DOGZILLA_INITIAL_POSE_X="\$\{DOGZILLA_INITIAL_POSE_X:-0\}"/)
-  assert.match(script, /DOGZILLA_INITIAL_POSE_Y="\$\{DOGZILLA_INITIAL_POSE_Y:-0\}"/)
-  assert.match(script, /DOGZILLA_INITIAL_POSE_YAW="\$\{DOGZILLA_INITIAL_POSE_YAW:-0\}"/)
-  assert.match(script, /if \[ "\$mode" = "localization" \] && \[ "\$DOGZILLA_INITIAL_POSE_SKIP" != "1" \]/)
-  assert.match(script, /create_publisher\(PoseWithCovarianceStamped, "\/initialpose", 1\)/)
-  assert.match(script, /msg\.header\.frame_id = "map"/)
+  assert.doesNotMatch(script, /dogzilla-map-origin\.json/)
+  assert.doesNotMatch(script, /DOGZILLA_INITIAL_POSE/)
+  assert.doesNotMatch(script, /PoseWithCovarianceStamped/)
+  assert.doesNotMatch(script, /\/initialpose/)
 })
 
 test('DOGZILLA map-pose startup keeps Cartographer alive when initial TF probe misses', async () => {
@@ -498,14 +540,65 @@ test('DOGZILLA Nav2 startup seeds AMCL initial pose from saved origin, not map-p
  assert.doesNotMatch(script, /Proceeding anyway/)
 })
 
-test('DOGZILLA map-pose SSH launcher reads saved origin and passes initial pose env vars', async () => {
+test('DOGZILLA map-pose SSH launcher never reads charger origin or passes initial pose env vars', async () => {
   const script = await readFile(MAP_POSE_SSH_SCRIPT_PATH, 'utf-8')
 
-  assert.match(script, /output\/app-cache\/dogzilla-map-origin\.json/)
-  assert.match(script, /DOGZILLA_INITIAL_POSE_X=\$initialX/)
-  assert.match(script, /DOGZILLA_INITIAL_POSE_Y=\$initialY/)
-  assert.match(script, /DOGZILLA_INITIAL_POSE_YAW=\$initialYaw/)
-  assert.match(script, /\$initialPoseEnv/)
+  assert.doesNotMatch(script, /dogzilla-map-origin\.json/)
+  assert.doesNotMatch(script, /DOGZILLA_INITIAL_POSE/)
+  assert.doesNotMatch(script, /initialPoseEnv/)
+  assert.doesNotMatch(script, /InitialX|InitialY|InitialYaw|ExpectedMap/)
+})
+
+test('DOGZILLA map-pose startup runs bounded global matching before trusting localization', async () => {
+  const [startup, noimuRecovery, imuRecovery, relocalize] = await Promise.all([
+    readFile(MAP_POSE_SCRIPT_PATH, 'utf-8'),
+    readFile(NOIMU_RECOVERY_LUA_PATH, 'utf-8'),
+    readFile(IMU_RECOVERY_LUA_PATH, 'utf-8'),
+    readFile(RELOCALIZE_SCRIPT_PATH, 'utf-8'),
+  ])
+
+  assert.match(startup, /relocalize_on_frozen_map\.py/)
+  assert.match(startup, /DOGZILLA_MAP_POSE_RESTORE_ONLY/)
+  assert.match(startup, /\[ "\$mode" = "localization" \] && \[ "\$DOGZILLA_MAP_POSE_RESTORE_ONLY" != "1" \]/)
+  assert.match(startup, /navigation remains blocked/)
+  for (const recovery of [noimuRecovery, imuRecovery]) {
+    assert.match(recovery, /POSE_GRAPH\.global_sampling_ratio = 1\.0/)
+    assert.match(recovery, /POSE_GRAPH\.optimize_every_n_nodes = 1/)
+    assert.match(recovery, /options\.rangefinder_sampling_ratio = 1\.0/)
+    assert.match(recovery, /motion_filter\.max_time_seconds = 1\.0/)
+    assert.match(recovery, /global_localization_min_score = 0\.55/)
+    assert.doesNotMatch(recovery, /constraint_builder\.sampling_ratio = 1\.0/)
+  }
+  assert.match(relocalize, /min-cross-nodes.*default=3/)
+  assert.match(relocalize, /service-timeout-sec.*default=30\.0/)
+  assert.match(relocalize, /def resume_pose_hint\(metadata:/)
+  assert.match(relocalize, /metadata\.get\("resumePose"\)/)
+  assert.match(relocalize, /initial_pose=self\.resume_pose_hint/)
+  assert.match(relocalize, /relative_to_trajectory_id=frozen_ids\[0\]/)
+  assert.match(relocalize, /self\.recovery_services\.finish\([\s\S]*?"map",\s*"base_link",\s*recovery_started_ns/)
+  assert.doesNotMatch(relocalize, /self\._require_state\([\s\S]*?FINISHED/)
+  assert.match(relocalize, /self\.normal_process = self\._launch_cartographer\([\s\S]*?self\.active_pbstream/)
+  assert.match(relocalize, /normalFrozenTrajectoryIds=normal_frozen_ids/)
+  assert.match(relocalize, /matched_trajectory_id not in normal_frozen_ids/)
+  assert.match(relocalize, /map_anchor_id not in normal_frozen_ids/)
+  assert.match(relocalize, /initial_pose=recovered_pose/)
+  assert.match(relocalize, /relative_to_trajectory_id=normal_anchor_id/)
+  assert.match(relocalize, /normal_anchor_id = map_anchor_id/)
+  assert.match(relocalize, /--handoff-config/)
+  assert.match(relocalize, /self\.handoff_config/)
+  assert.match(startup, /--handoff-config.*robodoge_dogzilla_laser_only\$\{IMU_CONFIG\}\.lua/)
+  assert.match(startup, /DOGZILLA_NAV2_PROVEN_INACTIVE/)
+  assert.match(startup, /recovery_args\+=\(--no-pause-nav2\)/)
+  assert.match(startup, /Continue mapping anchored at the globally recovered current pose/)
+  assert.match(relocalize, /mapping_handoff = not self\.handoff_config\.endswith/)
+  assert.match(relocalize, /\(False, None\) if mapping_handoff else self\._resume_nav2\(\)/)
+  assert.doesNotMatch(relocalize, /robodoge_localization_runtime\.pbstream/)
+  assert.match(relocalize, /acceptedCrossTrajectoryConstraintCount/)
+  assert.match(relocalize, /trusted=True/)
+  assert.match(relocalize, /trusted=False/)
+  assert.match(relocalize, /_is_recovery_process/)
+  assert.match(relocalize, /self\.recovery_services\.refresh\(\)/)
+  assert.match(relocalize, /for attempt in range\(3\)/)
 })
 
 test('DOGZILLA map-pose SSH launcher targets own container and falls back to systemd', async () => {
@@ -514,11 +607,17 @@ test('DOGZILLA map-pose SSH launcher targets own container and falls back to sys
   assert.match(script, /\[string\]\$ContainerName = "robodoge-map-pose"/)
   assert.doesNotMatch(script, /\[string\]\$ContainerName = "robodoge-lidar-bridge"/)
   assert.match(script, /DOGZILLA_DOCKER_EXEC=1/)
+  assert.match(script, /DOGZILLA_NAV2_PROVEN_INACTIVE=1/)
+  assert.match(script, /DOGZILLA_MAP_POSE_RESTORE_ONLY=1/)
+  assert.match(script, /systemctl stop robodoge-navigation\.service/)
   assert.match(script, /docker exec .* \$ContainerName bash \$containerScript/)
   assert.match(script, /systemctl start robodoge-map-pose\.service/)
   assert.match(script, /Starting dedicated \$Mode container/)
   assert.match(script, /docker run -d --rm --name \$ContainerName/)
-  assert.ok(script.indexOf("$startedInRequestedMode = $Mode -in") < script.indexOf('Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand'))
+  assert.match(script, /\$startedInRequestedMode = \$Mode -eq 'mapping'/)
+  assert.match(script, /docker inspect -f '\{\{\.State\.Running\}\}'/)
+  assert.doesNotMatch(script, /retrying docker exec/)
+  assert.ok(script.indexOf('$startedInRequestedMode = $Mode') < script.indexOf('Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand'))
 })
 
 const DOCKERFILE_PATH = new URL('../sidecars/dogzilla_map_pose/Dockerfile', import.meta.url)
@@ -563,6 +662,10 @@ test('Nav2 readiness latches DDS prerequisites across probe attempts', async () 
   assert.match(script, /scan_ready=false/)
   assert.match(script, /if \$action_ready && \$odom_ready && \$scan_ready/)
   assert.doesNotMatch(script, /grep -q/)
+  assert.match(script, /timeout --kill-after=1 2 ros2 action list/)
+  assert.match(script, /timeout --kill-after=1 2 ros2 topic info \/odom/)
+  assert.match(script, /timeout --kill-after=1 2 ros2 topic info "\$SCAN_TOPIC"/)
+  assert.match(script, /for i in \$\(seq 1 40\)/)
 })
 
 test('DOGZILLA boot service install defaults to pre-baked Cartographer/Nav2 image', async () => {

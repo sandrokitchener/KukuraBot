@@ -2,6 +2,7 @@ const MANUAL_CONTROL_DEADBAND = 0.08
 const MANUAL_CONTROL_SEND_INTERVAL_MS = 180
 const MANUAL_CONTROL_REPEAT_MS = 700
 const MANUAL_CONTROL_ERROR_RETRY_MS = 1200
+const MANUAL_CONTROL_SAFETY_TIMEOUT_MS = 2000
 const MANUAL_CONTROL_CHANGE_EPSILON = 0.035
 const MANUAL_CONTROL_GAIT = 'walk'
 const MANUAL_CONTROL_PACE = 'normal'
@@ -10,6 +11,7 @@ const MANUAL_CONTROL_FORWARD_WALK_FLOOR = 0.25
 const MANUAL_CONTROL_FORWARD_SCALE_MIN = 0.2
 const MANUAL_CONTROL_FORWARD_SCALE_MAX = 1
 const MANUAL_CONTROL_FORWARD_SCALE_DEFAULT = 0.45
+const MANUAL_CONTROL_TOUCH_DEADMAN_SOURCE = 'touch'
 const MANUAL_CONTROL_BARK_BUTTON_INDEX = 7
 const MANUAL_CONTROL_BARK_THRESHOLD = 0.55
 const MANUAL_CONTROL_BARK_COOLDOWN_MS = 900
@@ -40,6 +42,9 @@ export function createManualControlController({
     barkTriggerPressed: false,
     lastBarkAt: 0,
     barkPending: false,
+    touchMode: false,
+    touchPointers: new Map(),
+    touchVector: createNeutralManualVector(),
   }
 
   elements?.speedSlider?.addEventListener?.('input', handleForwardSpeedInput)
@@ -55,6 +60,11 @@ export function createManualControlController({
   }
 
   function handleNeutral() {
+    if (state.touchMode) {
+      disable({ sendNeutral: true, neutralSource: 'manual-neutral' })
+      return
+    }
+
     sendNeutral('manual-neutral').catch((error) => {
       setManualControlStatus(formatError(error), true)
     })
@@ -73,12 +83,143 @@ export function createManualControlController({
 
     state.gamepadIndex = null
     renderVector(createNeutralManualVector())
-    setManualControlStatus('Gamepad disconnected.')
     if (state.enabled) {
-      sendNeutral('gamepad-disconnected').catch((error) => {
-        setManualControlStatus(formatError(error), true)
-      })
+      stopForSafety('gamepad-disconnected', 'Manual control stopped: gamepad disconnected.')
     }
+  }
+
+  function handleVisibilityChange(hidden) {
+    if (hidden && state.enabled) {
+      stopForSafety('page-hidden', 'Manual control stopped: app is in the background.')
+    }
+  }
+
+  function handleWindowBlur() {
+    if (state.enabled) {
+      stopForSafety('window-blur', 'Manual control stopped: window lost focus.')
+    }
+  }
+
+  function handlePointerLoss() {
+    if (state.enabled) {
+      stopForSafety('pointer-loss', 'Manual control stopped: pointer control was interrupted.')
+    }
+  }
+
+  function enableTouch() {
+    state.touchMode = true
+    state.enabled = false
+    state.touchPointers.clear()
+    state.touchVector = createNeutralManualVector()
+    renderTouchSticks()
+    renderVector(state.touchVector)
+    applyState()
+  }
+
+  function handleTouchPointerDown(event, stick) {
+    if (!state.touchMode || !isRealRobotTargetActive() || !['left', 'right'].includes(stick)) {
+      return
+    }
+
+    if (event.pointerType && event.pointerType !== 'touch') {
+      return
+    }
+
+    const rect = event.currentTarget?.getBoundingClientRect?.()
+    if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) {
+      return
+    }
+
+    event.preventDefault?.()
+    const pointer = {
+      id: event.pointerId,
+      stick,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      radius: Math.max(1, Math.min(rect.width, rect.height) / 2),
+      x: 0,
+      y: 0,
+    }
+    state.touchPointers.set(pointer.id, pointer)
+    event.currentTarget.setPointerCapture?.(pointer.id)
+    updateTouchPointer(pointer, event.clientX, event.clientY)
+    startTouchInput()
+  }
+
+  function handleTouchPointerMove(event) {
+    const pointer = state.touchPointers.get(event.pointerId)
+    if (!pointer) {
+      return
+    }
+
+    event.preventDefault?.()
+    updateTouchPointer(pointer, event.clientX, event.clientY)
+  }
+
+  function handleTouchPointerUp(event) {
+    const pointer = state.touchPointers.get(event.pointerId)
+    if (!pointer) {
+      return
+    }
+
+    state.touchPointers.delete(event.pointerId)
+    event.currentTarget?.releasePointerCapture?.(event.pointerId)
+    updateTouchVector()
+    if (state.touchPointers.size === 0) {
+      disable({ sendNeutral: true, neutralSource: 'touch-pointer-up' })
+    }
+  }
+
+  function handleTouchPointerCancel() {
+    if (state.enabled) {
+      stopForSafety('touch-pointer-cancel', 'Touch control stopped: pointer control was interrupted.')
+    }
+  }
+
+  function startTouchInput() {
+    if (state.enabled) {
+      return
+    }
+
+    state.enabled = true
+    state.pending = false
+    state.lastVector = null
+    state.lastSentAt = 0
+    state.zeroSent = true
+    state.errorRetryAt = 0
+    state.forwardRampStartedAt = 0
+    state.lastGait = null
+    state.lastPace = null
+    setManualControlStatus('Touch control active.')
+    applyState()
+    scheduleFrame()
+  }
+
+  function updateTouchPointer(pointer, clientX, clientY) {
+    const dx = Number(clientX) - pointer.centerX
+    const dy = Number(clientY) - pointer.centerY
+    const distance = Math.hypot(dx, dy)
+    const scale = distance > pointer.radius ? pointer.radius / distance : 1
+    pointer.x = clamp((dx * scale) / pointer.radius, -1, 1)
+    pointer.y = clamp((dy * scale) / pointer.radius, -1, 1)
+    updateTouchVector()
+  }
+
+  function updateTouchVector() {
+    const left = [...state.touchPointers.values()].find((pointer) => pointer.stick === 'left')
+    const right = [...state.touchPointers.values()].find((pointer) => pointer.stick === 'right')
+    state.touchVector = readManualTouchVector({ left, right })
+    renderTouchSticks()
+    if (state.enabled) {
+      scheduleFrame()
+    }
+  }
+
+  function renderTouchSticks() {
+    const left = [...state.touchPointers.values()].find((pointer) => pointer.stick === 'left')
+    const right = [...state.touchPointers.values()].find((pointer) => pointer.stick === 'right')
+    renderTouchStick(elements.touchLeftStick, left)
+    renderTouchStick(elements.touchRightStick, right)
   }
 
   function enable() {
@@ -115,8 +256,10 @@ export function createManualControlController({
     scheduleFrame()
   }
 
-  function disable({ sendNeutral: shouldSendNeutral = false } = {}) {
+  function disable({ sendNeutral: shouldSendNeutral = false, neutralSource = 'manual-off' } = {}) {
     state.enabled = false
+    state.touchPointers.clear()
+    state.touchVector = createNeutralManualVector()
     applyState()
 
     if (frameId) {
@@ -125,13 +268,14 @@ export function createManualControlController({
     }
 
     renderVector(createNeutralManualVector())
+    renderTouchSticks()
     state.forwardRampStartedAt = 0
     state.barkTriggerPressed = false
     state.barkPending = false
     setManualControlStatus('Manual control off.')
 
     if (shouldSendNeutral && isRealRobotTargetActive()) {
-      sendNeutral('manual-off').catch((error) => {
+      sendNeutral(neutralSource).catch((error) => {
         setManualControlStatus(formatError(error), true)
       })
     }
@@ -139,7 +283,9 @@ export function createManualControlController({
 
   function dispose() {
     elements?.speedSlider?.removeEventListener?.('input', handleForwardSpeedInput)
-    if (state.enabled && isRealRobotTargetActive()) {
+    const wasEnabled = state.enabled
+    state.enabled = false
+    if (wasEnabled && isRealRobotTargetActive()) {
       navigator.sendBeacon?.(
         toApiUrl('/api/robot/manual-control'),
         new Blob([JSON.stringify({
@@ -180,25 +326,39 @@ export function createManualControlController({
       return
     }
 
+    if (state.touchMode) {
+      const now = Date.now()
+      const ramp = applyForwardRamp(state.touchVector, state, now, { forwardScale: state.forwardScale })
+      renderTouchSticks()
+      renderVector(ramp.vector)
+      if (shouldSendManualCommand(ramp.vector, state, ramp, now)) {
+        sendVector(ramp.vector, null, { source: MANUAL_CONTROL_TOUCH_DEADMAN_SOURCE, gait: ramp.gait, pace: ramp.pace }).catch((error) => {
+          state.errorRetryAt = Date.now() + MANUAL_CONTROL_ERROR_RETRY_MS
+          stopForSafety('touch-request-failed', `Touch control stopped: ${formatError(error)}`)
+        })
+      } else if (!state.pending) {
+        setManualControlStatus(`Touch control active: ${formatManualVector(ramp.vector)}.`)
+      }
+      scheduleFrame()
+      return
+    }
+
     const gamepad = findGamepad()
 
     if (!gamepad) {
       state.barkTriggerPressed = false
       renderPad(null)
       renderVector(createNeutralManualVector())
-      if (!state.zeroSent) {
-        sendNeutral('gamepad-missing').catch((error) => {
-          setManualControlStatus(formatError(error), true)
-        })
-      } else {
-        setManualControlStatus('Press a button on a connected gamepad.')
-      }
-      scheduleFrame()
+      stopForSafety('gamepad-missing', 'Manual control stopped: gamepad unavailable.')
       return
     }
 
     state.gamepadIndex = gamepad.index
     const now = Date.now()
+    if (state.lastSentAt && state.lastVector && hasManualVectorInput(state.lastVector) && now - state.lastSentAt > MANUAL_CONTROL_SAFETY_TIMEOUT_MS) {
+      stopForSafety('manual-control-timeout', 'Manual control stopped: command lease timed out.')
+      return
+    }
       const rawVector = readManualGamepadVector(gamepad)
       const ramp = applyForwardRamp(rawVector, state, now, { forwardScale: state.forwardScale })
     const vector = ramp.vector
@@ -209,7 +369,7 @@ export function createManualControlController({
     if (shouldSendManualCommand(vector, state, ramp, now)) {
       sendVector(vector, gamepad, { gait: ramp.gait, pace: ramp.pace }).catch((error) => {
         state.errorRetryAt = Date.now() + MANUAL_CONTROL_ERROR_RETRY_MS
-        setManualControlStatus(formatError(error), true)
+        stopForSafety('manual-request-failed', `Manual control stopped: ${formatError(error)}`)
       })
     } else if (!state.pending && !barkTriggered) {
       setManualControlStatus(`Manual control active: ${formatManualVector(vector)}.`)
@@ -225,6 +385,15 @@ export function createManualControlController({
     }
 
     await sendVector(createNeutralManualVector(), null, { source, force: true })
+  }
+
+  function stopForSafety(source, message) {
+    if (!state.enabled) {
+      return
+    }
+
+    disable({ sendNeutral: true, neutralSource: source })
+    setManualControlStatus(message, true)
   }
 
   async function sendVector(vector, gamepad, options = {}) {
@@ -257,15 +426,15 @@ export function createManualControlController({
       })
       const payload = await response.json()
 
+      if (!response.ok || isManualControlLeaseLost(payload)) {
+        throw new Error(payload.dispatch?.error || payload.error || 'Manual control failed.')
+      }
+
       state.lastVector = { ...vector }
       state.lastSentAt = Date.now()
       state.zeroSent = !hasManualVectorInput(vector)
       state.lastGait = gait
       state.lastPace = pace
-
-      if (!response.ok || payload.dispatch?.status === 'error') {
-        throw new Error(payload.dispatch?.error || payload.error || 'Manual control failed.')
-      }
 
       const summary = formatManualControlSummary(payload, getRuntimeConfig())
       setManualControlStatus(summary)
@@ -329,6 +498,30 @@ export function createManualControlController({
     const supported = isGamepadSupported()
     const realTarget = isRealRobotTargetActive()
 
+    if (state.touchMode) {
+      elements.panel.dataset.state = state.enabled ? 'active' : realTarget ? 'ready' : 'disabled'
+      elements.chip.textContent = 'Touch'
+      elements.toggleButton.hidden = true
+      elements.padName.textContent = 'Android touch'
+      elements.neutralButton.disabled = !realTarget || state.pending
+      if (elements.speedSlider) {
+        elements.speedSlider.disabled = !realTarget
+      }
+      if (elements.touchControls) {
+        elements.touchControls.hidden = false
+        elements.touchControls.setAttribute?.('aria-disabled', String(!realTarget))
+      }
+      for (const stick of [elements.touchLeftStick, elements.touchRightStick]) {
+        stick?.setAttribute?.('aria-disabled', String(!realTarget))
+      }
+      if (!realTarget) {
+        elements.status.textContent = 'Real robot target required.'
+      } else if (!state.enabled && !state.pending && ['Gamepad idle.', 'Manual control off.', 'Real robot target required.'].includes(elements.status.textContent)) {
+        elements.status.textContent = 'Touch controller ready.'
+      }
+      return
+    }
+
     elements.panel.dataset.state = state.enabled ? 'active' : supported && realTarget ? 'ready' : 'disabled'
     elements.chip.textContent = state.enabled ? 'Gamepad' : 'Off'
     elements.toggleButton.textContent = state.enabled ? 'Disable gamepad' : 'Enable gamepad'
@@ -371,6 +564,18 @@ export function createManualControlController({
     setManualMeter(elements.turnMeter, vector.turn)
   }
 
+  function renderTouchStick(element, pointer) {
+    if (!element) {
+      return
+    }
+
+    element.dataset.active = pointer ? 'true' : 'false'
+    element.style?.setProperty('--touch-stick-x', `${50 + (pointer?.x || 0) * 38}%`)
+    element.style?.setProperty('--touch-stick-y', `${50 + (pointer?.y || 0) * 38}%`)
+    element.setAttribute?.('aria-valuenow', String(Number((pointer?.x || 0).toFixed(2))))
+    element.setAttribute?.('aria-valuetext', pointer ? `x ${formatManualAxis(pointer.x)}, y ${formatManualAxis(pointer.y)}` : 'centered')
+  }
+
   function handleForwardSpeedInput(event) {
     state.forwardScale = readManualForwardScale(event?.target?.value)
     renderForwardSpeedScale()
@@ -407,6 +612,14 @@ export function createManualControlController({
     enable,
     handleGamepadConnected,
     handleGamepadDisconnected,
+    handleVisibilityChange,
+    handleWindowBlur,
+    handlePointerLoss,
+    enableTouch,
+    handleTouchPointerDown,
+    handleTouchPointerMove,
+    handleTouchPointerUp,
+    handleTouchPointerCancel,
     handleNeutral,
     handleToggle,
     isEnabled: () => state.enabled,
@@ -472,6 +685,14 @@ export function createNeutralManualVector() {
   }
 }
 
+export function readManualTouchVector({ left = null, right = null } = {}) {
+  return {
+    forward: normalizeManualAxis(-(Number(left?.y) || 0)),
+    strafe: normalizeManualAxis(-(Number(left?.x) || 0)),
+    turn: normalizeManualAxis(-(Number(right?.x) || 0)),
+  }
+}
+
 export function readManualForwardScale(value) {
   const numeric = Number(value)
   const percentValue = Number.isFinite(numeric) && numeric > 1 ? numeric / 100 : numeric
@@ -483,10 +704,21 @@ export function readManualForwardScale(value) {
 
 export function applyForwardRamp(vector, state, now = Date.now(), options = {}) {
   const forward = Number(vector?.forward) || 0
+  const strafing = Math.abs(Number(vector?.strafe) || 0) > 0
   const forwardScale = readManualForwardScale(options.forwardScale ?? 1)
 
+  if (strafing) {
+    state.forwardRampStartedAt = 0
+    return {
+      vector: { ...vector, forward: Number((forward * forwardScale).toFixed(3)) },
+      gait: 'trot',
+      pace: 'slow',
+      progress: 0,
+    }
+  }
+
   if (forward <= 0) {
-    const movingWithoutForward = !!(Math.abs(Number(vector?.strafe) || 0) > 0 || Math.abs(Number(vector?.turn) || 0) > 0)
+    const movingWithoutForward = Math.abs(Number(vector?.turn) || 0) > 0
     state.forwardRampStartedAt = 0
     return {
       vector: { ...vector, forward },
@@ -623,6 +855,12 @@ function formatStep(value) {
 function formatGamepadName(gamepad) {
   const rawName = String(gamepad?.id || '').trim()
   return rawName ? rawName.replace(/\s+\(.*?\)/g, '').slice(0, 42) : 'Gamepad'
+}
+
+function isManualControlLeaseLost(payload) {
+  const status = String(payload?.dispatch?.status || '').toLowerCase()
+  return payload?.lease?.active === false || payload?.dispatch?.lease?.active === false ||
+    ['error', 'expired', 'lease-lost', 'timeout'].includes(status)
 }
 
 function isGamepadSupported() {

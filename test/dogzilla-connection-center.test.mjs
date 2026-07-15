@@ -314,6 +314,7 @@ test('buildDogzillaActionPlan keeps autonomous mapping and candidate promotion e
   assert.ok(finishPlan.args.some((arg) => arg.endsWith('finish-dogzilla-autonomous-mapping-ssh.ps1')))
   assert.ok(promotePlan.args.some((arg) => arg.endsWith('promote-dogzilla-map-candidate-ssh.ps1')))
   assert.equal(startPlan.timeoutMs, 240_000)
+  assert.equal(continuePlan.timeoutMs, 1_080_000)
   assert.equal(finishPlan.timeoutMs, 240_000)
 })
 

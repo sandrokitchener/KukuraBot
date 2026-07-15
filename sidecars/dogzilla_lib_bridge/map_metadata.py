@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,23 @@ from typing import Any
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_MAP_METADATA_FILE = Path(os.environ.get("DOGZILLA_MAP_METADATA_FILE", str(ROOT_DIR / "maps" / "robodoge_home_map.json")))
 DEFAULT_MAP_YAML_FILE = Path(os.environ.get("DOGZILLA_MAP_YAML_FILE", str(ROOT_DIR / "maps" / "robodoge_home.yaml")))
+
+
+def normalize_resume_pose(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or str(value.get("frame") or "").strip().lstrip("/") != "map":
+        return None
+    try:
+        x = float(value["x"])
+        y = float(value["y"])
+        yaw = float(value["yaw"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(number) for number in (x, y, yaw)):
+        return None
+    captured_at = str(value.get("capturedAt") or "").strip()
+    if not captured_at:
+        return None
+    return {"frame": "map", "x": x, "y": y, "yaw": yaw, "capturedAt": captured_at}
 
 
 def read_active_map_metadata(
@@ -91,7 +109,7 @@ def read_active_map_metadata(
         min_y = origin[1]
         max_x = min_x + width_cells * resolution
         max_y = min_y + height_cells * resolution
-        return {
+        result = {
             "available": True,
             "id": str(info.get("id") or yaml_path.stem),
             "metadataFile": str(metadata_path),
@@ -114,6 +132,10 @@ def read_active_map_metadata(
             "fingerprint": fingerprint,
             "files": files,
         }
+        resume_pose = normalize_resume_pose(info.get("resumePose"))
+        if resume_pose:
+            result["resumePose"] = resume_pose
+        return result
     except (OSError, ValueError, KeyError) as error:
         return {
             "available": False,

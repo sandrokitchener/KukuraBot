@@ -3,16 +3,11 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  APP_MAP_FRAME,
-  buildDogzillaMapOriginSnapshot,
-  DEFAULT_MAP_ORIGIN_FILE,
-  loadDogzillaMapOrigin,
-  mapPoseToAppPose,
-} from '../lib/dogzilla-map-frame.mjs'
-import {
   getDogzillaRobotPose,
   startDogzillaLidarClient,
 } from '../lib/dogzilla-lidar-client.mjs'
+import { normalizeDogzillaMapMetadata } from '../lib/dogzilla-map-metadata.mjs'
+import { getRobotSidecarHealth } from '../lib/robot-sidecar-client.mjs'
 
 const SCRIPT_FILE = fileURLToPath(import.meta.url)
 const ROOT_DIR = path.resolve(path.dirname(SCRIPT_FILE), '..')
@@ -29,7 +24,7 @@ export function normalizeWaypointName(value) {
 export function poseToWaypoint(pose, {
   physicalSpot = '',
   arrivalToleranceMeters = 0.25,
-  mapOrigin = null,
+  mapMetadata = null,
 } = {}) {
   const body = pose?.pose && typeof pose.pose === 'object' ? pose.pose : pose
   const rawFrame = String(body?.frameId || body?.frame_id || body?.frame || '').trim()
@@ -43,43 +38,23 @@ export function poseToWaypoint(pose, {
     throw new Error('pose payload missing finite frame/x/y/yaw')
   }
 
-  let frame = rawFrame
-  let x = rawX
-  let y = rawY
-  let yaw = rawYaw
-  let capturedMapPose = null
-  const mapOriginSnapshot = rawFrame === 'map' && mapOrigin
-    ? buildDogzillaMapOriginSnapshot(mapOrigin)
-    : null
-
-  if (rawFrame === 'map' && mapOrigin) {
-    const appPose = mapPoseToAppPose({ frame: 'map', x: rawX, y: rawY, yaw: rawYaw }, mapOrigin)
-    if (appPose) {
-      capturedMapPose = { frame: 'map', x: rawX, y: rawY, yaw: rawYaw }
-      frame = appPose.frame
-      x = appPose.x
-      y = appPose.y
-      yaw = appPose.yaw
-    }
-  }
-
   return {
     kind: 'map_pose',
-    frame,
-    x,
-    y,
-    yaw,
+    frame: rawFrame,
+    x: rawX,
+    y: rawY,
+    yaw: rawYaw,
     arrivalToleranceMeters,
     physicalSpot,
     verified: rawFrame === 'map',
     capturedAt,
     capturedFrom: source || 'dogzilla rosbridge',
-    ...(mapOriginSnapshot ? { mapOrigin: mapOriginSnapshot } : {}),
-    ...(capturedMapPose ? { capturedMapPose } : {}),
+    ...(mapMetadata?.id ? { mapId: mapMetadata.id } : {}),
+    ...(mapMetadata?.fingerprint ? { mapFingerprint: mapMetadata.fingerprint } : {}),
+    ...(mapMetadata ? { map: mapMetadata } : {}),
     notes: [
-      `Captured from ${source || 'dogzilla rosbridge'} at ${capturedAt}.`,
-      ...(capturedMapPose ? [`Captured map pose: x=${capturedMapPose.x}, y=${capturedMapPose.y}, yaw=${capturedMapPose.yaw}.`] : []),
-      ...(frame === APP_MAP_FRAME ? [`Stored in ${APP_MAP_FRAME} frame; stable across Cartographer origin shifts.`] : []),
+      `Captured from ${source || 'dogzilla rosbridge'} at ${capturedAt} in ${rawFrame} frame.`,
+      ...(mapMetadata?.id ? [`Captured map identity: id=${mapMetadata.id}.`] : []),
       'Use with command JSON: {"command":"move","waypoint":"<name>"}',
     ],
   }
@@ -102,10 +77,10 @@ export async function captureWaypoint({
   name,
   waypointFile = DEFAULT_WAYPOINT_FILE,
   captureDir = DEFAULT_CAPTURE_DIR,
-  originFile = DEFAULT_MAP_ORIGIN_FILE,
   physicalSpot = '',
   arrivalToleranceMeters = 0.25,
   allowOdom = false,
+  allowMissingMapIdentity = false,
   poseTimeoutMs = 10_000,
 } = {}) {
   const waypointName = normalizeWaypointName(name)
@@ -119,11 +94,14 @@ export async function captureWaypoint({
     throw new Error(posePayload.error || 'pose not available')
   }
 
-  const mapOrigin = await loadDogzillaMapOrigin(originFile)
-  const waypoint = poseToWaypoint(posePayload, { physicalSpot, arrivalToleranceMeters, mapOrigin })
-  const effectiveFrame = waypoint.capturedMapPose?.frame || waypoint.frame
-  if (effectiveFrame !== 'map' && !allowOdom) {
-    throw new Error(`refusing to save non-map pose frame "${effectiveFrame}"; rerun with --allow-odom for temporary targets`)
+  const health = await getRobotSidecarHealth().catch(() => null)
+  const mapMetadata = normalizeDogzillaMapMetadata(health?.body?.runtime?.map)
+  const waypoint = poseToWaypoint(posePayload, { physicalSpot, arrivalToleranceMeters, mapMetadata })
+  if (waypoint.frame !== 'map' && !allowOdom) {
+    throw new Error(`refusing to save non-map pose frame "${waypoint.frame}"; rerun with --allow-odom for temporary targets`)
+  }
+  if (waypoint.frame === 'map' && (!waypoint.mapId || !waypoint.mapFingerprint) && !allowMissingMapIdentity) {
+    throw new Error('refusing to save map waypoint without active map identity')
   }
 
   const captureFile = path.join(captureDir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${waypointName}.json`)
@@ -132,6 +110,7 @@ export async function captureWaypoint({
     ok: true,
     waypointName,
     waypoint,
+    mapIdentityRequired: !allowMissingMapIdentity,
     sourceOfTruthFile: waypointFile,
     writePolicy: 'proposal-only; config/robot-waypoints.json is not overwritten by capture',
   }, null, 2)}\n`, 'utf-8')
@@ -161,9 +140,9 @@ function parseArgs(argv) {
   const args = {
     waypointFile: DEFAULT_WAYPOINT_FILE,
     captureDir: DEFAULT_CAPTURE_DIR,
-    originFile: DEFAULT_MAP_ORIGIN_FILE,
     arrivalToleranceMeters: 0.25,
     allowOdom: false,
+    allowMissingMapIdentity: false,
     poseTimeoutMs: 10_000,
     physicalSpot: '',
   }
@@ -172,10 +151,10 @@ function parseArgs(argv) {
     const token = argv[index]
     if (token === '--file') args.waypointFile = path.resolve(argv[++index])
     else if (token === '--capture-dir') args.captureDir = path.resolve(argv[++index])
-    else if (token === '--origin-file') args.originFile = path.resolve(argv[++index])
     else if (token === '--spot') args.physicalSpot = argv[++index]
     else if (token === '--tolerance') args.arrivalToleranceMeters = Number(argv[++index])
     else if (token === '--allow-odom') args.allowOdom = true
+    else if (token === '--allow-missing-map-identity') args.allowMissingMapIdentity = true
     else if (token === '--pose-timeout') args.poseTimeoutMs = Number(argv[++index])
     else if (!args.name) args.name = token
     else throw new Error(`unknown argument: ${token}`)

@@ -66,6 +66,14 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
             batteryLastKnownAt: '2026-06-04T12:00:05.000Z',
             batteryUnit: 'percent',
             batterySource: 'DOGZILLALib.read_battery',
+            batterySafety: {
+              status: 'ok',
+              motionAllowed: true,
+              warningPercent: 20,
+              cutoffPercent: 10,
+              recoveryPercent: 15,
+              cause: 'Battery is above the configured warning threshold.',
+            },
             roll: 1,
             pitch: 2,
             yaw: 3,
@@ -150,6 +158,8 @@ test('buildHealthzPayload exposes generation id, per-sensor age, and authority',
   assert.equal(payload.sensors.robotControl.ageSec, 1.5)
   assert.equal(payload.sensors.battery.authority, 'DOGZILLALib.read_battery')
   assert.equal(payload.sensors.battery.ageSec, 5)
+  assert.equal(payload.sensors.battery.motionAllowed, true)
+  assert.equal(payload.sensors.battery.cutoffPercent, 10)
   assert.equal(payload.sensors.lidarScan.authority, 'oradar /scan')
   assert.equal(payload.sensors.lidarScan.ageSec, 0.42)
   assert.equal(payload.sensors.mapPose.authority, 'tf:map->base_footprint')
@@ -192,6 +202,8 @@ test('buildHealthzPayload keeps Isaac sidecar failure out of real DOGZILLA senso
           telemetry: {
             battery: 81,
             batteryStatus: 'ok',
+            batteryUnit: 'percent',
+            batterySafety: { status: 'ok', motionAllowed: true },
             roll: 0,
           },
         },
@@ -291,7 +303,10 @@ test('buildHealthzPayload degrades when map origin is missing', () => {
           receivedAt: '2026-06-04T12:00:08.500Z',
           telemetry: {
             battery: 80,
+            batteryStatus: 'ok',
             batteryReadStatus: 'ok',
+            batteryUnit: 'percent',
+            batterySafety: { status: 'ok', motionAllowed: true },
           },
         },
       },
@@ -309,6 +324,44 @@ test('buildHealthzPayload degrades when map origin is missing', () => {
   assert.match(payload.sensors.mapOrigin.detail, /No saved/)
   assert.deepEqual(payload.failedRequiredSensors, [])
   assert.ok(payload.failedEnabledSensors.includes('mapOrigin'))
+})
+
+test('buildHealthzPayload fails required battery sensor when motion cutoff is active', () => {
+  const payload = buildHealthzPayload({
+    checkedAt: '2026-06-04T12:00:10.000Z',
+    probeResults: {
+      robotState: {
+        status: 'ok',
+        activeTarget: { kind: 'dogzilla-direct' },
+        activeRobot: {
+          timestamp: '2026-06-04T12:00:09.000Z',
+          telemetry: {
+            battery: 9,
+            batteryStatus: 'ok',
+            batteryReadStatus: 'ok',
+            batteryUnit: 'percent',
+            batterySafety: {
+              status: 'cutoff',
+              motionAllowed: false,
+              warningPercent: 20,
+              cutoffPercent: 10,
+              recoveryPercent: 15,
+              cause: 'Battery 9% is at or below the 10% motion cutoff.',
+              recovery: 'Charge until a fresh reading is at least 15%.',
+            },
+          },
+        },
+      },
+      robotBridge: { status: 'ok' },
+    },
+  })
+
+  assert.equal(payload.ok, false)
+  assert.equal(payload.status, 'error')
+  assert.equal(payload.sensors.battery.status, 'cutoff')
+  assert.equal(payload.sensors.battery.motionAllowed, false)
+  assert.equal(payload.sensors.battery.recoveryPercent, 15)
+  assert.deepEqual(payload.failedRequiredSensors, ['battery'])
 })
 
 test('collectHealthzProbes reads the configured YOLO vision health endpoint', async () => {

@@ -42,7 +42,7 @@
     "label": "DOGZILLA Pi speaker cues",
     "baseUrl": "http://10.0.4.32:8895",
     "port": 8895,
-    "volume": 0,
+    "volume": 0.1,
     "cuePath": "/cue",
     "healthPath": "/healthz"
   },

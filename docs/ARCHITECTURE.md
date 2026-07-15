@@ -18,6 +18,9 @@ public/ UI or packaged shell
 -> sidecar or robot bridge
 ```
 
+Command schema uses `command: "vision"` plus boolean `enabled` for explicit YOLO state changes; object-search remains `command: "detect"` with `object_to_detect`. App-service recognizes explicit YOLO on/off intent before model inference, compiler emits `vision.toggle`, and dispatch uses the shared YOLO toggle service rather than robot bridge `/commands`.
+On Pi installations with `robodoge-yolo-vision.service`, the toggle writes `/etc/robodoge/yolo-vision.env` and restarts that unit; success requires live `/healthz` agreement, including `modelLoaded: true` when enabling detection.
+
 `run.mjs` is the managed launcher. `scripts/start-clean.mjs` resets stale local Robo-Doge process ports, then imports `run.mjs`. `server.mjs` serves HTTP/WebSocket, monitors rosbridge reconnects, and reports Nav2 readiness without starting, restarting, reinstalling, or deleting Nav2. In DOGZILLA direct mode, Pi boot/systemd owns map-pose/Nav2 lifetime; the app is a client that reads health, sends goals, cancels goals, and reports blockers. UI Connection Center and `npm run dogzilla:start-navigation` remain explicit manual repair paths only.
 
 ## Key entrypoints
@@ -36,7 +39,7 @@ public/ UI or packaged shell
 
 ## Operator UI boundaries
 
-Keep routine controls narrow: Settings owns model, runtime target, sound volume, and speech profile; Diagnostics owns aggregate preflight and Pi-load checks, with connection setup and service repair collapsed. Robot Info is the persistent navigation-status surface, and its Nav-chain detail stays operator-expanded; do not duplicate Nav2 blockers into command or minimap overlays.
+Keep routine controls narrow: Settings owns model, runtime target, performance profile, sound volume, and speech profile; Diagnostics owns aggregate preflight and Pi-load checks, with connection setup and service repair collapsed. Robot Info is the persistent navigation-status surface, and its Nav-chain detail stays operator-expanded; do not duplicate Nav2 blockers into command or minimap overlays. The Overview and Camera tabs share the primary visualization slot; Camera hides the minimap and Map Controls until Overview is restored.
 
 ## Runtime targets
 
@@ -97,19 +100,19 @@ synchronously, returns `202` with `delivery: "accepted"` only after the Nav2
 action server accepts it, then monitors motion in background. Callers track
 completion through `/feedback` instead of holding the original POST open.
 
-Map identity no longer dispatch gate after rosbridge simplification.
-`config/robot-waypoints.json` remains authoritative waypoint source; saved
-origin state plus current rosbridge `map` pose resolve app-map waypoints at
-runtime. `/api/robot/state` caps live health probes so UI can show
+`config/robot-waypoints.json` remains authoritative waypoint source. Active map
+identity gates waypoint dispatch; new entries use explicit `map` poses, while
+legacy `app_map` entries resolve only from immutable waypoint-owned map pose
+metadata. `/api/robot/state` caps live health probes so UI can show
 bridge-offline/localizing/stuck status without waiting on slow full bridge
 health request.
-DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists only the last valid reading in `output/app-cache/dogzilla-battery-state.json` so failed reads or app restarts can show `last-known` instead of losing prior monitor state.
+DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists only the last valid reading in `output/app-cache/dogzilla-battery-state.json` so failed reads or app restarts can show `last-known` instead of losing prior monitor state. The Pi direct bridge is the motion-safety authority: it accepts typed integer percent only, applies configurable warning/cutoff/recovery thresholds with stale-data expiry, safe-stops motion, and publishes cause/recovery through `/state` and `/healthz-lite`. Battery UART reads stay synchronous under the shared robot lock; DOGZILLALib 3.1.9 supplies a one-second wall timeout, and the bridge caps then restores its pyserial timeout. Do not reintroduce detached battery-read workers because a timed-out worker can overlap later UART stop commands.
 
 ## Config ownership
 
 | Config | Owned behavior |
 | --- | --- |
-| `config/robot-runtime.json` | Active target, dry-run, waypoint/action/motion selections |
+| `config/robot-runtime.json` | Active target, dry-run, performance profile, waypoint/action/motion selections |
 | `config/dogzilla-connection.json` | Pi host, SSH alias, bridge ports, camera/vision/audio/lidar endpoints |
 | `config/robot-waypoints.json` | Authoritative real DOGZILLA waypoint registry |
 | `config/isaacsim-waypoints.json` | Isaac waypoint registry with same semantic names where possible |
@@ -131,6 +134,13 @@ DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists onl
 ## Tests
 
 Use `npm test` for the Node test suite. Python sidecar tests live under `test/test_*.py`; current package script does not run them directly unless invoked separately.
+
+Control ownership uses the in-memory per-robot lease API at `/api/robot/lease`:
+`GET` reports state, `POST` acquires or deliberately takes over, `PATCH` renews,
+and `DELETE` releases. Responses carry a monotonic fencing token and expiry;
+the default TTL is 10 seconds and can be changed with
+`ROBO_DOGE_LEASE_TTL_MS`. Lease state is intentionally process-local, so a
+backend restart drops ownership and requires reacquisition.
 
 ## More detail
 

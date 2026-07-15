@@ -63,6 +63,7 @@ test('candidate promotion rewrites map image alias and records active aliases', 
       writeFile(join(candidateDir, 'map.yaml'), 'image: map.pgm\nresolution: 0.05\n'),
       writeFile(join(candidateDir, 'candidate.json'), JSON.stringify({
         id: candidateId,
+        resumePose: { frame: 'map', x: 1.25, y: -0.75, yaw: 0.4, capturedAt: '2026-07-12T12:00:00Z' },
         pbstream: bashPath(join(candidateDir, 'map.pbstream')),
         yaml: bashPath(join(candidateDir, 'map.yaml')),
         pgm: bashPath(join(candidateDir, 'map.pgm')),
@@ -85,6 +86,7 @@ test('candidate promotion rewrites map image alias and records active aliases', 
     const metadata = JSON.parse(await readFile(join(mapsDir, 'robodoge_home_map.json'), 'utf8'))
     assert.equal(metadata.state, 'active')
     assert.equal(metadata.candidateId, candidateId)
+    assert.deepEqual(metadata.resumePose, { frame: 'map', x: 1.25, y: -0.75, yaw: 0.4, capturedAt: '2026-07-12T12:00:00Z' })
     assert.equal(metadata.pbstream, join(mapsDir, 'robodoge_home.pbstream'))
     assert.equal(metadata.yaml, join(mapsDir, 'robodoge_home.yaml'))
     assert.equal(metadata.pgm, join(mapsDir, 'robodoge_home.pgm'))

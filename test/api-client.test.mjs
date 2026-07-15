@@ -25,17 +25,17 @@ test('query apiBase overrides stored backend URL', () => {
   assert.equal(getApiBaseUrl(), 'http://10.0.0.2:3037')
 })
 
-test('Android shell defaults to the PC tailnet backend', () => {
+test('Android shell has no machine-specific default backend', () => {
   installMockWindow('', {
     userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36 wv',
     tauri: true,
   })
 
-  assert.equal(getApiBaseUrl(), 'http://100.89.71.113:3037')
-  assert.equal(toApiUrl('/api/config'), 'http://100.89.71.113:3037/api/config')
+  assert.equal(getApiBaseUrl(), '')
+  assert.equal(toApiUrl('/api/config'), '/api/config')
 })
 
-test('stored Android backend URL overrides the bundled tailnet default', () => {
+test('stored Android backend URL survives restart', () => {
   installMockWindow('', {
     userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Version/4.0 Mobile Safari/537.36 wv',
     tauri: true,
@@ -46,7 +46,7 @@ test('stored Android backend URL overrides the bundled tailnet default', () => {
   assert.equal(getApiBaseUrl(), 'http://192.168.1.50:3037')
 })
 
-test('query apiBase overrides Android tailnet default', () => {
+test('query apiBase overrides Android stored backend', () => {
   installMockWindow('?apiBase=http://10.0.0.2:3037', {
     userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36 wv',
     tauri: true,

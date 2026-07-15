@@ -1033,7 +1033,16 @@ class Nav2NavigateClient:
         except Exception:
             pass  # cache is best-effort; direct probes still work
 
-    def send_goal(self, *, frame: str, x: float, y: float, yaw: float) -> dict[str, Any]:
+    def send_goal(
+        self,
+        *,
+        frame: str,
+        x: float,
+        y: float,
+        yaw: float,
+        wait_for_result: bool = False,
+        result_timeout: float = 600.0,
+    ) -> dict[str, Any]:
         if self.backend == "docker-rclpy":
             if not DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED:
                 return {
@@ -1043,7 +1052,14 @@ class Nav2NavigateClient:
                     "action": self.action_name,
                     "backend": self.backend,
                 }
-            return self._send_goal_via_docker(frame=frame, x=x, y=y, yaw=yaw)
+            return self._send_goal_via_docker(
+                frame=frame,
+                x=x,
+                y=y,
+                yaw=yaw,
+                wait_for_result=wait_for_result,
+                result_timeout=result_timeout,
+            )
 
         self._refresh_status()
 
@@ -1121,6 +1137,64 @@ class Nav2NavigateClient:
                 "delivery": "nav2-rejected",
                 "error": "Nav2 NavigateToPose goal rejected",
                 "action": self.action_name,
+                "frame": frame,
+                "x": x,
+                "y": y,
+                "yaw": yaw,
+            }
+
+        if wait_for_result:
+            result_future = goal_handle.get_result_async()
+            deadline = time.monotonic() + result_timeout
+            while not result_future.done() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not result_future.done():
+                cancel_confirmed = False
+                try:
+                    cancel_future = goal_handle.cancel_goal_async()
+                    cancel_deadline = time.monotonic() + 3.0
+                    while not cancel_future.done() and time.monotonic() < cancel_deadline:
+                        time.sleep(0.05)
+                    cancel_response = cancel_future.result() if cancel_future.done() else None
+                    cancel_confirmed = bool(
+                        cancel_response is not None
+                        and int(getattr(cancel_response, "return_code", -1)) == 0
+                    )
+                except Exception:
+                    pass
+                return {
+                    "executed": False,
+                    "delivery": "nav2-result-timeout",
+                    "error": f"Nav2 goal did not finish within {result_timeout:.1f}s",
+                    "action": self.action_name,
+                    "goalAccepted": True,
+                    "cancelConfirmed": cancel_confirmed,
+                }
+            wrapped_result = result_future.result()
+            status = int(getattr(wrapped_result, "status", 0) or 0)
+            status_name = {
+                2: "executing",
+                4: "succeeded",
+                5: "canceled",
+                6: "aborted",
+            }.get(status, f"status-{status}")
+            if status != 4:
+                return {
+                    "executed": False,
+                    "delivery": "nav2-result-failed",
+                    "error": f"Nav2 goal finished with status {status_name}",
+                    "action": self.action_name,
+                    "goalAccepted": True,
+                    "goalCompleted": True,
+                    "goalStatus": status_name,
+                }
+            return {
+                "executed": True,
+                "delivery": "Nav2 NavigateToPose",
+                "action": self.action_name,
+                "goalAccepted": True,
+                "goalCompleted": True,
+                "goalStatus": "succeeded",
                 "frame": frame,
                 "x": x,
                 "y": y,
@@ -1597,7 +1671,16 @@ finally:
             check=False,
         )
 
-    def _send_goal_via_docker(self, *, frame: str, x: float, y: float, yaw: float) -> dict[str, Any]:
+    def _send_goal_via_docker(
+        self,
+        *,
+        frame: str,
+        x: float,
+        y: float,
+        yaw: float,
+        wait_for_result: bool = False,
+        result_timeout: float = 600.0,
+    ) -> dict[str, Any]:
         request = {
             "action": self.action_name,
             "frame": frame,
@@ -1612,6 +1695,8 @@ finally:
             "lifecycleWaitTimeout": DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT,
             "scanTopic": DEFAULT_NAV2_SCAN_TOPIC,
             "scanWaitTimeout": DEFAULT_NAV2_SCAN_WAIT_TIMEOUT,
+            "waitForResult": wait_for_result,
+            "resultTimeout": result_timeout,
         }
         request_json = json.dumps(request)
         script = f"""
@@ -1730,6 +1815,63 @@ try:
         }}))
         raise SystemExit(4)
 
+    if request["waitForResult"]:
+        result_future = goal_handle.get_result_async()
+        rclpy.spin_until_future_complete(
+            node,
+            result_future,
+            timeout_sec=float(request["resultTimeout"]),
+        )
+        if not result_future.done():
+            cancel_future = goal_handle.cancel_goal_async()
+            rclpy.spin_until_future_complete(node, cancel_future, timeout_sec=3.0)
+            cancel_response = cancel_future.result() if cancel_future.done() else None
+            cancel_confirmed = bool(
+                cancel_response is not None
+                and int(getattr(cancel_response, "return_code", -1)) == 0
+            )
+            print(json.dumps({{
+                "executed": False,
+                "delivery": "nav2-result-timeout",
+                "error": f"Nav2 goal did not finish within {{float(request['resultTimeout']):.1f}}s",
+                "action": request["action"],
+                "goalAccepted": True,
+                "cancelConfirmed": cancel_confirmed,
+            }}))
+            raise SystemExit(8)
+
+        wrapped_result = result_future.result()
+        status = int(getattr(wrapped_result, "status", 0) or 0)
+        status_name = {{2: "executing", 4: "succeeded", 5: "canceled", 6: "aborted"}}.get(
+            status, f"status-{{status}}"
+        )
+        if status != 4:
+            print(json.dumps({{
+                "executed": False,
+                "delivery": "nav2-result-failed",
+                "error": f"Nav2 goal finished with status {{status_name}}",
+                "action": request["action"],
+                "goalAccepted": True,
+                "goalCompleted": True,
+                "goalStatus": status_name,
+            }}))
+            raise SystemExit(9)
+
+        print(json.dumps({{
+            "executed": True,
+            "delivery": "Nav2 NavigateToPose",
+            "action": request["action"],
+            "goalAccepted": True,
+            "goalCompleted": True,
+            "goalStatus": "succeeded",
+            "frame": request["frame"],
+            "x": float(request["x"]),
+            "y": float(request["y"]),
+            "yaw": yaw,
+            "lifecycleWarning": lifecycle_warning,
+        }}))
+        raise SystemExit(0)
+
     print(json.dumps({{
         "executed": True,
         "delivery": "Nav2 NavigateToPose",
@@ -1752,6 +1894,7 @@ finally:
             + DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT
             + DEFAULT_NAV2_SCAN_WAIT_TIMEOUT
             + 5
+            + (result_timeout if wait_for_result else 0)
         )
         try:
             completed = self._run_docker_python(script, timeout=docker_timeout)

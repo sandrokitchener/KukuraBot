@@ -139,13 +139,13 @@ export function dogzillaMotionProfile(overrides = {}) {
     paceModes: ['slow', 'normal', 'high'],
     limits: {
       xStep: { min: -25, max: 25 },
-      yStep: { min: -18, max: 18 },
+      yStep: { min: 0, max: 0 },
       turnRate: { min: -100, max: 100 },
     },
     twistCalibration: {
       deadband: 0.05,
       linearXFullScaleStep: 25,
-      linearYFullScaleStep: 18,
+      linearYFullScaleStep: 0,
       angularZFullScaleStep: 100,
     },
     ...overrides,

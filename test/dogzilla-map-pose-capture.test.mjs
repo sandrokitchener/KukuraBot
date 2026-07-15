@@ -12,7 +12,7 @@ import {
 } from '../scripts/capture-dogzilla-map-pose.mjs'
 import { nav2HealthBody } from '../test-support/robot-http-fixtures.mjs'
 
-test('poseToWaypoint converts lidar bridge map pose to app_map when origin exists', () => {
+test('poseToWaypoint keeps lidar bridge pose in the active map frame even when a legacy origin exists', () => {
   const waypoint = poseToWaypoint({
     ok: true,
     pose: {
@@ -36,9 +36,9 @@ test('poseToWaypoint converts lidar bridge map pose to app_map when origin exist
   })
 
   assert.equal(waypoint.kind, 'map_pose')
-  assert.equal(waypoint.frame, 'app_map')
-  assert.equal(waypoint.x, 0.7)
-  assert.equal(waypoint.y, -0.5)
+  assert.equal(waypoint.frame, 'map')
+  assert.equal(waypoint.x, 1.2)
+  assert.equal(waypoint.y, -0.4)
   assert.equal(waypoint.yaw, 0.75)
   assert.equal(waypoint.arrivalToleranceMeters, 0.3)
   assert.equal(waypoint.physicalSpot, 'Living room rug')
@@ -46,20 +46,11 @@ test('poseToWaypoint converts lidar bridge map pose to app_map when origin exist
   assert.equal(waypoint.mapId, 'test_map')
   assert.equal(waypoint.mapFingerprint, 'test-map-fingerprint')
   assert.equal(waypoint.map.fingerprint, 'test-map-fingerprint')
-  assert.equal(waypoint.mapOrigin.label, 'home')
-  assert.equal(waypoint.mapOrigin.x, 0.5)
-  assert.equal(waypoint.mapOrigin.y, 0.1)
-  assert.equal(waypoint.mapOrigin.yaw, 0)
-  assert.equal(waypoint.mapOrigin.mapFingerprint, 'test-map-fingerprint')
-  assert.ok(waypoint.capturedMapPose)
-  assert.equal(waypoint.capturedMapPose.frame, 'map')
-  assert.equal(waypoint.capturedMapPose.x, 1.2)
-  assert.equal(waypoint.capturedMapPose.y, -0.4)
-  assert.equal(waypoint.capturedMapPose.yaw, 0.75)
+  assert.equal(waypoint.mapOrigin, undefined)
+  assert.equal(waypoint.capturedMapPose, undefined)
   assert.match(waypoint.notes[0], /Captured from tf:map->base_link/)
-  assert.match(waypoint.notes.join('\n'), /Captured map pose: x=1.2, y=-0.4, yaw=0.75/)
   assert.match(waypoint.notes.join('\n'), /Captured map identity: id=test_map/)
-  assert.match(waypoint.notes.join('\n'), /Stored in app_map frame/)
+  assert.doesNotMatch(waypoint.notes.join('\n'), /app_map/)
 })
 
 test('poseToWaypoint stores raw map frame when no app origin is available', () => {
@@ -109,7 +100,7 @@ test('poseToWaypoint marks odom captures as temporary unverified targets', () =>
   assert.match(waypoint.notes[0], /scan-odom/)
 })
 
-test('poseToWaypoint converts map pose to app_map when app origin exists', () => {
+test('poseToWaypoint ignores mutable app origin for map-native waypoint storage', () => {
   const waypoint = poseToWaypoint({
     ok: true,
     pose: {
@@ -130,25 +121,15 @@ test('poseToWaypoint converts map pose to app_map when app origin exists', () =>
     mapMetadata: nav2HealthBody().runtime.map,
   })
 
-  assert.equal(waypoint.frame, 'app_map')
-  assert.equal(waypoint.x, 1)
-  assert.equal(waypoint.y, 0)
-  assert.equal(waypoint.yaw, 1.5708)
+  assert.equal(waypoint.frame, 'map')
+  assert.equal(waypoint.x, 10)
+  assert.equal(waypoint.y, 21)
+  assert.equal(waypoint.yaw, Math.PI)
   assert.equal(waypoint.verified, true)
   assert.equal(waypoint.mapFingerprint, 'test-map-fingerprint')
-  assert.equal(waypoint.mapOrigin.label, 'dock')
-  assert.equal(waypoint.mapOrigin.x, 10)
-  assert.equal(waypoint.mapOrigin.y, 20)
-  assert.equal(waypoint.mapOrigin.yaw, Math.PI / 2)
-  assert.equal(waypoint.mapOrigin.mapId, 'test_map')
-  assert.equal(waypoint.mapOrigin.mapFingerprint, 'test-map-fingerprint')
-  assert.equal(waypoint.mapOrigin.displayOnly, undefined)
-  assert.ok(waypoint.capturedMapPose)
-  assert.equal(waypoint.capturedMapPose.frame, 'map')
-  assert.equal(waypoint.capturedMapPose.x, 10)
-  assert.equal(waypoint.capturedMapPose.y, 21)
-  assert.equal(waypoint.capturedMapPose.yaw, Math.PI)
-  assert.match(waypoint.notes.join('\n'), /Stored in app_map frame/)
+  assert.equal(waypoint.mapOrigin, undefined)
+  assert.equal(waypoint.capturedMapPose, undefined)
+  assert.doesNotMatch(waypoint.notes.join('\n'), /app_map/)
 })
 
 

@@ -28,6 +28,7 @@ BARK_FILES = [
 
 DEFAULT_CUES = {
     "bark": BARK_FILES,
+    "mapping-start": ["mapping-start.wav"],
     "thinking-start": [
         "robot-think-whimper-1.wav",
         "robot-think-whimper-2.wav",
@@ -141,7 +142,7 @@ def play_cue(state: AudioState, cue: str, volume: Any = None) -> dict[str, Any]:
         return {"ok": False, "cue": cue, "error": f"Unknown cue: {cue}"}
 
     if volume_value <= 0.0:
-        if cue in ("thinking-start", "confirm", "bark"):
+        if cue in ("thinking-start", "confirm", "bark", "mapping-start"):
             stop_active(state)
         state.last_cue = cue
         state.last_error = ""
@@ -155,7 +156,7 @@ def play_cue(state: AudioState, cue: str, volume: Any = None) -> dict[str, Any]:
     if not sound_file.exists():
         return {"ok": False, "cue": cue, "error": f"Sound file missing: {sound_file}"}
 
-    if cue in ("thinking-start", "confirm", "bark"):
+    if cue in ("thinking-start", "confirm", "bark", "mapping-start"):
         stop_active(state)
 
     try:

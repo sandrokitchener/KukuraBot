@@ -15,6 +15,7 @@
     "server": "node server.mjs",
     "fake:robot-state": "node scripts/fake-robot-state-client.mjs",
     "dogzilla:capture-pose": "node scripts/capture-dogzilla-map-pose.mjs",
+    "dogzilla:migrate-waypoints": "node scripts/migrate-waypoints-to-appmap.mjs",
     "dogzilla:review-waypoint-proposal": "node scripts/review-dogzilla-waypoint-proposal.mjs",
     "dogzilla:validate-waypoints": "node scripts/validate-dogzilla-waypoints.mjs",
     "dogzilla:probe-nav": "node scripts/probe-dogzilla-nav-readiness.mjs",

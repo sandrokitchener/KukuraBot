@@ -18,5 +18,6 @@ Supported cue names:
 - `thinking-start`
 - `thinking-stop`
 - `confirm`
+- `mapping-start` (plays `public/sounds/mapping-start.wav` after autonomous mapping starts)
 
 The sidecar plays WAV files with `aplay` by default so the browser does not need to own robot feedback audio.

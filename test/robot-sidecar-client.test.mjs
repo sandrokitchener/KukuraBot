@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { enterDogzillaNavMode, fetchDogzillaNavMode, probeRobotSidecarHealth, sendRobotCommand, sendRobotEmergencyStop } from '../lib/robot-sidecar-client.mjs'
+import { enterDogzillaNavMode, fetchDogzillaNavMode, probeRobotSidecarHealth, sendRobotCommand, sendRobotEmergencyStop, sendRobotEmergencyStopClear } from '../lib/robot-sidecar-client.mjs'
 import {
   actionOncePreview,
   dogzillaMapPoseBody,
@@ -140,6 +140,28 @@ test('sendRobotEmergencyStop posts a stop action even when runtime dry-run is en
       assert.equal(requestBody.envelope.payload.robot_name, 'Questing Beast')
       assert.equal(requestBody.envelope.canonicalPlan.kind, 'noop')
       assert.equal(requestBody.envelope.canonicalPlan.params.reason, 'emergency_stop')
+    },
+  )
+})
+
+test('sendRobotEmergencyStopClear posts an explicit unlatch command', async () => {
+  let requestBody = null
+
+  await withMockedFetch(
+    async (_url, options) => {
+      requestBody = parseRequestBody(options)
+      return jsonResponse({ accepted: true }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotEmergencyStopClear(
+        ros2Runtime({ dryRun: false }),
+        ros2TransportConfig({ dryRun: false }),
+      )
+
+      assert.equal(result.status, 'sent')
+      assert.equal(requestBody.action, 'clear')
+      assert.equal(requestBody.envelope.action, 'clear')
+      assert.equal(requestBody.envelope.canonicalPlan.params.reason, 'clear_emergency_stop')
     },
   )
 })

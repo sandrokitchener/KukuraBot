@@ -1,11 +1,11 @@
 export const DANGEROUS_CONNECTION_ACTIONS = Object.freeze({
-  'capture-map-origin': {
-    title: 'Set Charger Origin',
-    message: 'This will save the current robot position as the charger origin. Existing app_map waypoints keep their stored capture anchor; only new captures use this origin.',
-  },
   'start-map-pose-mapping': {
     title: 'Start New SLAM Map',
     message: 'This switches Cartographer into live mapping. Drive slowly, save only when the map is stable, then recapture waypoints that no longer align.',
+  },
+  'start-map-pose': {
+    title: 'Relocalize Robot',
+    message: 'This pauses waypoint navigation, matches live LiDAR against the full saved map, and enables navigation only after Cartographer proves a global match.',
   },
   'start-autonomous-mapping': {
     title: 'Map This Floor',
@@ -13,7 +13,7 @@ export const DANGEROUS_CONNECTION_ACTIONS = Object.freeze({
   },
   'continue-autonomous-mapping': {
     title: 'Continue Current Map',
-    message: 'Robot will extend the active Cartographer map from its saved PBSTREAM. Start only when the robot is localized in a recognizable part of that map.',
+    message: 'Robot will walk to the last saved mapping pose, then extend the active Cartographer map from its saved PBSTREAM. Keep its route clear.',
   },
   'finish-autonomous-mapping': {
     title: 'Finish Autonomous Mapping',
@@ -72,10 +72,14 @@ export function buildNavChainComponents(readinessPayload) {
   const lidar = readinessPayload.sensors?.lidar
   const localization = readinessPayload.sensors?.localization
   const localizedPose = localization?.mapPose || localization?.pose || localization
+  const localizationBlocker = Array.isArray(nav.blockers)
+    ? nav.blockers.find((blocker) => /location|localiz|global match|relocal/i.test(String(blocker || '')))
+    : ''
   const lidarStatus = lidar ? (lidar.ok === true ? 'ok' : 'fail') : 'unknown'
   const localizationReady = localization?.ok === true
     && localization?.waypointSafe === true
     && localizedPose?.frame === 'map'
+    && !localizationBlocker
   const localizationStatus = localization ? (localizationReady ? 'ok' : 'fail') : 'unknown'
 
   const components = [
@@ -92,7 +96,7 @@ export function buildNavChainComponents(readinessPayload) {
       ...NAV_CHAIN_COMPONENTS[1],
       status: localizationStatus,
       detail: localization
-        ? (localizationReady ? 'Fresh map->base_link pose' : localization.error || 'Fresh map-frame pose unavailable')
+        ? (localizationReady ? 'Map location verified by global match' : localizationBlocker || localization.error || 'Verified map-frame location unavailable')
         : 'Localization status not reported',
     },
     {

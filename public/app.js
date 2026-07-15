@@ -1,9 +1,10 @@
 import { createSpeechInputController } from './speech-input.js'
 import { createCommandCuePlayer } from './command-cue.js'
 import { splitRecentChatHistory } from './chat-history.js'
-import { apiFetch, getApiBaseUrl, setApiBaseUrl, toApiUrl } from './api-client.js'
+import { apiFetch, getApiBaseUrl, normalizeApiBaseUrl, setApiBaseUrl, toApiUrl } from './api-client.js'
 import { createDogzillaAudioController } from './dogzilla-audio.js'
 import { createManualControlController } from './manual-control.js'
+import { parseExplicitVisionCommand } from './vision-command.js'
 import {
   createRobotMapRenderer,
   formatMapStatusPayload,
@@ -26,6 +27,9 @@ const settingsStatus = document.querySelector('#settings-status')
 const robotTargetSelect = document.querySelector('#robot-target-select')
 const saveRobotTargetButton = document.querySelector('#save-robot-target-button')
 const robotTargetStatus = document.querySelector('#robot-target-status')
+const performanceProfileSelect = document.querySelector('#performance-profile-select')
+const savePerformanceProfileButton = document.querySelector('#save-performance-profile-button')
+const performanceProfileStatus = document.querySelector('#performance-profile-status')
 const manualControlPanel = document.querySelector('#manual-control-panel')
 const manualControlChip = document.querySelector('#manual-control-chip')
 const manualControlToggleButton = document.querySelector('#manual-control-toggle-button')
@@ -40,6 +44,9 @@ const manualControlStrafeMeter = document.querySelector('#manual-control-strafe-
 const manualControlTurnMeter = document.querySelector('#manual-control-turn-meter')
 const manualControlSpeedSlider = document.querySelector('#manual-control-speed-slider')
 const manualControlSpeedValue = document.querySelector('#manual-control-speed-value')
+const manualTouchControls = document.querySelector('#manual-touch-controls')
+const manualTouchLeftStick = document.querySelector('#manual-touch-left-stick')
+const manualTouchRightStick = document.querySelector('#manual-touch-right-stick')
 const speechPanel = document.querySelector('.speech-panel')
 const speechProfileName = document.querySelector('#speech-profile-name')
 const speechProfileSelect = document.querySelector('#speech-profile-select')
@@ -76,16 +83,12 @@ const robotMapDot = document.querySelector('#robot-map-dot')
 const robotMapElement = document.querySelector('#robot-map')
 const robotLidarScan = document.querySelector('#robot-lidar-scan')
 const robotMapMeta = document.querySelector('#robot-map-meta')
-const robotMapGridMeta = document.querySelector('#robot-map-grid-meta')
-const robotMapModeChip = document.querySelector('#robot-map-mode-chip')
-const robotMapFreshness = document.querySelector('#robot-map-freshness')
-const robotMapCellCounts = document.querySelector('#robot-map-cell-counts')
-const robotMapBbox = document.querySelector('#robot-map-bbox')
 const robotMapLayerGrid = document.querySelector('#robot-map-layer-grid')
 const robotMapLayerScan = document.querySelector('#robot-map-layer-scan')
 const robotMapLayerWaypoints = document.querySelector('#robot-map-layer-waypoints')
 const robotPoseReadout = document.querySelector('#robot-pose-readout')
 const robotMapPanel = document.querySelector('.robot-map-panel')
+const mapWorkflowPanel = document.querySelector('#map-workflow-panel')
 const robotCameraPanel = document.querySelector('#robot-camera-panel')
 const robotCameraFrame = document.querySelector('#robot-camera-frame')
 const robotCameraChip = document.querySelector('#robot-camera-chip')
@@ -189,6 +192,7 @@ const DEFAULT_ROBOT_RUNTIME = {
   motionFile: 'config/robot-motion.json',
   feedbackPollMs: 2500,
   statePollMs: 125,
+  lidarPollMs: 750,
   stateSnapshotPath: '/api/robot/state',
   stateStreamPath: '/api/robot/state/stream',
   waypointReadinessPath: '/api/dogzilla/waypoint-readiness',
@@ -196,6 +200,20 @@ const DEFAULT_ROBOT_RUNTIME = {
   waypoints: [],
   waypointReadiness: null,
   selectionLocked: false,
+  performanceProfile: {
+    id: 'balanced',
+    label: 'Balanced',
+    cameraStream: 'raw',
+    visionEnabled: true,
+    localizationMode: 'continuous',
+    feedbackPollMs: 2500,
+    statePollMs: 1000,
+    lidarPollMs: 750,
+    safetyTelemetry: true,
+    selectionLocked: false,
+  },
+  availablePerformanceProfiles: [],
+  performanceSelectionLocked: false,
   source: 'runtime',
 }
 const DOGZILLA_CAMERA_LOAD_TIMEOUT_MS = 8000
@@ -211,6 +229,8 @@ let slamMappingSessionStartedAt = 0
 let connectionActionPending = false
 let autonomousMappingActive = false
 let autonomousMapCandidateAvailable = false
+let emergencyStopActive = false
+let emergencyStopStateKnown = false
 let activeThinkingCue = null
 let thinkingCueToken = 0
 let reconSnapshots = []
@@ -304,6 +324,9 @@ const manualControl = createManualControlController({
     turnMeter: manualControlTurnMeter,
     speedSlider: manualControlSpeedSlider,
     speedValue: manualControlSpeedValue,
+    touchControls: manualTouchControls,
+    touchLeftStick: manualTouchLeftStick,
+    touchRightStick: manualTouchRightStick,
   },
   apiFetch,
   toApiUrl,
@@ -335,6 +358,7 @@ form.addEventListener('submit', handleChatSubmit)
 saveProfileButton.addEventListener('click', handleProfileSave)
 saveSpeechProfileButton.addEventListener('click', handleSpeechProfileSave)
 saveRobotTargetButton.addEventListener('click', handleRobotTargetSave)
+savePerformanceProfileButton?.addEventListener('click', handlePerformanceProfileSave)
 const persistentEmergencyStop = document.getElementById('persistent-emergency-stop')
 persistentEmergencyStop?.addEventListener('click', handleEmergencyStop)
 
@@ -458,6 +482,10 @@ robotCameraFrame.addEventListener('error', handleDogzillaCameraFrameError)
 robotCameraFrame.addEventListener('load', handleDogzillaCameraFrameLoad)
 window.addEventListener('gamepadconnected', manualControl.handleGamepadConnected)
 window.addEventListener('gamepaddisconnected', manualControl.handleGamepadDisconnected)
+window.addEventListener('blur', manualControl.handleWindowBlur)
+document.addEventListener('visibilitychange', () => manualControl.handleVisibilityChange(document.hidden))
+manualControlPanel?.addEventListener('pointercancel', manualControl.handlePointerLoss)
+manualControlPanel?.addEventListener('lostpointercapture', manualControl.handlePointerLoss)
 
 function initAndroidAppShell() {
   if (!isAndroidAppShell()) {
@@ -465,6 +493,9 @@ function initAndroidAppShell() {
   }
 
   document.documentElement.classList.add('android-app')
+  manualControl.enableTouch()
+  bindManualTouchStick(manualTouchLeftStick, 'left')
+  bindManualTouchStick(manualTouchRightStick, 'right')
   setMobileView(MOBILE_DEFAULT_VIEW)
   document.addEventListener('touchstart', handleMobileTouchStart, { passive: true })
   document.addEventListener('touchmove', handleMobileTouchMove, { passive: false })
@@ -664,6 +695,7 @@ async function handleChatSubmit(event) {
 
   try {
     const payload = await submitChatMessage(message)
+    applyVisionDispatchResult(payload)
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
     const completionState = isActiveDispatchFailure(payload) ? 'error' : 'idle'
@@ -693,24 +725,72 @@ async function handleChatSubmit(event) {
 }
 
 async function submitChatMessage(message) {
+  let payload
   if (shouldUseAndroidLocalModel()) {
-    return submitAndroidLocalModelMessage(message)
+    payload = await submitAndroidLocalModelMessage(message)
+  } else {
+    const response = await apiFetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ input: message }),
+    })
+
+    payload = await response.json()
+    if (!response.ok) {
+      throw new Error(payload.error || 'Request failed.')
+    }
   }
 
-  const response = await apiFetch('/api/chat', {
+  return enforceExplicitVisionCommand(message, payload)
+}
+
+function bindManualTouchStick(element, stick) {
+  if (!element) {
+    return
+  }
+
+  element.addEventListener('pointerdown', (event) => manualControl.handleTouchPointerDown(event, stick))
+  element.addEventListener('pointermove', manualControl.handleTouchPointerMove)
+  element.addEventListener('pointerup', manualControl.handleTouchPointerUp)
+  element.addEventListener('pointercancel', manualControl.handleTouchPointerCancel)
+  element.addEventListener('lostpointercapture', manualControl.handleTouchPointerCancel)
+}
+
+async function enforceExplicitVisionCommand(message, payload) {
+  const command = parseExplicitVisionCommand(message)
+  if (!command || payload?.parsed?.command === 'vision') return payload
+
+  const response = await apiFetch('/api/dogzilla/vision/toggle', {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ input: message }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled: command.enabled }),
   })
-
-  const payload = await response.json()
-  if (!response.ok) {
-    throw new Error(payload.error || 'Request failed.')
+  const toggle = await response.json()
+  if (!response.ok || toggle.ok === false) {
+    throw new Error(toggle.error || 'Vision command was not executed.')
   }
 
-  return payload
+  return {
+    ...payload,
+    response: JSON.stringify(command),
+    parsed: command,
+    robotRuntime: {
+      ...payload.robotRuntime,
+      status: 'ready',
+      command: 'vision',
+      action: 'dogzilla.vision_toggle',
+      canonicalPlan: { kind: 'vision.toggle', params: { enabled: command.enabled } },
+    },
+    robotDispatch: {
+      ...toggle,
+      status: 'sent',
+      kind: 'vision.toggle',
+      requestedEnabled: command.enabled,
+      actualEnabled: toggle.actualEnabled ?? toggle.enabled,
+    },
+  }
 }
 
 function shouldUseAndroidLocalModel() {
@@ -920,12 +1000,52 @@ async function handleRobotTargetSave() {
   }
 }
 
+async function handlePerformanceProfileSave() {
+  const nextProfileId = performanceProfileSelect?.value
+  const activeProfile = runtimeConfig.robotRuntime.performanceProfile
+  if (!nextProfileId) {
+    if (performanceProfileStatus) performanceProfileStatus.textContent = 'Select a performance profile first.'
+    return
+  }
+  if (nextProfileId === activeProfile?.id) {
+    if (performanceProfileStatus) performanceProfileStatus.textContent = `Already using ${activeProfile.label}.`
+    return
+  }
+
+  if (savePerformanceProfileButton) savePerformanceProfileButton.disabled = true
+  if (performanceProfileSelect) performanceProfileSelect.disabled = true
+  if (performanceProfileStatus) performanceProfileStatus.textContent = 'Saving performance profile...'
+  try {
+    const response = await apiFetch('/api/settings/performance-profile', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ profileId: nextProfileId }),
+    })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || 'Could not update performance profile.')
+    applyPayload(payload)
+    startRobotFeedbackPolling()
+    startRobotStatePolling()
+    startRobotLidarPolling()
+    if (performanceProfileStatus) performanceProfileStatus.textContent = `Using ${runtimeConfig.robotRuntime.performanceProfile.label}.`
+    setStatus(`Performance profile changed to ${runtimeConfig.robotRuntime.performanceProfile.label}.`)
+  } catch (error) {
+    if (performanceProfileStatus) performanceProfileStatus.textContent = formatError(error)
+    setStatus(formatError(error), 'error')
+  } finally {
+    applyPerformanceProfileSelectionState()
+  }
+}
+
 async function handleEmergencyStop(event) {
   const triggerButton = event?.currentTarget
+  if (!emergencyStopStateKnown) return
+  const action = emergencyStopActive ? 'clear' : 'stop'
   if (triggerButton) {
     triggerButton.disabled = true
+    triggerButton.textContent = action === 'clear' ? 'Clearing…' : 'Stopping…'
   }
-  setStatus('Sending emergency stop.', 'busy')
+  setStatus(action === 'clear' ? 'Clearing emergency stop.' : 'Sending emergency stop.', 'busy')
 
   try {
     const response = await apiFetch('/api/robot/stop', {
@@ -933,7 +1053,7 @@ async function handleEmergencyStop(event) {
       headers: {
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ action: 'stop' }),
+      body: JSON.stringify({ action }),
     })
     const payload = await response.json()
 
@@ -941,18 +1061,29 @@ async function handleEmergencyStop(event) {
       throw new Error(payload.dispatch?.error || payload.error || 'Emergency stop failed.')
     }
 
-    const summary = formatEmergencyStopSummary(payload.dispatch)
+    await refreshEmergencyStopState()
+    const summary = formatEmergencyStopSummary(payload.dispatch, action)
     setStatus(summary)
-    await refreshRobotFeedback()
+    await refreshDogzillaWaypointReadiness()
     await refreshRobotState()
   } catch (error) {
+    await refreshEmergencyStopState()
     const message = formatError(error)
     setStatus(message, 'error')
-  } finally {
-    if (triggerButton) {
-      triggerButton.disabled = false
-    }
   }
+}
+
+function applyVisionDispatchResult(payload) {
+  const dispatch = payload?.robotDispatch
+  if (dispatch?.kind !== 'vision.toggle' || typeof dispatch.actualEnabled !== 'boolean') return
+
+  runtimeConfig.dogzilla = runtimeConfig.dogzilla || {}
+  runtimeConfig.dogzilla.vision = dispatch.vision || {
+    ...(runtimeConfig.dogzilla.vision || {}),
+    detectionEnabled: dispatch.actualEnabled,
+  }
+  applyDogzillaCameraConfig()
+  if (dispatch.status === 'sent') startDogzillaCameraViewer({ forceRefresh: true })
 }
 
 async function handleDogzillaBackendSave() {
@@ -974,10 +1105,18 @@ async function handleDogzillaBackendSave() {
 
 async function saveBackendUrl(value) {
   const requestedBackendUrl = String(value || '').trim()
-  const nextBaseUrl = setApiBaseUrl(requestedBackendUrl)
+  const nextBaseUrl = normalizeApiBaseUrl(requestedBackendUrl)
   if (requestedBackendUrl && !nextBaseUrl) {
     throw new Error('Backend URL must start with http:// or https://.')
   }
+  if (nextBaseUrl && window.location.protocol === 'https:' && nextBaseUrl.startsWith('http:')) {
+    throw new Error('HTTPS app cannot connect to an HTTP backend. Use HTTPS or open the app shell.')
+  }
+  if (nextBaseUrl) {
+    const response = await fetch(new URL('api/config', `${nextBaseUrl}/`))
+    if (!response.ok) throw new Error(`Backend health check failed (${response.status}).`)
+  }
+  setApiBaseUrl(nextBaseUrl)
   applyBackendControls()
 
   const payload = await fetchConfig()
@@ -1026,7 +1165,55 @@ async function refreshRobotFeedback() {
     return
   }
 
-  await refreshDogzillaWaypointReadiness()
+  await Promise.all([
+    refreshDogzillaWaypointReadiness(),
+    refreshEmergencyStopState(),
+  ])
+}
+
+async function refreshEmergencyStopState() {
+  if (!isRealRobotTargetActive()) {
+    applyEmergencyStopState(null)
+    return false
+  }
+  try {
+    const response = await apiFetch('/api/robot/health?lite=1')
+    const payload = await response.json()
+    if (response.ok) {
+      applyAutonomousMappingState(payload?.body?.autonomousMapping)
+      return applyEmergencyStopState(payload?.body)
+    }
+  } catch {
+    // Unknown is safer than presenting stale latch state as current.
+  }
+  applyEmergencyStopState(null)
+  return false
+}
+
+function applyEmergencyStopState(health) {
+  if (typeof health?.gaitBlocked !== 'boolean') {
+    emergencyStopStateKnown = false
+    if (!persistentEmergencyStop) return false
+    persistentEmergencyStop.dataset.state = 'unknown'
+    persistentEmergencyStop.textContent = 'Unknown'
+    persistentEmergencyStop.disabled = true
+    persistentEmergencyStop.setAttribute('aria-label', 'Emergency stop state unavailable')
+    persistentEmergencyStop.title = 'Waiting for live emergency stop state'
+    return false
+  }
+
+  emergencyStopStateKnown = true
+  emergencyStopActive = health?.gaitBlocked === true && health?.gaitBlockedReason === 'emergency_stop'
+  if (!persistentEmergencyStop) return true
+  persistentEmergencyStop.dataset.state = emergencyStopActive ? 'stopped' : 'ready'
+  persistentEmergencyStop.textContent = emergencyStopActive ? 'Stopped' : 'Stop'
+  persistentEmergencyStop.disabled = false
+  persistentEmergencyStop.setAttribute(
+    'aria-label',
+    emergencyStopActive ? 'Clear emergency stop and resume robot control' : 'Emergency stop robot',
+  )
+  persistentEmergencyStop.title = emergencyStopActive ? 'Click to clear emergency stop' : 'Emergency stop robot'
+  return true
 }
 
 function startRobotFeedbackPolling() {
@@ -1096,9 +1283,12 @@ function startRobotLidarPolling() {
   }
 
   void refreshDogzillaLidarScan()
+  const pollMs = runtimeConfig.robotRuntime.lidarPollMs
+    || runtimeConfig.robotRuntime.performanceProfile?.lidarPollMs
+    || 750
   robotLidarTimerId = window.setInterval(() => {
     void refreshDogzillaLidarScan()
-  }, 750)
+  }, pollMs)
 }
 
 async function refreshRobotState() {
@@ -1174,27 +1364,18 @@ async function refreshDogzillaMap() {
     if (!mapResponse.ok || payload?.ok !== true) {
       robotMap.setMapData(null)
       document.querySelector('.robot-map-head')?.classList.remove('has-map')
-      if (robotMapGridMeta) {
-        robotMapGridMeta.textContent = payload?.status === 'no-map' ? 'No map' : 'Map unavailable'
-      }
       renderMapStatus(payload, healthPayload)
       adaptMapPollInterval(healthPayload)
       return
     }
 
     robotMap.setMapData(payload)
-    if (robotMapGridMeta) {
-      robotMapGridMeta.textContent = robotMap.getMapGridMeta() || `Map ${payload.width}x${payload.height}`
-    }
     document.querySelector('.robot-map-head')?.classList.add('has-map')
     renderMapStatus(payload, healthPayload)
     adaptMapPollInterval(healthPayload)
 } catch {
     robotMap.setMapData(null)
     document.querySelector('.robot-map-head')?.classList.remove('has-map')
-    if (robotMapGridMeta) {
-      robotMapGridMeta.textContent = 'Map unavailable'
-    }
     renderMapStatus(null, null)
     adaptMapPollInterval(null)
   }
@@ -1202,17 +1383,6 @@ async function refreshDogzillaMap() {
 
 function renderMapStatus(mapPayload, healthPayload) {
   const status = formatMapStatusPayload(mapPayload, healthPayload)
-
-  if (robotMapModeChip) {
-    robotMapModeChip.textContent = status.modeLabel
-    robotMapModeChip.dataset.mode = status.mode
-    if (status.fresh && status.mode === 'mapping') {
-      robotMapModeChip.dataset.fresh = 'true'
-    } else {
-      delete robotMapModeChip.dataset.fresh
-    }
-    robotMapModeChip.hidden = false
-  }
 
   const saveMapButton = document.getElementById('save-map-button')
   const newMapButton = document.getElementById('new-map-button')
@@ -1242,32 +1412,6 @@ function renderMapStatus(mapPayload, healthPayload) {
     ensureTopDownMapView()
   }
 
-  if (robotMapFreshness) {
-    if (status.freshnessLabel) {
-      robotMapFreshness.textContent = status.freshnessLabel
-      robotMapFreshness.hidden = false
-    } else {
-      robotMapFreshness.hidden = true
-    }
-  }
-
-  if (robotMapCellCounts) {
-    if (status.cellCountsLabel) {
-      robotMapCellCounts.textContent = `Cells: ${status.cellCountsLabel}`
-      robotMapCellCounts.hidden = false
-    } else {
-      robotMapCellCounts.hidden = true
-    }
-  }
-
-  if (robotMapBbox) {
-    if (status.bboxLabel) {
-      robotMapBbox.textContent = status.bboxLabel
-      robotMapBbox.hidden = false
-    } else {
-      robotMapBbox.hidden = true
-    }
-  }
   renderMapLayerStatus(status, mapPayload, healthPayload)
   const workflowSummary = formatMapWorkflowSummary(status, healthPayload)
   if (workflowSummary) {
@@ -1289,11 +1433,7 @@ function renderMapLayerStatus(status, mapPayload, healthPayload) {
       ? 'live'
       : 'stale'
     : 'missing'
-  const gridLabel = mapPayload?.ok === true
-    ? status.cellCountsLabel
-      ? `Grid ${status.cellCountsLabel}`
-      : 'Grid loaded'
-    : 'No occupancy grid'
+  const gridLabel = mapPayload?.ok === true ? 'Grid live' : 'No occupancy grid'
   setMapLayerStatus(robotMapLayerGrid, gridState, gridLabel)
 
   const lidarLive = healthPayload?.ok === true || healthPayload?.status === 'ok'
@@ -1305,11 +1445,7 @@ function renderMapLayerStatus(status, mapPayload, healthPayload) {
   const waypointsReady = waypointReadiness?.readyForMapWaypoints === true
   const waypointBlocked = waypointReadiness && waypointsReady !== true
   const waypointState = waypointsReady ? 'live' : waypointBlocked ? 'stale' : waypoints.length ? 'ready' : 'missing'
-  const waypointLabel = waypointsReady
-    ? `Waypoints ready (${waypoints.length})`
-    : waypoints.length
-      ? `Waypoints ${waypoints.length}`
-      : 'No waypoints'
+  const waypointLabel = waypointsReady ? 'Waypoints ready' : waypoints.length ? 'Waypoints saved' : 'No waypoints'
   setMapLayerStatus(robotMapLayerWaypoints, waypointState, waypointLabel)
 }
 
@@ -1323,20 +1459,20 @@ function setRecenterVisualState(state) {
   const running = state === 'running'
   const success = state === 'success'
   const error = state === 'error'
-  const label = running ? 'Re-centering...' : 'Re-center Here'
+  const label = running ? 'Relocalizing...' : 'Relocalize on Map'
   for (const button of document.querySelectorAll('[data-connection-action="start-map-pose"]')) {
-    if (button.textContent === 'Re-center Here' || button.textContent === 'Re-centering...') {
+    if (button.textContent === 'Relocalize on Map' || button.textContent === 'Relocalizing...') {
       button.textContent = label
     }
   }
   if (running) {
-    setMapWorkflowStatus('Re-centering on saved map...', '')
-    setMapLayerStatus(robotMapLayerGrid, 'stale', 'Re-centering map')
+    setMapWorkflowStatus('Matching live LiDAR against the full saved map...', '')
+    setMapLayerStatus(robotMapLayerGrid, 'stale', 'Relocalizing')
   } else if (success) {
-    setMapWorkflowStatus('Re-centered on saved map.', 'success')
-    setMapLayerStatus(robotMapLayerGrid, 'live', 'Map re-centered')
+    setMapWorkflowStatus('Robot location matched against the saved map.', 'success')
+    setMapLayerStatus(robotMapLayerGrid, 'live', 'Location verified')
   } else if (error) {
-    setMapLayerStatus(robotMapLayerGrid, 'stale', 'Re-center failed')
+    setMapLayerStatus(robotMapLayerGrid, 'stale', 'Relocalization failed')
   }
 }
 
@@ -1377,7 +1513,7 @@ function formatMapWorkflowSummary(status, healthPayload) {
   if (status.mode === 'localization') {
     return {
       state: status.fresh ? 'success' : '',
-      message: status.fresh ? `Map locked: ${scanText}; add origin and waypoints.` : 'Map locked: waiting for fresh localization grid.',
+      message: status.fresh ? `Map locked: ${scanText}; save map-native waypoints.` : 'Map locked: waiting for fresh localization grid.',
     }
   }
   if (status.mode === 'no-map') {
@@ -1510,34 +1646,58 @@ function renderStaleWaypoints(staleWaypoints) {
   const list = document.querySelector('#stale-waypoints-list')
   if (!panel || !list) return
 
-  if (!staleWaypoints || staleWaypoints.length === 0) {
+  const staleByName = new Map((staleWaypoints || []).map((waypoint) => [waypoint.name, waypoint]))
+  const names = Array.isArray(runtimeConfig.robotRuntime?.waypoints)
+    ? runtimeConfig.robotRuntime.waypoints.map((waypoint) => waypoint.id)
+    : [...staleByName.keys()]
+  if (names.length === 0) {
     panel.hidden = true
     list.replaceChildren()
     return
   }
 
   panel.hidden = false
-  const items = staleWaypoints.map((waypoint) => {
+  const items = names.map((name) => {
+    const waypoint = staleByName.get(name) || { name, reason: '' }
     const li = document.createElement('li')
     li.className = 'stale-waypoints-item'
-    li.dataset.waypointName = waypoint.name
+    li.dataset.waypointName = name
 
     const nameSpan = document.createElement('span')
     nameSpan.className = 'stale-waypoints-name'
-    nameSpan.textContent = waypoint.name
+    nameSpan.textContent = name
 
     const reasonSpan = document.createElement('span')
     reasonSpan.className = 'stale-waypoints-reason'
-    reasonSpan.textContent = waypoint.reason
+    reasonSpan.textContent = waypoint.reason || 'Current map entry'
 
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'stale-waypoints-recapture'
     button.textContent = 'Re-save'
     button.dataset.waypointName = waypoint.name
-    button.addEventListener('click', () => handleStaleWaypointRecapture(waypoint.name))
+    button.addEventListener('click', () => handleStaleWaypointRecapture(name))
 
-    li.append(nameSpan, reasonSpan, button)
+    const rename = document.createElement('button')
+    rename.type = 'button'
+    rename.className = 'stale-waypoints-recapture'
+    rename.textContent = 'Rename'
+    rename.addEventListener('click', () => handleWaypointRename(name))
+
+    const remove = document.createElement('button')
+    remove.type = 'button'
+    remove.className = 'stale-waypoints-recapture'
+    remove.textContent = 'Delete'
+    remove.addEventListener('click', () => handleWaypointDelete(name))
+
+    const revalidate = document.createElement('button')
+    revalidate.type = 'button'
+    revalidate.className = 'stale-waypoints-recapture'
+    revalidate.textContent = 'Revalidate'
+    revalidate.disabled = !staleByName.has(name)
+    revalidate.addEventListener('click', () => handleWaypointRevalidate(name))
+
+    li.append(nameSpan, reasonSpan, button, rename, remove, revalidate)
     return li
   })
   list.replaceChildren(...items)
@@ -1888,13 +2048,7 @@ async function handleDogzillaConnectionAction(event) {
   } else if (action === 'save-map-pose') {
     setMapWorkflowStatus('Saving occupancy grid and locking map...', '')
   } else if (action === 'start-autonomous-mapping' || action === 'continue-autonomous-mapping') {
-    const startButton = document.getElementById('autonomous-map-start-button')
-    const continueButton = document.getElementById('autonomous-map-continue-button')
-    const finishButton = document.getElementById('autonomous-map-finish-button')
-    if (startButton) startButton.disabled = true
-    if (continueButton) continueButton.disabled = true
-    if (finishButton) finishButton.disabled = false
-    setMapWorkflowStatus(action === 'continue-autonomous-mapping' ? 'Reopening current map for exploration...' : 'Starting autonomous floor mapping...', '')
+    setMapWorkflowStatus(action === 'continue-autonomous-mapping' ? 'Relocalizing on the current map, then resuming exploration...' : 'Starting autonomous floor mapping...', '')
   } else if (action === 'finish-autonomous-mapping') {
     setMapWorkflowStatus('Stopping robot and saving candidate map...', '')
   } else if (action === 'start-map-pose') {
@@ -1902,34 +2056,6 @@ async function handleDogzillaConnectionAction(event) {
   }
 
   try {
-    if (action === 'capture-map-origin') {
-      const response = await apiFetch('/api/dogzilla/map-origin/capture', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ label: 'charger_origin' }),
-      })
-      const payload = await response.json()
-
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || 'DOGZILLA charger origin calibration failed.')
-      }
-
-      await loadPublicConfig()
-      const origin = payload.origin || {}
-      const originText = formatMapOriginCapture(origin)
-      connectionStatus.textContent = originText
-      connectionOutput.textContent = JSON.stringify({
-        action,
-        status: 'saved',
-        origin,
-      }, null, 2)
-      setMapWorkflowStatus(originText, 'success')
-      setStatus(originText)
-      return
-    }
-
     const response = await apiFetch('/api/dogzilla/connection/action', {
       method: 'POST',
       headers: {
@@ -1982,7 +2108,7 @@ async function handleDogzillaConnectionAction(event) {
       if (finishButton) finishButton.disabled = false
       ensureTopDownMapView()
       void refreshDogzillaMap()
-      setMapWorkflowStatus(`${action === 'continue-autonomous-mapping' ? 'Current map reopened' : 'Autonomous mapping active'}. Finish Mapping saves a reviewable candidate.`, 'success')
+      setMapWorkflowStatus(action === 'continue-autonomous-mapping' ? 'Resume started. Waiting for live mapping updates...' : 'Mapping started. Waiting for live map updates...', 'success')
     } else if (action === 'finish-autonomous-mapping') {
       autonomousMappingActive = false
       autonomousMapCandidateAvailable = true
@@ -2024,19 +2150,20 @@ async function handleDogzillaConnectionAction(event) {
       const proofSummary = mapSaveProof
         ? `Saved default map ${mapSaveProof.id || mapSaveProof.yaml || mapSaveProof.pbstream}.`
         : 'Map saved.'
-      const originMessage = payload.origin ? 'Origin captured at current robot pose.' : 'Origin capture proof missing.'
-      connectionStatus.textContent = `${proofSummary} Localization restarted. ${originMessage}`
+      const localizationMessage = payload.localization?.status === 'ok'
+        ? 'Robot relocalized from a verified full-map LiDAR match.'
+        : 'Robot location remains unverified.'
+      connectionStatus.textContent = `${proofSummary} ${localizationMessage}`
       connectionOutput.textContent = [
         formatMapSaveProof(mapSaveProof),
-        payload.mapOriginCleared ? 'old origin cleared before capture' : '',
-        payload.origin ? `origin\n${JSON.stringify(payload.origin, null, 2)}` : '',
+        payload.mapOriginCleared ? 'legacy charger origin cleared' : '',
         payload.localization ? `localization\n${formatDogzillaActionOutput(payload.localization)}` : ''
       ].filter(Boolean).join('\n\n')
-      setStatus(`DOGZILLA ${proofSummary} Localization restarted. ${originMessage}`)
+      setStatus(`DOGZILLA ${proofSummary} ${localizationMessage}`)
       if (slamChip) slamChip.hidden = true
       if (newMapBtn) newMapBtn.disabled = false
       if (saveMapBtn) saveMapBtn.disabled = true
-      setMapWorkflowStatus(`${proofSummary} Localization restarted. ${originMessage}`, 'success')
+      setMapWorkflowStatus(`${proofSummary} ${localizationMessage}`, payload.localization?.status === 'ok' ? 'success' : 'error')
     }
   } catch (error) {
     connectionStatus.textContent = formatError(error)
@@ -2380,6 +2507,42 @@ function renderDogzillaPreflight(payload) {
   dogzillaPreflightChecks.replaceChildren(...checks.map(buildPreflightCheckRow))
 }
 
+async function refreshWaypointRegistry() {
+  applyPayload(await fetchConfig())
+  await refreshDogzillaWaypointReadiness()
+}
+
+async function handleWaypointRename(name) {
+  const nextName = window.prompt(`Rename waypoint "${name}"`, name)
+  if (!nextName || nextName.trim() === name) return
+  const response = await apiFetch(`/api/dogzilla/waypoints/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: nextName }),
+  })
+  const payload = await response.json()
+  if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'Waypoint rename failed')
+  await refreshWaypointRegistry()
+  setStatus(`Waypoint renamed to "${payload.name}".`)
+}
+
+async function handleWaypointDelete(name) {
+  if (!window.confirm(`Delete waypoint "${name}"? This removes its saved pose.`)) return
+  const response = await apiFetch(`/api/dogzilla/waypoints/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  const payload = await response.json()
+  if (!response.ok || payload.deleted !== true) throw new Error(payload.error || 'Waypoint delete failed')
+  await refreshWaypointRegistry()
+  setStatus(`Waypoint "${name}" deleted.`)
+}
+
+async function handleWaypointRevalidate(name) {
+  const response = await apiFetch(`/api/dogzilla/waypoints/${encodeURIComponent(name)}/revalidate`, { method: 'POST' })
+  const payload = await response.json()
+  if (!response.ok || payload.revalidated !== true) throw new Error(payload.error || 'Waypoint revalidation failed')
+  await refreshWaypointRegistry()
+  setStatus(`Waypoint "${name}" revalidated against the active map.`)
+}
+
 function buildPreflightSummaryCard(label, value, statusName) {
   const card = document.createElement('div')
   card.dataset.state = statusName
@@ -2486,7 +2649,7 @@ function formatConnectionAction(action) {
     case 'start-lidar':
       return 'lidar bridge restart'
     case 'start-map-pose':
-      return 'localize on map'
+      return 'relocalize on map'
     case 'start-navigation':
       return 'waypoint navigator start'
     case 'start-map-pose-mapping':
@@ -2499,29 +2662,11 @@ function formatConnectionAction(action) {
       return 'finish mapping'
     case 'promote-map-candidate':
       return 'use candidate map'
-    case 'capture-map-origin':
-      return 'mark origin'
     case 'save-map-pose':
       return 'save map'
     default:
       return action || 'connection action'
   }
-}
-
-function formatMapOriginCapture(origin = {}) {
-  const x = toFiniteNumber(origin.x)
-  const y = toFiniteNumber(origin.y)
-  const yaw = toFiniteNumber(origin.yaw)
-  const parts = [
-    'Charger origin calibrated for new captures. Existing app_map waypoints keep their stored capture anchor.',
-  ]
-  if (Number.isFinite(x) && Number.isFinite(y)) {
-    parts.push(`Raw map anchor x ${formatTelemetryNumber(x)}, y ${formatTelemetryNumber(y)}.`)
-  }
-  if (Number.isFinite(yaw)) {
-    parts.push(`Yaw ${formatTelemetryNumber(yaw)} rad.`)
-  }
-  return parts.join(' ')
 }
 
 function parseLastJsonLine(text) {
@@ -2610,6 +2755,8 @@ function applyBackendControls() {
   const apiBaseUrl = getApiBaseUrl()
   dogzillaBackendUrlInput.value = apiBaseUrl
   connectionBackendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
+  const setup = document.querySelector('#connection-setup')
+  if (isAndroidAppShell() && !apiBaseUrl && setup) setup.open = true
 }
 
 function applyPayload(payload) {
@@ -2703,6 +2850,8 @@ function applyRobotRuntimeConfig() {
   }
   renderRobotTargetOptions()
   applyRobotTargetSelectionState()
+  renderPerformanceProfileOptions()
+  applyPerformanceProfileSelectionState()
 }
 
 function announceIsaacCompletionIfNeeded(feedbackPayload) {
@@ -2775,7 +2924,7 @@ function renderNavigationChainHealth(readinessPayload) {
           if (c.action === 'promote-map-candidate') {
             actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="promote-map-candidate">Use Candidate Map</button></div>'
           } else if (c.id === 'localization') {
-            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-map-pose">Localize on Map</button></div>'
+            actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-map-pose">Relocalize on Map</button></div>'
           } else if (c.id === 'action') {
             actions = '<div class="robot-nav-chain-detail-actions"><button type="button" data-connection-action="start-navigation">Restart Nav</button></div>'
           }
@@ -2857,10 +3006,11 @@ function renderRobotStateSnapshot(snapshot) {
   const isStale = ageMs > 3000
 
   const poseState = snapshot?.poseState || {}
+  const localizationTrusted = snapshot?.localizationStatus?.trusted === true
   const waypointSafe = poseState.waypointSafe === true
   const poseStatus = poseState.status || ''
   const poseAgeOk = !poseState.pose?.ageSec || poseState.pose.ageSec <= 2
-  const poseTrusted = !isStale && waypointSafe && poseAgeOk && poseStatus !== 'error'
+  const poseTrusted = localizationTrusted && !isStale && waypointSafe && poseAgeOk && poseStatus !== 'error'
 
   robotStatePanel.dataset.state = isStale ? 'stale' : 'ready'
   robotStateChip.textContent = isStale ? 'Stale' : 'Live'
@@ -2956,7 +3106,15 @@ function formatNoRobotMapMessage(snapshot) {
 function renderRobotTelemetry(robot) {
   const telemetry = robot.telemetry || {}
   const battery = toFiniteNumber(telemetry.battery)
-  renderBatteryMeter(battery)
+  const batterySafety = telemetry.batterySafety && typeof telemetry.batterySafety === 'object'
+    ? telemetry.batterySafety
+    : null
+  renderBatteryMeter({
+    value: battery,
+    status: telemetry.batteryStatus,
+    unit: telemetry.batteryUnit,
+    safety: batterySafety,
+  })
 
   const parts = []
   const roll = toFiniteNumber(telemetry.roll)
@@ -2969,7 +3127,14 @@ function renderRobotTelemetry(robot) {
   if (telemetry.source) {
     parts.push(String(telemetry.source))
   }
-  if (telemetry.batteryStatus && telemetry.batteryStatus !== 'ok') {
+  if (batterySafety?.status && batterySafety.status !== 'ok') {
+    if (batterySafety.cause) {
+      parts.push(String(batterySafety.cause))
+    }
+    if (batterySafety.recovery) {
+      parts.push(String(batterySafety.recovery))
+    }
+  } else if (telemetry.batteryStatus && telemetry.batteryStatus !== 'ok') {
     if (telemetry.batteryStatus === 'last-known') {
       const readStatus = telemetry.batteryReadStatus && telemetry.batteryReadStatus !== 'ok'
         ? `; ${String(telemetry.batteryReadStatus).replace(/-/g, ' ')}`
@@ -2991,29 +3156,39 @@ function renderRobotTelemetry(robot) {
   robotTelemetryMeta.textContent = parts.join(' | ')
 }
 
-function renderBatteryMeter(value) {
-  if (!Number.isFinite(value)) {
+function renderBatteryMeter(input) {
+  const reading = input && typeof input === 'object' ? input : { value: input }
+  const value = toFiniteNumber(reading.value)
+  const status = typeof reading.status === 'string' ? reading.status : ''
+  const unit = typeof reading.unit === 'string' ? reading.unit : ''
+  const safety = reading.safety && typeof reading.safety === 'object' ? reading.safety : null
+  const freshPercent = Number.isFinite(value) && status === 'ok' && unit === 'percent'
+
+  if (!freshPercent) {
     robotBatteryValue.textContent = '-'
     robotBatteryMeter.dataset.state = 'unknown'
     robotBatteryMeter.style.setProperty('--battery-fill', '0%')
-    robotBatteryMeter.setAttribute('aria-label', 'Battery unavailable')
+    const lastKnown = Number.isFinite(value) && unit === 'percent'
+      ? ` Last known value ${Math.round(value)}%.`
+      : ''
+    robotBatteryMeter.setAttribute(
+      'aria-label',
+      `Battery ${status ? status.replace(/-/g, ' ') : 'unavailable'}.${lastKnown}`,
+    )
     return
   }
 
-  const label = formatBatteryValue(value)
+  const label = formatBatteryValue(value, unit)
   robotBatteryValue.textContent = label
   robotBatteryMeter.setAttribute('aria-label', `Battery ${label}`)
-
-  if (value < 0 || value > 100) {
-    robotBatteryMeter.dataset.state = 'voltage'
-    robotBatteryMeter.style.setProperty('--battery-fill', '55%')
-    return
-  }
 
   const percent = Math.max(0, Math.min(100, Math.round(value)))
   robotBatteryMeter.style.setProperty('--battery-fill', `${percent}%`)
 
-  if (percent <= 20) {
+  const warningPercent = toFiniteNumber(safety?.warningPercent)
+  if (safety?.motionAllowed === false || percent <= toFiniteNumber(safety?.cutoffPercent)) {
+    robotBatteryMeter.dataset.state = 'low'
+  } else if (percent <= (Number.isFinite(warningPercent) ? warningPercent : 20)) {
     robotBatteryMeter.dataset.state = 'low'
   } else if (percent <= 50) {
     robotBatteryMeter.dataset.state = 'medium'
@@ -3022,16 +3197,20 @@ function renderBatteryMeter(value) {
   }
 }
 
-function formatBatteryValue(value) {
+function formatBatteryValue(value, unit = '') {
   if (!Number.isFinite(value)) {
     return '-'
   }
 
-  if (value >= 0 && value <= 100) {
+  if (unit === 'percent') {
     return `${Math.round(value)}%`
   }
 
-  return `${value.toFixed(2)}V`
+  if (unit === 'volts') {
+    return `${value.toFixed(2)}V`
+  }
+
+  return `${value.toFixed(2)} raw`
 }
 
 function formatTelemetryNumber(value) {
@@ -3050,8 +3229,11 @@ function toFiniteNumber(value) {
 function applyDogzillaCameraConfig() {
   const camera = runtimeConfig.dogzilla?.camera
   const vision = runtimeConfig.dogzilla?.vision
-  const streamUrl = camera?.proxyStreamPath ? toApiUrl(camera.proxyStreamPath) : camera?.streamUrl || ''
-  const upstreamStreamUrl = camera?.streamUrl || ''
+  const performance = runtimeConfig.robotRuntime?.performanceProfile
+  const streamMode = performance?.cameraStream || 'raw'
+  const streamConfig = streamMode === 'yolo' && performance?.visionEnabled !== false ? vision : streamMode === 'off' ? null : camera
+  const streamUrl = streamConfig?.proxyStreamPath ? toApiUrl(streamConfig.proxyStreamPath) : streamConfig?.streamUrl || ''
+  const upstreamStreamUrl = streamConfig?.streamUrl || ''
   const yoloEnabled = vision?.detectionEnabled === true
 
   if (robotCameraYoloToggle) {
@@ -3078,14 +3260,14 @@ robotCameraSnapshotButton.disabled = true
   }
 
   robotCameraFrame.dataset.streamUrl = streamUrl
-  robotCameraFrame.dataset.statusPath = camera?.proxyStatusPath || ''
-  robotCameraFrame.dataset.snapshotPath = camera?.proxySnapshotPath ? toApiUrl(camera.proxySnapshotPath) : ''
+  robotCameraFrame.dataset.statusPath = streamConfig?.proxyStatusPath || ''
+  robotCameraFrame.dataset.snapshotPath = streamConfig?.proxySnapshotPath ? toApiUrl(streamConfig.proxySnapshotPath) : ''
   robotCameraFrame.dataset.viewerMode = 'stream'
 robotCameraRefreshButton.disabled = false
 robotCameraRecoverButton.disabled = false
 robotCameraSnapshotButton.disabled = false
   robotCameraChip.textContent = robotCameraFrame.getAttribute('src') === streamUrl ? 'Live' : 'Starting'
-  robotCameraMeta.textContent = formatDogzillaCameraSource(camera, upstreamStreamUrl)
+  robotCameraMeta.textContent = formatDogzillaCameraSource(streamConfig, upstreamStreamUrl)
 }
 
 function applyRobotView(view) {
@@ -3093,6 +3275,7 @@ function applyRobotView(view) {
 
   robotCameraPanel.hidden = !showCamera
   robotMapPanel.hidden = showCamera
+  mapWorkflowPanel.hidden = showCamera
 
   if (showCamera) {
     startDogzillaCameraViewer()
@@ -3577,6 +3760,18 @@ function renderRobotTargetOptions() {
   }
 }
 
+function renderPerformanceProfileOptions() {
+  if (!performanceProfileSelect) return
+  performanceProfileSelect.replaceChildren()
+  for (const profile of runtimeConfig.robotRuntime.availablePerformanceProfiles || []) {
+    const option = document.createElement('option')
+    option.value = profile.id
+    option.textContent = profile.label
+    option.selected = profile.id === runtimeConfig.robotRuntime.performanceProfile?.id
+    performanceProfileSelect.append(option)
+  }
+}
+
 function applyProfileSelectionState() {
   const locked = runtimeConfig.activeProfile.selectionLocked
   profileSelect.disabled = locked
@@ -3599,6 +3794,17 @@ function applyRobotTargetSelectionState() {
   saveRobotTargetButton.disabled = locked
   robotTargetStatus.textContent = `Targeting ${runtimeConfig.robotRuntime.activeTarget.label}.`
   manualControl.applyState()
+}
+
+function applyPerformanceProfileSelectionState() {
+  if (!performanceProfileSelect || !savePerformanceProfileButton || !performanceProfileStatus) return
+  const runtime = runtimeConfig.robotRuntime
+  const locked = runtime.performanceSelectionLocked || runtime.performanceProfile?.selectionLocked
+  performanceProfileSelect.disabled = !!locked
+  savePerformanceProfileButton.disabled = !!locked
+  if (runtime.performanceProfile) {
+    performanceProfileStatus.textContent = `Using ${runtime.performanceProfile.label}.`
+  }
 }
 
 function formatError(error) {
@@ -3945,30 +4151,31 @@ function firstWarning(preview) {
   return Array.isArray(preview?.warnings) ? normalizeOneLineText(preview.warnings[0]) : ''
 }
 
-function formatEmergencyStopSummary(dispatch) {
+function formatEmergencyStopSummary(dispatch, action = 'stop') {
   const targetLabel = dispatch?.envelope?.targetLabel || runtimeConfig.robotRuntime.activeTarget?.label || 'robot'
+  const label = action === 'clear' ? 'Emergency stop reset' : 'Stop'
 
   if (dispatch?.status === 'sent') {
-    return `Stop sent to ${targetLabel}.`
+    return `${label} sent to ${targetLabel}.`
   }
 
   if (dispatch?.status === 'inactive-target') {
-    return 'Stop not sent; target inactive.'
+    return `${label} not sent; target inactive.`
   }
 
   if (dispatch?.status === 'disabled') {
-    return 'Stop not sent; transport disabled.'
+    return `${label} not sent; transport disabled.`
   }
 
   if (dispatch?.status === 'unsupported-transport') {
-    return 'Stop not sent; unsupported transport.'
+    return `${label} not sent; unsupported transport.`
   }
 
   if (dispatch?.status === 'error') {
-    return `Stop failed: ${dispatch.error || `HTTP ${dispatch.responseStatus || 'unknown'}`}.`
+    return `${label} failed: ${dispatch.error || `HTTP ${dispatch.responseStatus || 'unknown'}`}.`
   }
 
-  return `Stop ${dispatch?.status || 'complete'}.`
+  return `${label} ${dispatch?.status || 'complete'}.`
 }
 
 function setSpeechStatus(message, isError = false) {

@@ -2,7 +2,7 @@
   "fields": [
     {
       "name": "command",
-      "type": "\"move\" | \"detect\" | \"trick\" | \"follow\" | \"talk\""
+      "type": "\"move\" | \"detect\" | \"vision\" | \"trick\" | \"follow\" | \"talk\""
     },
     {
       "name": "waypoint",
@@ -12,6 +12,7 @@
   "allowedCommands": {
     "move": "go to a location",
     "detect": "scan/search an area",
+    "vision": "enable or disable YOLO object detection",
     "trick": "perform a trick"
   },
   "conditionalFields": {
@@ -19,6 +20,12 @@
       {
         "name": "object_to_detect",
         "type": "string"
+      }
+    ],
+    "vision": [
+      {
+        "name": "enabled",
+        "type": "boolean"
       }
     ],
     "trick": [
@@ -35,14 +42,34 @@
     }
   },
   "conditionalNotes": {
+    "vision": [
+      "For YOLO state changes, set \"command\" to \"vision\" and \"enabled\" to an explicit boolean.",
+      "Use \"detect\" with \"object_to_detect\" for object-search requests; do not use it for YOLO on/off state."
+    ],
     "trick": [
       "If the user names a specific trick, set \"trick\" to that normalized trick name.",
       "If the user asks for a trick without naming one, set \"trick\" to \"random\"."
     ]
   },
   "examples": [
-      {
-        "input": "sit",
+    {
+      "input": "vision on",
+      "output": {
+        "command": "vision",
+        "waypoint": "current_position",
+        "enabled": true
+      }
+    },
+    {
+      "input": "vision off",
+      "output": {
+        "command": "vision",
+        "waypoint": "current_position",
+        "enabled": false
+      }
+    },
+    {
+      "input": "sit",
         "output": {
           "command": "trick",
           "waypoint": "current_position",

@@ -27,6 +27,25 @@
   background: #a32e27;
 }
 
+.persistent-emergency-stop[data-state='stopped'] {
+  width: 76px;
+  min-width: 76px;
+  background: #6f7478;
+  color: #f4f5f5;
+}
+
+.persistent-emergency-stop[data-state='stopped']:hover {
+  background: #858a8e;
+}
+
+.persistent-emergency-stop[data-state='unknown'] {
+  width: 76px;
+  min-width: 76px;
+  background: #858a8e;
+  color: #eceeef;
+  cursor: wait;
+}
+
 .confirm-modal-overlay {
   position: fixed;
   inset: 0;

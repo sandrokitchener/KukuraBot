@@ -15,6 +15,7 @@ param(
   [string]$MapPath = "",
   [switch]$AllowMapping,
   [switch]$ForceRestart,
+  [switch]$RestoreOnly,
   [switch]$NoSync,
   [switch]$NoHostKeyScan
 )
@@ -54,23 +55,8 @@ $containerScript = "$RemoteRoot/sidecars/dogzilla_map_pose/start-map-pose-in-con
 $mapEnv = if ($MapPath) { " -e DOGZILLA_MAP_PBSTREAM=$MapPath" } else { "" }
 $allowMappingEnv = if ($AllowMapping) { " -e DOGZILLA_MAP_POSE_ALLOW_MAPPING=1" } else { "" }
 $forceRestartEnv = if ($ForceRestart) { " -e DOGZILLA_FORCE_RESTART=1" } else { "" }
-
-$originFile = Join-Path $repoRoot "output/app-cache/dogzilla-map-origin.json"
-$initialX = "0"
-$initialY = "0"
-$initialYaw = "0"
-if (Test-Path -LiteralPath $originFile) {
-  try {
-    $origin = Get-Content -LiteralPath $originFile -Raw | ConvertFrom-Json
-    if ($null -ne $origin.x) { $initialX = [string]$origin.x }
-    if ($null -ne $origin.y) { $initialY = [string]$origin.y }
-    if ($null -ne $origin.yaw) { $initialYaw = [string]$origin.yaw }
-  } catch {
-    Write-Warning "Failed to read map origin file; using default initial pose (0,0,0): $_"
-  }
-}
-$initialPoseEnv = " -e DOGZILLA_INITIAL_POSE_X=$initialX -e DOGZILLA_INITIAL_POSE_Y=$initialY -e DOGZILLA_INITIAL_POSE_YAW=$initialYaw"
-
+$navInactiveEnv = if ($Mode -eq 'continue_mapping') { " -e DOGZILLA_NAV2_PROVEN_INACTIVE=1" } else { "" }
+$restoreOnlyEnv = if ($RestoreOnly) { " -e DOGZILLA_MAP_POSE_RESTORE_ONLY=1" } else { "" }
 function Wait-ContainerRunning {
   param(
     [string]$Name,
@@ -87,28 +73,31 @@ function Wait-ContainerRunning {
   return $false
 }
 
-$remoteCommand = "docker exec -e DOGZILLA_DOCKER_EXEC=1 -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$initialPoseEnv $ContainerName bash $containerScript"
-$startedInRequestedMode = $Mode -in @('mapping', 'continue_mapping')
+if ($Mode -eq 'continue_mapping') {
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand 'sudo systemctl stop robodoge-navigation.service; ! sudo systemctl is-active --quiet robodoge-navigation.service'
+  if ($LASTEXITCODE -ne 0) { throw 'Continue mapping could not prove Nav2 inactive before the Cartographer handoff.' }
+}
+
+$remoteCommand = "docker exec -e DOGZILLA_DOCKER_EXEC=1 -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$navInactiveEnv$restoreOnlyEnv $ContainerName bash $containerScript"
+$startedInRequestedMode = $Mode -eq 'mapping'
 if ($startedInRequestedMode) {
   Write-Output "Starting dedicated $Mode container..."
-  $startCommand = "sudo systemctl stop robodoge-map-pose.service 2>/dev/null || true; docker rm -f $ContainerName 2>/dev/null || true; docker run -d --rm --name $ContainerName --privileged --network host -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$initialPoseEnv -v /dev:/dev -v ${RemoteRoot}:${RemoteRoot} -w $RemoteRoot robodoge/ros-humble-cartographer:1.0 bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; bash $containerScript'"
+  $startCommand = "sudo systemctl stop robodoge-map-pose.service 2>/dev/null || true; docker rm -f $ContainerName 2>/dev/null || true; docker run -d --rm --name $ContainerName --privileged --network host -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$navInactiveEnv -v /dev:/dev -v ${RemoteRoot}:${RemoteRoot} -w $RemoteRoot robodoge/ros-humble-cartographer:1.0 bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; bash $containerScript'"
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $startCommand
   if ($LASTEXITCODE -ne 0 -or !(Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25)) {
     throw "DOGZILLA Cartographer map pose container '$ContainerName' did not become ready in $Mode mode"
   }
 } else {
-  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
-  if ($LASTEXITCODE -ne 0) {
+  $containerState = & ssh -F $configPath $Alias "docker inspect -f '{{.State.Running}}' $ContainerName 2>/dev/null" 2>$null
+  if ($containerState -notmatch '^true$') {
     Write-Output "Container $ContainerName not available; starting via systemd..."
     & ssh -F $configPath $Alias "sudo systemctl start robodoge-map-pose.service 2>/dev/null || docker start $ContainerName 2>/dev/null || true"
-    if (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25) {
-      Write-Output "Container $ContainerName started; retrying docker exec."
-      Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
-      if ($LASTEXITCODE -ne 0) {
-        throw "DOGZILLA Cartographer map pose failed to start"
-      }
-    } else {
+    if (-not (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25)) {
       throw "DOGZILLA Cartographer map pose container '$ContainerName' did not become ready within 25s"
     }
+  }
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+  if ($LASTEXITCODE -ne 0) {
+    throw "DOGZILLA Cartographer map pose failed to start"
   }
 }

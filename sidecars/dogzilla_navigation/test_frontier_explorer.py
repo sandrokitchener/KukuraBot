@@ -72,6 +72,34 @@ class FrontierSelectionTest(unittest.TestCase):
         self.assertIsNotNone(goal)
         self.assertLess(goal["distance"], 0.5)
 
+    def test_skips_failed_frontier_and_selects_another_region(self):
+        width = height = 11
+        cells = [-1] * (width * height)
+        for y in range(2, 9):
+            for x in range(2, 9):
+                cells[y * width + x] = 0
+
+        first = frontier_explorer.select_frontier_goal(
+            cells, width, height,
+            resolution=0.1, origin_x=0.0, origin_y=0.0,
+            robot_x=0.5, robot_y=0.5,
+            min_distance=0.1, max_distance=1.0, clearance_cells=0,
+        )
+        second = frontier_explorer.select_frontier_goal(
+            cells, width, height,
+            resolution=0.1, origin_x=0.0, origin_y=0.0,
+            robot_x=0.5, robot_y=0.5,
+            min_distance=0.1, max_distance=1.0, clearance_cells=0,
+            excluded_goals=[{"x": first["x"], "y": first["y"]}],
+            exclusion_radius=0.3,
+        )
+
+        self.assertIsNotNone(second)
+        self.assertGreaterEqual(
+            frontier_explorer.math.hypot(second["x"] - first["x"], second["y"] - first["y"]),
+            0.3,
+        )
+
     def test_rejects_unknown_and_unreachable_regions(self):
         width = height = 9
         cells = [-1] * (width * height)

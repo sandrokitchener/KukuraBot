@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   composeSystemPrompt,
   loadPublicConfig,
+  parseExplicitVisionCommand,
   processModelResult,
   processUserInput,
   renderCommandTypes,
@@ -159,26 +160,30 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   assert.equal(payload.robotRuntime.robotName, 'Questing Beast')
   assert.equal(payload.robotRuntime.robot_name, 'Questing Beast')
   assert.equal(payload.robotRuntime.waypointSet, 'home')
+  assert.equal(payload.robotRuntime.performanceProfile.id, 'balanced')
+  assert.equal(payload.robotRuntime.performanceProfile.localizationMode, 'continuous')
+  assert.equal(payload.robotRuntime.performanceProfile.safetyTelemetry, true)
+  assert.ok(payload.robotRuntime.availablePerformanceProfiles.some((profile) => profile.id === 'endurance'))
   assert.equal(typeof payload.robotRuntime.mapOrigin.configured, 'boolean')
-  const kitchenWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'kitchen')
-  assert.ok(kitchenWaypoint)
-  assert.equal(kitchenWaypoint.sourceVerified, true)
-  assert.equal(kitchenWaypoint.verified, true)
-  if (kitchenWaypoint.verificationProblem === 'stale map fingerprint') {
-    assert.equal(kitchenWaypoint.enabled, false)
-    assert.equal(kitchenWaypoint.navigable, false)
+  const knownWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'garage')
+  assert.ok(knownWaypoint)
+  assert.equal(knownWaypoint.sourceVerified, true)
+  assert.equal(knownWaypoint.verified, true)
+  if (knownWaypoint.verificationProblem === 'stale map fingerprint') {
+    assert.equal(knownWaypoint.enabled, false)
+    assert.equal(knownWaypoint.navigable, false)
   } else {
-    assert.equal(kitchenWaypoint.enabled, true)
-    assert.equal(kitchenWaypoint.navigable, true)
+    assert.equal(knownWaypoint.enabled, true)
+    assert.equal(knownWaypoint.navigable, true)
   }
-  assert.doesNotMatch(kitchenWaypoint.verificationProblem, /captured-pose note|notes still|dummy|stored pose does not match/i)
+  assert.doesNotMatch(knownWaypoint.verificationProblem, /captured-pose note|notes still|dummy|stored pose does not match/i)
   assert.match(payload.robotRuntime.mapOrigin.status, /ready|missing/)
-  assert.equal(kitchenWaypoint.frame, 'app_map')
-  assert.equal(kitchenWaypoint.capturedMapPose?.frame, 'map')
+  assert.equal(knownWaypoint.frame, 'app_map')
+  assert.equal(knownWaypoint.capturedMapPose?.frame, 'map')
   if (payload.robotRuntime.mapOrigin.configured) {
-    assert.equal(kitchenWaypoint.appMapPose?.frame, 'app_map')
-    assert.equal(kitchenWaypoint.appMapPose?.sourceFrame, 'map')
-    assert.equal(kitchenWaypoint.appMapPose?.storedFrame, 'app_map')
+    assert.equal(knownWaypoint.appMapPose?.frame, 'app_map')
+    assert.equal(knownWaypoint.appMapPose?.sourceFrame, 'map')
+    assert.equal(knownWaypoint.appMapPose?.storedFrame, 'app_map')
     assert.ok(typeof payload.robotRuntime.mapOrigin.origin.label === 'string' && payload.robotRuntime.mapOrigin.origin.label.length > 0)
   }
   const garageWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'garage')
@@ -262,6 +267,80 @@ test('processUserInput dispatches ROS2 command when ROS2 target is active', asyn
   assert.equal(result.robotDispatch.status, 'sent')
   assert.deepEqual(dispatchedPreview, result.robotRuntime)
   assert.equal(result.isaacDispatch, null)
+})
+
+test('parseExplicitVisionCommand recognizes explicit YOLO state intent only', () => {
+  assert.deepEqual(parseExplicitVisionCommand('enable object detection'), {
+    command: 'vision',
+    waypoint: 'current_position',
+    enabled: true,
+  })
+  assert.equal(parseExplicitVisionCommand('turn YOLO off').enabled, false)
+  assert.equal(parseExplicitVisionCommand('look for my keys'), null)
+  assert.equal(parseExplicitVisionCommand('is vision working?'), null)
+})
+
+test('processUserInput bypasses model prose for explicit vision commands', async () => {
+  let modelCalled = false
+  let requested = null
+  const result = await processUserInput('please enable object detection', {
+    queryModelImpl: async () => {
+      modelCalled = true
+      return 'I enabled it.'
+    },
+    dispatchDogzillaVisionToggleImpl: async (enabled) => {
+      requested = enabled
+      return { ok: true, actualEnabled: enabled, vision: { detectionEnabled: enabled } }
+    },
+    loadRobotRuntimeConfigImpl: async () => ({
+      activeTarget: { id: 'dogzilla_direct', kind: 'dogzilla-direct', label: 'DOGZILLA' },
+    }),
+  })
+
+  assert.equal(modelCalled, false)
+  assert.equal(requested, true)
+  assert.deepEqual(result.parsed, { command: 'vision', waypoint: 'current_position', enabled: true })
+  assert.equal(result.response, '{"command":"vision","waypoint":"current_position","enabled":true}')
+  assert.equal(result.robotDispatch.status, 'sent')
+})
+
+test('processModelResult overrides false model claims with explicit vision intent', async () => {
+  const result = await processModelResult({
+    input: 'disable vision',
+    rawResponse: 'I enabled it.',
+    options: {
+      dispatchDogzillaVisionToggleImpl: async (enabled) => ({ ok: true, actualEnabled: enabled }),
+    },
+    loadRobotRuntimeConfigImpl: async () => ({
+      activeTarget: { id: 'dogzilla_direct', kind: 'dogzilla-direct', label: 'DOGZILLA' },
+    }),
+  })
+
+  assert.deepEqual(result.parsed, { command: 'vision', waypoint: 'current_position', enabled: false })
+  assert.equal(result.response, '{"command":"vision","waypoint":"current_position","enabled":false}')
+  assert.equal(result.robotDispatch.actualEnabled, false)
+})
+
+test('processModelResult routes vision command through shared YOLO toggle', async () => {
+  let requested = null
+  const result = await processModelResult({
+    input: 'turn YOLO on',
+    rawResponse: '{"command":"vision","enabled":true}',
+    buildIsaacSimPreviewImpl: async () => ({ status: 'unsupported', dispatchPlan: { dispatchOnChat: false } }),
+    options: {
+      dispatchDogzillaVisionToggleImpl: async (enabled) => {
+        requested = enabled
+        return { ok: true, actualEnabled: true }
+      },
+    },
+    loadRobotRuntimeConfigImpl: async () => ({
+      activeTarget: { id: 'dogzilla_direct', kind: 'dogzilla-direct', label: 'DOGZILLA' },
+    }),
+  })
+
+  assert.equal(requested, true)
+  assert.equal(result.robotDispatch.status, 'sent')
+  assert.equal(result.robotDispatch.kind, 'vision.toggle')
 })
 
 test('processModelResult parses local model output and dispatches active ROS2 target', async () => {

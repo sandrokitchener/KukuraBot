@@ -15,13 +15,12 @@
 
 .robot-map {
   position: relative;
+  touch-action: none;
   order: 1;
-  width: min(100%, 640px);
-  height: auto;
-  min-height: 320px;
-  max-width: 100%;
-  align-self: center;
-  justify-self: center;
+  width: 100%;
+  min-height: 0;
+  align-self: stretch;
+  justify-self: stretch;
   border: 1px solid rgba(55, 66, 62, 0.16);
   border-radius: 6px;
   background: #e4e7e1;
@@ -433,23 +432,6 @@
   }
 }
 
-.robot-map-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 4px 8px;
-  min-width: 0;
-  min-height: 20px;
-}
-
-.robot-map-grid-meta {
-  min-width: 0;
-  font-size: 0.7rem;
-  color: #7a736b;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
 .robot-map-layer-row {
   display: flex;
   flex-wrap: wrap;
@@ -495,62 +477,6 @@
 .robot-map-layer[data-state='missing'] {
   border-style: dashed;
   color: #938a80;
-}
-
-.map-mode-chip {
-  max-width: 100%;
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 1px 8px;
-  border-radius: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.map-mode-chip[data-mode="mapping"] {
-  color: #1a5c32;
-  background: #d4f5d9;
-}
-.map-mode-chip[data-mode="mapping"][data-fresh="true"] {
-  animation: map-live-pulse 1.5s ease-in-out infinite;
-}
-.map-mode-chip[data-mode="localization"] {
-  color: #7a5d00;
-  background: #fff0c4;
-}
-.map-mode-chip[data-mode="unknown"],
-.map-mode-chip[data-mode="no-map"] {
-  color: #6a6a6a;
-  background: #e8e8e8;
-}
-
-@keyframes map-live-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.65; }
-}
-
-.map-freshness {
-  min-width: 0;
-  font-size: 0.68rem;
-  color: #7a736b;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.map-cell-counts {
-  min-width: 0;
-  font-size: 0.68rem;
-  color: #5a5a55;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.map-bbox {
-  min-width: 0;
-  font-size: 0.68rem;
-  color: #7a736b;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
 }
 
 .camera-refresh-button {

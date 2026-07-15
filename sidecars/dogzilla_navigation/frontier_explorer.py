@@ -126,6 +126,8 @@ def select_frontier_goal(
     min_distance: float,
     max_distance: float,
     clearance_cells: int,
+    excluded_goals: list[dict[str, float]] | None = None,
+    exclusion_radius: float = 0.0,
 ) -> dict[str, float | int] | None:
     """Choose a reachable, clear free cell adjacent to unknown space."""
     if width <= 0 or height <= 0 or len(cells) != width * height or resolution <= 0:
@@ -162,6 +164,11 @@ def select_frontier_goal(
         world_y = origin_y + (y + 0.5) * resolution
         distance = math.hypot(world_x - robot_x, world_y - robot_y)
         if distance <= min_distance or distance > max_distance:
+            continue
+        if any(
+            math.hypot(world_x - failed["x"], world_y - failed["y"]) < exclusion_radius
+            for failed in (excluded_goals or [])
+        ):
             continue
         score = (-distance, unknown_neighbors)
         if best_score is None or score > best_score:
@@ -200,9 +207,14 @@ class FrontierExplorer:
         self.scan_received_at = 0.0
         self.pose_missing_at = 0.0
         self.goal_handle: Any | None = None
+        self.current_goal: dict[str, float | int] | None = None
+        self.cancelled_goal_keys: set[tuple[float, float]] = set()
         self.goal_started_at = 0.0
+        self.goal_progress_at = 0.0
+        self.goal_best_distance = math.inf
         self.goal_count = 0
         self.failures = 0
+        self.failed_goals: list[dict[str, float]] = []
         self.no_frontier_cycles = 0
         self.finished = False
         self.cancel_future: Any | None = None
@@ -247,6 +259,7 @@ class FrontierExplorer:
             "scanTopic": self.args.scan_topic,
             "goalCount": self.goal_count,
             "failures": self.failures,
+            "failedGoals": self.failed_goals,
             "updatedAt": time.time(),
         }
         temporary = path.with_suffix(path.suffix + ".tmp")
@@ -285,6 +298,9 @@ class FrontierExplorer:
         handle = self.goal_handle
         self.goal_handle = None
         self.goal_started_at = 0.0
+        if self.current_goal is not None:
+            self.cancelled_goal_keys.add(self._goal_key(self.current_goal))
+        self.current_goal = None
         if handle is None:
             return False
         try:
@@ -297,6 +313,21 @@ class FrontierExplorer:
         self.cancel_deadline = time.monotonic() + max(0.1, self.args.cancel_timeout)
         self.cancel_timeout_reported = False
         return True
+
+    @staticmethod
+    def _goal_key(goal: dict[str, float | int]) -> tuple[float, float]:
+        return round(float(goal["x"]), 3), round(float(goal["y"]), 3)
+
+    def _record_goal_failure(self, goal: dict[str, float | int], reason: str) -> None:
+        if not any(
+            math.hypot(float(goal["x"]) - failed["x"], float(goal["y"]) - failed["y"])
+            < self.args.failed_goal_radius
+            for failed in self.failed_goals
+        ):
+            self.failed_goals.append({"x": float(goal["x"]), "y": float(goal["y"])})
+            self.failures += 1
+        self.status.update({"state": "waiting", "lastError": reason})
+        self._write_status()
 
     def _wait_for_goal_cancellation(self) -> bool:
         if self.cancellation_failed:
@@ -325,35 +356,48 @@ class FrontierExplorer:
             return False
         return True
 
-    def _on_goal_response(self, future: Any) -> None:
+    def _on_goal_response(self, future: Any, goal: dict[str, float | int]) -> None:
         try:
             handle = future.result()
         except Exception as error:
             self.goal_handle = None
-            self.failures += 1
-            self.status.update({"state": "waiting", "lastError": str(error)})
+            self.current_goal = None
+            self._record_goal_failure(goal, str(error))
             return
         if not handle or not handle.accepted:
             self.goal_handle = None
-            self.failures += 1
-            self.status.update({"state": "waiting", "lastError": "Nav2 rejected frontier goal"})
+            self.current_goal = None
+            self._record_goal_failure(goal, "Nav2 rejected frontier goal")
             return
         self.goal_handle = handle
         result_future = handle.get_result_async()
-        result_future.add_done_callback(self._on_goal_result)
+        result_future.add_done_callback(lambda result, sent_goal=goal: self._on_goal_result(result, sent_goal))
 
-    def _on_goal_result(self, future: Any) -> None:
+    def _on_goal_result(self, future: Any, goal: dict[str, float | int]) -> None:
+        goal_key = self._goal_key(goal)
+        if goal_key in self.cancelled_goal_keys:
+            self.cancelled_goal_keys.discard(goal_key)
+            return
         self.goal_handle = None
+        self.current_goal = None
         self.goal_started_at = 0.0
+        failure_reason = "Nav2 frontier goal failed"
         try:
             result = future.result()
-            succeeded = int(getattr(result, "status", 0)) == 4
+            result_status = int(getattr(result, "status", 0))
+            succeeded = result_status == 4
         except Exception as error:
             succeeded = False
-            self.status["lastError"] = str(error)
-        self.failures = 0 if succeeded else self.failures + 1
-        self.status["state"] = "waiting"
-        self._write_status()
+            result_status = 0
+            failure_reason = str(error)
+        if succeeded:
+            self.failures = 0
+            self.failed_goals.clear()
+            self.status.update({"state": "waiting", "reason": "frontier goal reached"})
+            self.status.pop("lastError", None)
+            self._write_status()
+        else:
+            self._record_goal_failure(goal, failure_reason if result_status == 0 else f"Nav2 frontier goal failed with status {result_status}")
 
     def _send_goal(self, goal: dict[str, float | int]) -> None:
         if not self.action_client.wait_for_server(timeout_sec=1.0):
@@ -376,10 +420,17 @@ class FrontierExplorer:
         pose.pose.orientation.w = 1.0
         message.pose = pose
         self.goal_started_at = time.monotonic()
+        self.goal_progress_at = self.goal_started_at
+        self.goal_best_distance = float(goal["distance"])
+        self.current_goal = goal
         self.goal_count += 1
-        self.status.update({"state": "navigating", "goal": goal})
+        self.status.update({"state": "navigating", "goal": goal, "goalBestDistance": self.goal_best_distance})
+        self.status.pop("reason", None)
+        self.status.pop("lastError", None)
         self._write_status()
-        self.action_client.send_goal_async(message).add_done_callback(self._on_goal_response)
+        self.action_client.send_goal_async(message).add_done_callback(
+            lambda response, sent_goal=goal: self._on_goal_response(response, sent_goal)
+        )
 
     def _tick(self) -> None:
         if self.finished:
@@ -408,10 +459,30 @@ class FrontierExplorer:
             self._finish("stopped", "too many Nav2 frontier failures")
             return
         if self.goal_handle is not None:
-            if now - self.goal_started_at > self.args.goal_timeout:
+            pose = self._robot_pose()
+            if pose is None:
+                if self.pose_missing_at == 0.0:
+                    self.pose_missing_at = now
+                if now - self.pose_missing_at > self.args.pose_timeout:
+                    self._finish("stopped", "map to base_link transform unavailable")
+                return
+            self.pose_missing_at = 0.0
+            goal = self.current_goal
+            if goal is not None:
+                distance = math.hypot(float(goal["x"]) - pose[0], float(goal["y"]) - pose[1])
+                if distance <= self.goal_best_distance - self.args.goal_progress_distance:
+                    self.goal_best_distance = distance
+                    self.goal_progress_at = now
+                    self.status["goalBestDistance"] = distance
+                    self._write_status()
+            if now - self.goal_started_at > self.args.goal_max_duration:
+                if goal is not None:
+                    self._record_goal_failure(goal, "frontier goal exceeded maximum duration")
                 self._cancel_goal()
-                self.status.update({"state": "waiting", "lastError": "frontier goal timed out"})
-                self._write_status()
+            elif now - self.goal_progress_at > self.args.goal_timeout:
+                if goal is not None:
+                    self._record_goal_failure(goal, "frontier goal stalled without progress")
+                self._cancel_goal()
             return
         if self.goal_count >= self.args.max_goals:
             self._finish("complete", "goal limit reached")
@@ -440,6 +511,8 @@ class FrontierExplorer:
             min_distance=self.args.min_goal_distance,
             max_distance=self.args.max_goal_distance,
             clearance_cells=max(0, int(math.ceil(self.args.goal_clearance / float(info.resolution)))),
+            excluded_goals=self.failed_goals,
+            exclusion_radius=self.args.failed_goal_radius,
         )
         if goal is None:
             self.no_frontier_cycles += 1
@@ -479,14 +552,17 @@ def main() -> int:
     parser.add_argument("--min-goal-distance", type=float, default=0.35)
     parser.add_argument("--max-goal-distance", type=float, default=5.0)
     parser.add_argument("--goal-clearance", type=float, default=0.25)
-    parser.add_argument("--goal-timeout", type=float, default=90.0)
+    parser.add_argument("--goal-timeout", type=float, default=45.0, help="seconds allowed without meaningful approach")
+    parser.add_argument("--goal-max-duration", type=float, default=300.0)
+    parser.add_argument("--goal-progress-distance", type=float, default=0.1)
+    parser.add_argument("--failed-goal-radius", type=float, default=0.75)
     parser.add_argument("--action-timeout", type=float, default=120.0)
     parser.add_argument("--cancel-timeout", type=float, default=10.0)
     parser.add_argument("--map-timeout", type=float, default=8.0)
     parser.add_argument("--scan-timeout", type=float, default=3.0)
     parser.add_argument("--pose-timeout", type=float, default=20.0)
     parser.add_argument("--max-goals", type=int, default=80)
-    parser.add_argument("--max-failures", type=int, default=3)
+    parser.add_argument("--max-failures", type=int, default=6)
     parser.add_argument("--complete-after-no-frontier", type=int, default=30)
     args = parser.parse_args()
     try:

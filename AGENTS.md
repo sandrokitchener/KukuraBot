@@ -159,20 +159,4 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 - `rtk proxy <cmd>` runs command without filtering but tracks usage
 <!-- /headroom:rtk-instructions -->
 
-## Perform a context-doc maintenance pass.
-
-Review the code changes in this branch/session and update the smallest relevant files under `/docs`.
-
-Rules:
-- Do not rewrite docs wholesale.
-- Do not add noisy changelog-style notes.
-- Remove or correct stale context.
-- Keep docs optimized for future coding agents.
-- Prefer durable architecture, APIs, gotchas, setup steps, and test instructions.
-- If no docs need updates, say exactly: "Docs checked; no updates needed."
-
-Then summarize:
-1. Docs changed
-2. Why each doc changed
-3. Any docs intentionally left unchanged
 ## `@dipshit` — offload read-only fact-gathering to local Ollama to save tokens. Good: summarize docs, find references, extract facts, list TODOs. Bad: edits, decisions, security, anything subtle. Verify output before acting. Only worth the round-trip when main-agent context is already tight or you need compressed output without dumping raw files into context.

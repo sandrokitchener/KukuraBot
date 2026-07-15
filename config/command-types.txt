@@ -5,6 +5,11 @@
 - detection:
   - words like look, check, or find trigger this
   - you may infer from phrases such as "I lost" or "can you please find"
+- vision:
+  - explicit enable/disable YOLO object detection only
+  - phrases like "vision on", "turn vision on", and "enable vision mode" mean enabled true
+  - phrases like "vision off", "turn vision off", and "disable vision mode" mean enabled false
+  - do not use vision for object-search requests; use detection instead
 - tricks:
   - words like trick, backflip, or play should stay in COMMAND mode
   - supported real robot one-shot tricks include sit, stand_up, lie_down, crawl, stretch, swing, pray, handshake, and paw_shake

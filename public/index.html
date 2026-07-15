@@ -109,9 +109,11 @@
  <button
  id="persistent-emergency-stop"
  class="persistent-emergency-stop"
+ data-state="unknown"
  type="button"
- aria-label="Emergency stop robot"
- >Stop</button>
+ aria-label="Emergency stop state unavailable"
+ disabled
+ >Unknown</button>
  </div>
  </form>
 
@@ -182,6 +184,34 @@
             <div class="manual-control-actions">
               <button id="manual-control-toggle-button" type="button">Enable gamepad</button>
               <button id="manual-control-neutral-button" type="button">Neutral</button>
+            </div>
+            <div id="manual-touch-controls" class="manual-touch-controls" hidden aria-label="Android touch controller">
+              <div
+                id="manual-touch-left-stick"
+                class="manual-touch-stick"
+                role="slider"
+                tabindex="0"
+                aria-label="Forward and strafe touch stick"
+                aria-valuemin="-1"
+                aria-valuemax="1"
+                aria-valuenow="0"
+                aria-valuetext="centered"
+              >
+                <span class="manual-touch-stick-label">Move</span>
+              </div>
+              <div
+                id="manual-touch-right-stick"
+                class="manual-touch-stick"
+                role="slider"
+                tabindex="0"
+                aria-label="Turn touch stick"
+                aria-valuemin="-1"
+                aria-valuemax="1"
+                aria-valuenow="0"
+                aria-valuetext="centered"
+              >
+                <span class="manual-touch-stick-label">Turn</span>
+              </div>
             </div>
             <label class="manual-control-speed" for="manual-control-speed-slider">
               <span>Forward gait</span>
@@ -271,13 +301,6 @@
                 </div>
                 <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
               </div>
-            <div class="robot-map-meta-row">
-              <span id="robot-map-grid-meta" class="robot-map-grid-meta"></span>
-              <span id="robot-map-mode-chip" class="map-mode-chip" hidden>…</span>
-              <span id="robot-map-freshness" class="map-freshness" hidden></span>
-              <span id="robot-map-cell-counts" class="map-cell-counts" hidden></span>
-              <span id="robot-map-bbox" class="map-bbox" hidden></span>
-            </div>
             <div class="robot-map-layer-row" aria-label="Map layer status">
               <span id="robot-map-layer-grid" class="robot-map-layer" data-state="missing">Occupancy grid</span>
               <span id="robot-map-layer-scan" class="robot-map-layer" data-state="missing">Live LiDAR</span>
@@ -303,7 +326,7 @@
             <details id="map-workflow-panel" class="map-workflow-panel" open>
               <summary class="map-workflow-head">
                 <span class="map-workflow-title">Map Controls</span>
-                <span id="map-workflow-status" class="map-workflow-status">Ready.</span>
+                <span id="map-workflow-status" class="map-workflow-status" aria-live="polite">Ready.</span>
               </summary>
               <div class="map-workflow-steps">
                 <div class="map-workflow-step map-workflow-step-primary">
@@ -320,7 +343,7 @@
                   <span class="map-step-number">2</span>
                   <span class="map-step-label">Align Robot</span>
                   <div class="map-workflow-actions">
-                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Re-center Here</button>
+                    <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Relocalize on Map</button>
                   </div>
                 </div>
                 <div class="map-workflow-step">
@@ -332,7 +355,7 @@
                     <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
                   </div>
                   <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
-                    <span class="stale-waypoints-label">Out of date - drive robot here, then click Recapture</span>
+                    <span class="stale-waypoints-label">Waypoint registry (stale entries require revalidation or recapture)</span>
                     <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
                   </div>
                 </div>
@@ -424,9 +447,10 @@
           <div id="dogzilla-preflight-checks" class="preflight-checks"></div>
         </section>
 
-        <details class="advanced-service-tools">
+        <details id="connection-setup" class="advanced-service-tools">
           <summary>Connection setup</summary>
           <section class="connection-panel">
+            <p class="connection-status">First run: enter a LAN, Tailnet, or HTTPS hosted backend, then select Use backend to validate and save it.</p>
             <div class="settings-row connection-backend-row">
               <label for="dogzilla-backend-url-input">Backend URL</label>
               <input
@@ -491,6 +515,13 @@
           </div>
           <div id="robot-target-status" class="settings-status">Loading robot targets...</div>
 
+          <div class="settings-row">
+            <label for="performance-profile-select">Robot performance</label>
+            <select id="performance-profile-select"></select>
+            <button id="save-performance-profile-button" type="button">Use performance</button>
+          </div>
+          <div id="performance-profile-status" class="settings-status">Loading performance profiles...</div>
+
           <div class="dogzilla-audio-volume settings-audio-volume">
             <label for="dogzilla-audio-volume-input">Dog sound volume</label>
             <input id="dogzilla-audio-volume-input" type="range" min="0" max="100" step="5" value="75" />
@@ -540,8 +571,8 @@ flowchart TD
           <h3>Step-by-step instructions</h3>
           <ol class="help-steps">
             <li>
-              <strong>Localize on Map</strong>
-              <p>On a normal session, the app does this automatically. It starts Cartographer in localization mode against the saved map. Click "Localize on Map" if you need to restart it manually.</p>
+              <strong>Relocalize on Map</strong>
+              <p>Cartographer matches live LiDAR against the full saved map. Navigation stays blocked until a strong cross-map match is verified.</p>
             </li>
             <li>
   <strong>Map This Floor</strong>
@@ -549,11 +580,11 @@ flowchart TD
 </li>
             <li>
               <strong>Drive robot to waypoint spot</strong>
-              <p>Use manual controls to <strong>drive</strong> the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch). Do not carry the robot â€” Cartographer laser-only localization cannot globally re-localize after being carried.</p>
+              <p>Use manual controls to <strong>drive</strong> the robot to the exact location where you want a waypoint (e.g., kitchen counter, living room couch). If the robot was carried, relocalize before saving the spot.</p>
             </li>
             <li>
               <strong>Wait for pose stable</strong>
-              <p>Wait until the pose indicator shows "waypointSafe". This means Cartographer has localized the robot reliably on the map.</p>
+              <p>Wait until global localization is verified and the pose is fresh. A fresh <code>waypointSafe</code> TF alone does not prove the robot is in the correct room.</p>
             </li>
             <li>
               <strong>Save waypoint here</strong>
@@ -594,7 +625,7 @@ flowchart TD
               <li>Ensure robot is on a flat, stable surface</li>
               <li>Check LiDAR has clear view of surroundings</li>
               <li>Wait 10-15 seconds for Cartographer to converge</li>
-              <li>Try restarting map localization in Diagnostics</li>
+              <li>Run "Relocalize on Map" and wait for a verified full-map match</li>
             </ul>
           </details>
           <details class="help-troubleshoot">
@@ -610,7 +641,7 @@ flowchart TD
             <ul>
               <li>Check navigation chain health dots in Robot Info panel</li>
               <li>Verify map localization is running (pose should be stable)</li>
-              <li>Try "Localize on Map" in Diagnostics</li>
+              <li>Try "Relocalize on Map" in Diagnostics</li>
               <li>Check for "Repairing navigation..." status in nav badge</li>
             </ul>
           </details>

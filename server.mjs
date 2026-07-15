@@ -25,7 +25,6 @@ import {
 } from './lib/dogzilla-camera-proxy.mjs'
 import {
   APP_MAP_FRAME,
-  applyMapOriginToPose,
   getDogzillaMapOriginStatus,
   loadDogzillaMapOrigin,
 } from './lib/dogzilla-map-frame.mjs'
@@ -445,10 +444,7 @@ const bridgeHealth = cachedBridgeHealth
       })
     : null
   const bridgeRobot = applyMapOriginStatusToRobotState(
-    applyMapOriginToRobotState(
-      buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState),
-      mapOriginStatus.configured ? mapOrigin : null,
-    ),
+    buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState),
     mapOriginStatus,
   )
   const bridgeOwnsActiveRobot = robotRuntimeConfig.activeTarget?.kind === 'dogzilla-direct'
@@ -461,7 +457,7 @@ const bridgeHealth = cachedBridgeHealth
     : bridgeOwnsActiveRobot && bridgeState?.attempted
       ? 'error'
       : streamSnapshot.status
-  recordDogzillaMapPose(bridgeRobot)
+  recordDogzillaMapPose(bridgeRobot, bridgeRuntime?.localization)
   const poseTrack = bridgeRobot?.pose ? getDogzillaPoseTrack() : []
   const robots = bridgeRobot
     ? [bridgeRobot, ...streamRobots.filter((robot) => robot.uuid !== bridgeRobot.uuid)]
@@ -489,6 +485,7 @@ const bridgeHealth = cachedBridgeHealth
     bridgeHealth,
     bridgeHealthCachedForDisplay,
     poseState,
+    localizationStatus: bridgeRuntime?.localization || null,
     mapOrigin: mapOriginStatus,
     poseTrack,
     navigationStatus: deriveNavigationStatus({
@@ -677,7 +674,11 @@ function buildReconMapContext(robotState, lidarScan) {
   }
 }
 
-function recordDogzillaMapPose(robot) {
+function recordDogzillaMapPose(robot, localization) {
+  if (localization?.trusted !== true) {
+    dogzillaPoseTrack.length = 0
+    return
+  }
   const pose = robot?.pose
   const telemetry = robot?.telemetry || {}
   if (!pose || !isRenderableMapFrame(pose.frame) || telemetry.waypointSafe !== true) {
@@ -706,31 +707,6 @@ function recordDogzillaMapPose(robot) {
 
 function getDogzillaPoseTrack() {
   return dogzillaPoseTrack.map((pose) => ({ ...pose }))
-}
-
-function applyMapOriginToRobotState(robot, mapOrigin) {
-  if (!robot?.pose || !mapOrigin) {
-    return robot
-  }
-
-  const pose = applyMapOriginToPose(robot.pose, mapOrigin)
-  if (pose === robot.pose || pose?.frame !== APP_MAP_FRAME) {
-    return robot
-  }
-
-  return {
-    ...robot,
-    pose,
-    telemetry: {
-      ...robot.telemetry,
-      poseFrame: APP_MAP_FRAME,
-      poseSourceFrame: 'map',
-      mapOriginConfigured: true,
-      mapOriginLabel: pose.originLabel,
-      mapOriginSavedAt: pose.originSavedAt,
-      mapSource: 'saved-dogzilla-map-origin',
-    },
-  }
 }
 
 function applyMapOriginStatusToRobotState(robot, mapOriginStatus) {
@@ -764,8 +740,23 @@ function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState = 
   const yaw = normalizeFiniteNumber(state.yaw)
   const roll = normalizeFiniteNumber(state.roll)
   const pitch = normalizeFiniteNumber(state.pitch)
-  const batterySample = normalizeDogzillaBatterySample(state.battery)
-  const batteryState = dogzillaBatteryStateTracker.resolve(batterySample, timestamp)
+  const batterySafety = state.batterySafety && typeof state.batterySafety === 'object'
+    ? state.batterySafety
+    : null
+  const batteryReadStatus = state.batteryReadStatus === 'cached'
+    && ['ok', 'warning', 'cutoff', 'recovering'].includes(batterySafety?.status)
+    ? 'ok'
+    : state.batteryReadStatus
+  const batterySample = normalizeDogzillaBatterySample({
+    value: state.battery,
+    raw: state.battery,
+    unit: state.batteryUnit,
+    status: batteryReadStatus,
+  })
+  const batteryState = dogzillaBatteryStateTracker.resolve(
+    batterySample,
+    normalizeIsoTimestamp(batterySafety?.lastKnownAt) || timestamp,
+  )
   const mapPose = resolveRobotPoseFromBridgeState(poseState)
   const poseDiagnostics = Array.isArray(poseState?.diagnostics)
     ? poseState.diagnostics.map((item) => normalizeString(item)).filter(Boolean)
@@ -788,11 +779,12 @@ function buildRobotStateFromBridge(bridgeState, robotRuntimeConfig, poseState = 
       battery: batteryState.value,
       batteryRaw: batterySample.raw,
       batteryStatus: batteryState.status,
-      batteryReadStatus: batterySample.status,
+      batteryReadStatus: normalizeString(state.batteryReadStatus) || batterySample.status,
       batteryReadError: normalizeString(state.readErrors?.battery),
       batteryLastKnownAt: batteryState.lastKnownAt,
       batteryUnit: batteryState.unit,
       batterySource: 'DOGZILLALib.read_battery',
+      batterySafety,
       roll,
       pitch,
       yaw,

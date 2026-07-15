@@ -40,6 +40,73 @@ if [ "$current_mode" = "localization" ] && [ "${DOGZILLA_MAP_SAVE_ALLOW_LOCALIZA
   exit 2
 fi
 
+resume_pose_json=""
+if [ "$current_mode" = "mapping" ] || [ "$current_mode" = "continue_mapping" ]; then
+  if resume_pose_json="$(python3 - <<'PY'
+import json
+import math
+import time
+from datetime import datetime, timezone
+
+import rclpy
+from rclpy.node import Node
+from tf2_ros import Buffer, TransformListener
+
+rclpy.init(args=None)
+node = Node("robodoge_mapping_resume_pose_capture")
+tf_buffer = Buffer(cache_time=rclpy.duration.Duration(seconds=5.0))
+listener = TransformListener(tf_buffer, node)
+deadline = time.monotonic() + 5.0
+last_error = "map->base_link TF unavailable"
+
+try:
+    while time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.1)
+        try:
+            transform = tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
+            stamp = transform.header.stamp.sec + transform.header.stamp.nanosec / 1e9
+            now = node.get_clock().now().nanoseconds / 1e9
+            age = max(0.0, now - stamp)
+            if stamp <= 0.0 or age > 2.0:
+                raise RuntimeError(f"map->base_link TF is stale ({age:.2f}s)")
+            translation = transform.transform.translation
+            rotation = transform.transform.rotation
+            yaw = math.atan2(
+                2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z),
+            )
+            print(json.dumps({
+                "frame": "map",
+                "x": translation.x,
+                "y": translation.y,
+                "yaw": yaw,
+                "capturedAt": datetime.now(timezone.utc).isoformat(),
+            }, separators=(",", ":")))
+            raise SystemExit(0)
+        except SystemExit:
+            raise
+        except Exception as error:
+            last_error = str(error)
+            time.sleep(0.15)
+finally:
+    node.destroy_node()
+    rclpy.shutdown()
+
+raise SystemExit(last_error)
+PY
+)"; then
+    echo "Captured fresh mapping-mode resume pose before map save." >&2
+  else
+    echo "Warning: fresh mapping-mode map->base_link pose unavailable; saved map will not be resumable by placement marker." >&2
+    resume_pose_json=""
+  fi
+fi
+
+resume_pose_fragment=""
+if [ -n "$resume_pose_json" ]; then
+  resume_pose_fragment="$(printf ',\n  \"resumePose\": %s' "$resume_pose_json")"
+fi
+
 map_id="${DOGZILLA_MAP_ID:-robodoge_home_$(date -u +%Y%m%dT%H%M%SZ)}"
 if [ "$DOGZILLA_MAP_SAVE_CANDIDATE" = "1" ]; then
   map_id="${DOGZILLA_MAP_ID:-candidate_$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -113,7 +180,7 @@ if [ "$DOGZILLA_MAP_SAVE_CANDIDATE" = "1" ]; then
   "resolution": $DOGZILLA_MAP_RESOLUTION,
   "sourceMode": "${current_mode:-unknown}",
   "rosMapConversion": "$conversion_status",
-  "state": "candidate"
+  "state": "candidate"${resume_pose_fragment}
 }
 JSON
   printf '{"status":"ok","state":"candidate","id":"%s","candidate":"%s","pbstream":"%s","yaml":"%s","rosMapConversion":"%s"}\n' "$map_id" "$candidate_metadata" "$target_pbstream" "$map_stem.yaml" "$conversion_status"
@@ -151,7 +218,7 @@ cat > "$DOGZILLA_MAP_METADATA" <<JSON
   "resolution": $DOGZILLA_MAP_RESOLUTION,
   "sourceMode": "${current_mode:-unknown}",
   "activeAlias": "robodoge_home",
-  "rosMapConversion": "$conversion_status"
+  "rosMapConversion": "$conversion_status"${resume_pose_fragment}
 }
 JSON
 

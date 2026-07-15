@@ -22,6 +22,7 @@ http://127.0.0.1:3037
 ```powershell
 npm run dogzilla:probe-nav
 npm run dogzilla:validate-waypoints
+npm run dogzilla:migrate-waypoints
 npm run dogzilla:start-navigation
 npm run dogzilla:start-map-pose
 npm run dogzilla:set-origin
@@ -169,6 +170,7 @@ Android-specific Tauri commands are in the Android section.
 
 ```powershell
 rtk npm test
+rtk test node --test test/robot-lease.test.mjs test/http-runtime-routes.test.mjs
 rtk git diff --check
 ```
 

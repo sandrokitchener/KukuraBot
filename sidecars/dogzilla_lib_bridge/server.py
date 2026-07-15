@@ -31,6 +31,8 @@ _NAV2_STANDBY_ENABLED = os.environ.get("DOGZILLA_NAV2_STANDBY_ENABLED", "0") == 
 CONTAINER_NAME = os.environ.get("DOGZILLA_CONTAINER", "robodoge-rosbridge")
 REMOTE_ROOT = os.environ.get("REMOTE_ROOT", "/home/pi/robodoge")
 AUTONOMOUS_MAPPING_DIR = Path(REMOTE_ROOT) / "maps"
+LOCALIZATION_STATUS_FILE = AUTONOMOUS_MAPPING_DIR / "robodoge_localization_status.json"
+MAP_POSE_MODE_FILE = AUTONOMOUS_MAPPING_DIR / "robodoge_map_pose_mode.json"
 VALID_NAV_MODES = {"idle", "localize", "navigate", "sleep"}
 
 
@@ -288,7 +290,26 @@ from nav2_client import (
     DEFAULT_ODOM_TOPIC,
     Nav2NavigateClient,
 )
+
 from process_utils import parse_json_process_output, summarize_process_text
+
+
+def _env_number(name: str, default: float, *, minimum: float = 0.0, maximum: float = 100.0) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return min(maximum, max(minimum, value))
+
+
+DOGZILLA_LOCOMOTION_MAX_LATERAL_STEP = max(
+    0.0,
+    float(os.environ.get("DOGZILLA_LOCOMOTION_MAX_LATERAL_STEP", "0")),
+)
+DOGZILLA_MANUAL_MAX_LATERAL_STEP = max(
+    0.0,
+    float(os.environ.get("DOGZILLA_MANUAL_MAX_LATERAL_STEP", "1")),
+)
 
 LOG_FILE = Path(__file__).resolve().with_name("command_log.ndjson")
 ROBOT_ID_FILE = ROOT_DIR / "robot_id.txt"
@@ -305,7 +326,30 @@ DEFAULT_EXPECTED_ROS_DOMAIN_ID = os.environ.get("DOGZILLA_EXPECTED_ROS_DOMAIN_ID
 DEFAULT_INCLUDE_ATTITUDE_STATE = os.environ.get("DOGZILLA_INCLUDE_ATTITUDE_STATE", "0") == "1"
 DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") == "1"
 DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "1") == "1"
-DEFAULT_NAV2_MIN_BATTERY_PCT = float(os.environ.get("DOGZILLA_NAV2_MIN_BATTERY_PCT", "5"))
+DEFAULT_BATTERY_CUTOFF_PCT = _env_number(
+    "DOGZILLA_BATTERY_CUTOFF_PERCENT",
+    _env_number("DOGZILLA_NAV2_MIN_BATTERY_PCT", 10.0),
+    minimum=1.0,
+)
+DEFAULT_BATTERY_WARNING_PCT = max(
+    DEFAULT_BATTERY_CUTOFF_PCT,
+    _env_number("DOGZILLA_BATTERY_WARNING_PERCENT", 20.0, minimum=1.0),
+)
+DEFAULT_BATTERY_RECOVERY_PCT = max(
+    DEFAULT_BATTERY_CUTOFF_PCT,
+    _env_number("DOGZILLA_BATTERY_RECOVERY_PERCENT", 15.0, minimum=1.0),
+)
+DEFAULT_BATTERY_MAX_AGE_SEC = _env_number(
+    "DOGZILLA_BATTERY_MAX_AGE_SEC", 15.0, minimum=1.0, maximum=300.0
+)
+DEFAULT_BATTERY_REFRESH_INTERVAL_SEC = _env_number(
+    "DOGZILLA_BATTERY_REFRESH_INTERVAL_SEC", 2.0, minimum=0.2, maximum=30.0
+)
+DEFAULT_BATTERY_READ_TIMEOUT_SEC = _env_number(
+    "DOGZILLA_BATTERY_READ_TIMEOUT_SEC", 1.0, minimum=0.1, maximum=5.0
+)
+# Backward-compatible name used by older tests/configuration.
+DEFAULT_NAV2_MIN_BATTERY_PCT = DEFAULT_BATTERY_CUTOFF_PCT
 DEFAULT_NO_MOTION_WINDOW_SEC = float(os.environ.get("DOGZILLA_NO_MOTION_WINDOW_SEC", "10.0"))
 DEFAULT_NAV2_PROMOTE_TIMEOUT_SEC = float(os.environ.get("DOGZILLA_NAV2_PROMOTE_TIMEOUT_SEC", "45.0"))
 DEFAULT_NAV2_PROMOTE_POLL_SEC = float(os.environ.get("DOGZILLA_NAV2_PROMOTE_POLL_SEC", "2.0"))
@@ -365,9 +409,60 @@ ACTION_ALIASES = {
     "pray": 17,
 }
 
+_BATTERY_UNSET = object()
+
+
+def canonical_plan_has_motion(kind: str, params: dict[str, Any] | None = None) -> bool:
+    params = params or {}
+    if kind == "locomotion.relative":
+        return locomotion_params_have_motion(params)
+    if kind == "locomotion.goto" or kind == "pose.body":
+        return True
+    if kind == "action.once":
+        return resolve_action_id(params) != ACTION_ALIASES["stop"]
+    if kind == "action.loop":
+        return bool(params.get("enabled"))
+    return False
+
 
 def read_active_map_metadata() -> dict[str, Any]:
     return map_metadata_module.read_active_map_metadata(DEFAULT_MAP_METADATA_FILE, DEFAULT_MAP_YAML_FILE)
+
+
+def read_localization_status() -> dict[str, Any]:
+    try:
+        mode_payload = json.loads(MAP_POSE_MODE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        mode_payload = {}
+    mode = str(mode_payload.get("mode") or "").strip()
+    if mode in {"mapping", "continue_mapping"}:
+        return {
+            "trusted": True,
+            "required": False,
+            "phase": mode,
+            "mode": mode,
+            "source": str(MAP_POSE_MODE_FILE),
+        }
+
+    try:
+        payload = json.loads(LOCALIZATION_STATUS_FILE.read_text(encoding="utf-8"))
+    except Exception as error:
+        return {
+            "trusted": False,
+            "required": True,
+            "phase": "unknown",
+            "mode": mode or "unknown",
+            "error": f"Localization proof unavailable: {error}",
+            "source": str(LOCALIZATION_STATUS_FILE),
+        }
+
+    return {
+        **payload,
+        "trusted": payload.get("trusted") is True,
+        "required": True,
+        "mode": mode or str(payload.get("mode") or "localization"),
+        "source": str(LOCALIZATION_STATUS_FILE),
+    }
 
 
 def validate_goal_inside_active_map(frame: str, x: float, y: float, source_frame: str = "") -> dict[str, Any]:
@@ -382,6 +477,15 @@ def validate_goal_inside_active_map(frame: str, x: float, y: float, source_frame
 
 
 def get_nav2_waypoint_prerequisites(nav2_client: Any) -> dict[str, Any]:
+    localization = read_localization_status()
+    if localization.get("trusted") is not True:
+        return {
+            "ok": False,
+            "checked": True,
+            "message": localization.get("error") or "Robot location is untrusted; run map relocalization before navigation",
+            "localization": localization,
+        }
+
     snapshot_fn = getattr(nav2_client, "snapshot", None)
     if not callable(snapshot_fn):
         return {"ok": True, "checked": False, "reason": "nav2_snapshot_unavailable"}
@@ -429,6 +533,13 @@ class DogzillaRuntime:
         self.last_nav2_gait_command: dict[str, Any] | None = None
         self.nav2_cmd_vel_blocked = False
         self.nav2_cmd_vel_blocked_reason: str | None = None
+        self.battery_safety_enforced = True
+        self.battery_last_valid_percent: float | None = None
+        self.battery_last_valid_monotonic: float | None = None
+        self.battery_last_valid_at: str | None = None
+        self.battery_last_read_monotonic: float | None = None
+        self.battery_motion_block_reason: str | None = None
+        self.battery_stop_reason: str | None = None
 
         for vendor_path in self.vendor_paths:
             if vendor_path.exists():
@@ -442,6 +553,7 @@ class DogzillaRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         nav2 = self.nav2_client.snapshot()
+        localization = read_localization_status()
         return {
             **identity_payload(),
             "available": self.available,
@@ -453,10 +565,12 @@ class DogzillaRuntime:
             "knownActions": ACTION_ALIASES,
             "studyHints": STUDY_HINTS,
             "map": read_active_map_metadata(),
+            "localization": localization,
             "nav2": nav2,
-            "navigation": self.navigation_snapshot(nav2),
+            "navigation": self.navigation_snapshot(nav2, localization),
             "lidarAvoidance": self.lidar_avoidance.snapshot() if hasattr(self, "lidar_avoidance") else None,
             "navMode": get_nav_mode(),
+            "batterySafety": self._battery_safety_snapshot(refresh=False),
             "nav2GaitAdapter": {
                 "receivedCount": int(getattr(self, "nav2_gait_adapter_count", 0) or 0),
                 "lastCommand": getattr(self, "last_nav2_gait_command", None),
@@ -471,17 +585,232 @@ class DogzillaRuntime:
             "robotError": self.robot_error,
         }
 
-    def navigation_snapshot(self, nav2: dict[str, Any] | None = None) -> dict[str, Any]:
+    def navigation_snapshot(
+        self,
+        nav2: dict[str, Any] | None = None,
+        localization: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         nav2 = nav2 if isinstance(nav2, dict) else self.nav2_client.snapshot()
+        localization = localization if isinstance(localization, dict) else read_localization_status()
         nav2_available = nav2.get("available") is True
-        waypoint_ready = nav2.get("waypointReady") is True
+        localization_trusted = localization.get("trusted") is True
+        waypoint_ready = nav2.get("waypointReady") is True and localization_trusted
+        blockers = list(nav2.get("blockers") or [])
+        if not localization_trusted:
+            blockers.insert(0, localization.get("error") or "Robot location is untrusted; relocalization required")
         return {
             "available": waypoint_ready,
             "primary": "nav2" if waypoint_ready else "unavailable",
             "actionServerAvailable": nav2_available,
             "waypointReady": waypoint_ready,
-            "blockers": nav2.get("blockers") or [],
+            "blockers": blockers,
+            "localization": localization,
             "nav2": nav2,
+        }
+
+    def _battery_safety_snapshot(
+        self,
+        *,
+        refresh: bool = False,
+        robot: Any | None = None,
+        raw: Any = _BATTERY_UNSET,
+    ) -> dict[str, Any]:
+        if not getattr(self, "battery_safety_enforced", False):
+            if raw is _BATTERY_UNSET and refresh and robot is not None:
+                raw, _ = self._read_battery_with_timeout(robot)
+            valid_percent = (
+                isinstance(raw, (int, float))
+                and not isinstance(raw, bool)
+                and math.isfinite(float(raw))
+                and 1 <= float(raw) <= 100
+                and float(raw).is_integer()
+            )
+            return {
+                "status": "disabled",
+                "motionAllowed": True,
+                "value": float(raw) if valid_percent else None,
+                "raw": None if raw is _BATTERY_UNSET else raw,
+                "unit": "percent" if valid_percent else "unknown",
+                "readStatus": "ok" if valid_percent else "read-failed" if raw in (None, 0) else "invalid-percent",
+                "fresh": valid_percent,
+                "warningPercent": DEFAULT_BATTERY_WARNING_PCT,
+                "cutoffPercent": DEFAULT_BATTERY_CUTOFF_PCT,
+                "recoveryPercent": DEFAULT_BATTERY_RECOVERY_PCT,
+                "maxAgeSec": DEFAULT_BATTERY_MAX_AGE_SEC,
+            }
+
+        now = time.monotonic()
+        read_error = ""
+        sample_supplied = raw is not _BATTERY_UNSET
+        last_read = getattr(self, "battery_last_read_monotonic", None)
+        should_refresh = refresh and (
+            last_read is None or now - float(last_read) >= DEFAULT_BATTERY_REFRESH_INTERVAL_SEC
+        )
+
+        if not sample_supplied and should_refresh:
+            if robot is None:
+                robot = getattr(self, "robot", None)
+            if robot is None and self.available:
+                acquired = self._lock.acquire(timeout=0.25)
+                if acquired:
+                    try:
+                        robot = self._robot()
+                    finally:
+                        self._lock.release()
+            if robot is None:
+                raw = None
+                read_error = "robot unavailable"
+            else:
+                raw, read_error = self._read_battery_with_timeout(robot)
+            sample_supplied = True
+
+        if sample_supplied:
+            self.battery_last_read_monotonic = now
+
+        valid_percent = (
+            sample_supplied
+            and isinstance(raw, (int, float))
+            and not isinstance(raw, bool)
+            and math.isfinite(float(raw))
+            and 1 <= float(raw) <= 100
+            and float(raw).is_integer()
+        )
+        if valid_percent:
+            self.battery_last_valid_percent = float(raw)
+            self.battery_last_valid_monotonic = now
+            self.battery_last_valid_at = utc_now()
+
+        value = getattr(self, "battery_last_valid_percent", None)
+        valid_at = getattr(self, "battery_last_valid_monotonic", None)
+        age_sec = max(0.0, now - float(valid_at)) if valid_at is not None else None
+        prior_reason = getattr(self, "battery_motion_block_reason", None)
+        read_status = (
+            "ok"
+            if valid_percent
+            else "cached"
+            if not sample_supplied and value is not None and age_sec is not None and age_sec <= DEFAULT_BATTERY_MAX_AGE_SEC
+            else "read-failed"
+            if raw is None or raw == 0
+            else "invalid-percent"
+        )
+
+        blocked_reason: str | None = None
+        status = "unavailable"
+        cause = "Fresh DOGZILLA battery percentage is unavailable."
+        recovery = "Restore fresh DOGZILLALib battery telemetry before motion."
+
+        if value is not None and age_sec is not None and age_sec <= DEFAULT_BATTERY_MAX_AGE_SEC:
+            if value <= DEFAULT_BATTERY_CUTOFF_PCT:
+                blocked_reason = "battery_cutoff"
+                status = "cutoff"
+                cause = f"Battery {value:g}% is at or below the {DEFAULT_BATTERY_CUTOFF_PCT:g}% motion cutoff."
+                recovery = f"Charge until a fresh reading is at least {DEFAULT_BATTERY_RECOVERY_PCT:g}%."
+            elif prior_reason and prior_reason.startswith("battery_") and value < DEFAULT_BATTERY_RECOVERY_PCT:
+                blocked_reason = "battery_recovering"
+                status = "recovering"
+                cause = f"Battery recovered to {value:g}% but remains below the {DEFAULT_BATTERY_RECOVERY_PCT:g}% restart threshold."
+                recovery = f"Charge until a fresh reading is at least {DEFAULT_BATTERY_RECOVERY_PCT:g}%."
+            elif value <= DEFAULT_BATTERY_WARNING_PCT:
+                status = "warning" if valid_percent or read_status == "cached" else "last-known"
+                cause = f"Battery {value:g}% is at or below the {DEFAULT_BATTERY_WARNING_PCT:g}% warning threshold."
+                recovery = f"Charge before battery reaches the {DEFAULT_BATTERY_CUTOFF_PCT:g}% motion cutoff."
+            else:
+                status = "ok" if valid_percent or read_status == "cached" else "last-known"
+                cause = "Battery is above the configured warning threshold."
+                recovery = ""
+        elif value is not None:
+            blocked_reason = "battery_stale"
+            status = "stale"
+            cause = f"Battery reading is older than {DEFAULT_BATTERY_MAX_AGE_SEC:g} seconds."
+        else:
+            blocked_reason = "battery_invalid" if read_status == "invalid-percent" else "battery_unavailable"
+            status = "invalid" if read_status == "invalid-percent" else "unavailable"
+            if read_status == "invalid-percent":
+                cause = "DOGZILLA battery reading was not an integer percentage from 1 to 100."
+
+        if blocked_reason:
+            self.battery_motion_block_reason = blocked_reason
+            self._block_nav2_cmd_vel(blocked_reason)
+        else:
+            self.battery_motion_block_reason = None
+            self.battery_stop_reason = None
+            if getattr(self, "nav2_cmd_vel_blocked_reason", None) in {
+                "battery_cutoff", "battery_recovering", "battery_stale", "battery_unavailable", "battery_invalid"
+            }:
+                self._clear_nav2_cmd_vel_block()
+
+        return {
+            "status": status,
+            "motionAllowed": blocked_reason is None,
+            "blockedReason": blocked_reason,
+            "cause": cause,
+            "recovery": recovery,
+            "value": value,
+            "raw": None if raw is _BATTERY_UNSET else raw,
+            "unit": "percent" if valid_percent or value is not None else "unknown",
+            "readStatus": read_status,
+            "readError": read_error,
+            "fresh": valid_percent,
+            "lastKnownAt": getattr(self, "battery_last_valid_at", None),
+            "ageSec": round(age_sec, 3) if age_sec is not None else None,
+            "warningPercent": DEFAULT_BATTERY_WARNING_PCT,
+            "cutoffPercent": DEFAULT_BATTERY_CUTOFF_PCT,
+            "recoveryPercent": DEFAULT_BATTERY_RECOVERY_PCT,
+            "maxAgeSec": DEFAULT_BATTERY_MAX_AGE_SEC,
+        }
+
+    def _read_battery_with_timeout(self, robot: Any) -> tuple[Any, str]:
+        if not self._lock.acquire(blocking=False):
+            return None, "robot serial busy"
+
+        raw = None
+        read_error = ""
+        serial_port = None
+        original_timeout = _BATTERY_UNSET
+        timeout_changed = False
+        try:
+            serial_port = getattr(robot, "ser", None)
+            original_timeout = getattr(serial_port, "timeout", _BATTERY_UNSET)
+            if original_timeout is not _BATTERY_UNSET:
+                bounded_timeout = (
+                    DEFAULT_BATTERY_READ_TIMEOUT_SEC
+                    if original_timeout is None
+                    else min(float(original_timeout), DEFAULT_BATTERY_READ_TIMEOUT_SEC)
+                )
+                serial_port.timeout = bounded_timeout
+                timeout_changed = True
+            # DOGZILLALib 3.1.9 bounds read_battery with its own one-second
+            # wall loop. Keep that UART call synchronous under the shared lock.
+            raw = call_first(robot, ["read_Battery", "read_battery"])
+        except Exception as error:
+            read_error = str(error)
+        finally:
+            try:
+                if timeout_changed:
+                    serial_port.timeout = original_timeout
+            except Exception as error:
+                raw = None
+                read_error = str(error)
+            self._lock.release()
+
+        return raw, read_error
+
+    def _battery_motion_rejection(self, kind: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        if not canonical_plan_has_motion(kind, params):
+            return None
+        safety = self._battery_safety_snapshot(refresh=True)
+        if safety.get("motionAllowed") is True:
+            return None
+
+        stop = self._execute_emergency_stop(reason=safety.get("blockedReason") or "battery_safety")
+        return {
+            "executed": False,
+            "delivery": "battery-safety-blocked",
+            "kind": kind,
+            "error": safety.get("cause") or "Battery safety blocked motion.",
+            "operatorMessage": safety.get("recovery") or "Restore fresh, safe battery telemetry before motion.",
+            "batterySafety": safety,
+            "safeStop": stop,
         }
 
     def execute(self, canonical_plan: dict[str, Any]) -> dict[str, Any]:
@@ -499,6 +828,15 @@ class DogzillaRuntime:
 
         if kind == "noop" and params.get("reason") == "clear_emergency_stop":
             self.cancel_active_navigation()
+            safety = self._battery_safety_snapshot(refresh=True)
+            if safety.get("motionAllowed") is not True:
+                return {
+                    "executed": False,
+                    "delivery": "battery-safety-blocked",
+                    "error": safety.get("cause"),
+                    "operatorMessage": safety.get("recovery"),
+                    "batterySafety": safety,
+                }
             self._clear_nav2_cmd_vel_block()
             return {
                 "executed": True,
@@ -508,6 +846,10 @@ class DogzillaRuntime:
 
         if kind == "noop" and params.get("reason") == "command_preempt":
             return self._execute_command_preempt()
+
+        battery_rejection = self._battery_motion_rejection(str(kind or ""), params)
+        if battery_rejection is not None:
+            return battery_rejection
 
         if kind == "locomotion.goto":
             cancel_event = self._replace_navigation_cancel_event()
@@ -576,6 +918,21 @@ class DogzillaRuntime:
     def execute_nav2_cmd_vel(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         params = nav2_cmd_vel_to_locomotion(payload or {})
         self.nav2_gait_adapter_count = int(getattr(self, "nav2_gait_adapter_count", 0) or 0) + 1
+
+        battery_rejection = self._battery_motion_rejection("locomotion.relative", params)
+        if battery_rejection is not None:
+            result = {
+                **battery_rejection,
+                "delivery": "nav2-gait-adapter-blocked",
+                "kind": "nav2.cmd_vel.gait_adapter",
+                "blocked": True,
+                "params": params,
+            }
+            self.last_nav2_gait_command = {
+                "receivedAt": utc_now(),
+                "result": result,
+            }
+            return result
 
         if self._nav2_cmd_vel_is_blocked() and locomotion_params_have_motion(params):
             result = {
@@ -672,6 +1029,8 @@ class DogzillaRuntime:
                 "delivery": "DOGZILLALib",
                 "dryRun": self.dry_run,
                 "battery": None,
+                "batteryUnit": "unknown",
+                "batteryReadStatus": "unavailable",
                 "motors": None,
                 "roll": None,
                 "pitch": None,
@@ -681,11 +1040,7 @@ class DogzillaRuntime:
                 "readAt": utc_now(),
             }
 
-            # Keep the default state path light. Some vendor serial reads can block
-            # when the controller or robot battery is unhealthy.
-            state_fields = [
-                ("battery", ["read_Battery", "read_battery"]),
-            ]
+            state_fields = []
             if DEFAULT_INCLUDE_ATTITUDE_STATE:
                 state_fields.extend(
                     [
@@ -705,15 +1060,35 @@ class DogzillaRuntime:
             for field, names in state_fields:
                 try:
                     result[field] = call_first(robot, names)
-                    if field == "battery" and result[field] == 0:
-                        result[field] = None
-                        result["readErrors"][field] = "read_Battery returned failure sentinel 0"
                 except Exception as error:
                     result["readErrors"][field] = str(error)
 
-            if not result["readErrors"]:
-                del result["readErrors"]
-            return result
+        battery_safety = self._battery_safety_snapshot(refresh=True, robot=robot)
+        result["batterySafety"] = battery_safety
+        result["batteryReadStatus"] = battery_safety.get("readStatus") or "unavailable"
+        if battery_safety.get("value") is not None and battery_safety.get("unit") == "percent":
+            result["battery"] = battery_safety.get("value")
+            result["batteryUnit"] = "percent"
+        if result["batteryReadStatus"] == "read-failed":
+            result["readErrors"]["battery"] = battery_safety.get("readError") or "read_Battery returned failure sentinel 0"
+        elif result["batteryReadStatus"] == "invalid-percent":
+            result["readErrors"]["battery"] = "read_Battery did not return an integer percentage from 1 to 100"
+
+        blocked_reason = battery_safety.get("blockedReason")
+        if (
+            blocked_reason
+            and not self.dry_run
+            and getattr(self, "battery_stop_reason", None) != blocked_reason
+        ):
+            stop = self._execute_emergency_stop(reason=blocked_reason)
+            self.battery_stop_reason = blocked_reason
+            battery_safety["safeStopApplied"] = stop.get("executed") is True
+            if stop.get("error"):
+                battery_safety["safeStopError"] = stop["error"]
+
+        if not result["readErrors"]:
+            del result["readErrors"]
+        return result
 
     def read_imu(self) -> dict[str, Any]:
         if not self.available:
@@ -757,7 +1132,16 @@ class DogzillaRuntime:
 
     def _execute_locomotion(self, robot, params: dict[str, Any]) -> dict[str, Any]:
         x_step = clamp(float(params.get("x_step") or 0), -25, 25)
-        y_step = clamp(float(params.get("y_step") or 0), -18, 18)
+        lateral_limit = (
+            DOGZILLA_MANUAL_MAX_LATERAL_STEP
+            if params.get("source") in ("gamepad", "touch")
+            else DOGZILLA_LOCOMOTION_MAX_LATERAL_STEP
+        )
+        y_step = clamp(
+            float(params.get("y_step") or 0),
+            -lateral_limit,
+            lateral_limit,
+        )
         turn_rate = clamp(float(params.get("turn_rate") or 0), -100, 100)
         pace = params.get("pace")
         gait = params.get("gait")
@@ -839,43 +1223,53 @@ class DogzillaRuntime:
                 "navMode": current_mode,
             }
         if current_mode != "navigate":
-            # Auto-promote from idle/localize to navigate, then wait for readiness.
-            mode_result = set_nav_mode("navigate")
-            if not mode_result.get("ok"):
-                return {
-                    "executed": False,
-                    "delivery": "rejected",
-                    "kind": "locomotion.goto",
-                    "waypoint": params.get("waypoint") or "",
-                    "waypointSafe": False,
-                    "error": mode_result.get("error") or "failed to enter navigate mode",
-                    "navMode": current_mode,
-                    "modeResult": mode_result,
+            current_snapshot = self.nav2_client.snapshot()
+            if current_snapshot.get("waypointReady") is True:
+                _set_nav_mode("navigate", {"ok": True, "alreadyActive": True})
+                mode_transition = {
+                    "from": current_mode,
+                    "to": "navigate",
+                    "started": False,
+                    "alreadyActive": True,
                 }
-            mode_transition = {
-                "from": current_mode,
-                "to": "navigate",
-                "started": True,
-            }
-            # Bounded readiness wait with latest blockers.
-            readiness = self._wait_for_nav2_readiness(
-                DEFAULT_NAV2_PROMOTE_TIMEOUT_SEC, DEFAULT_NAV2_PROMOTE_POLL_SEC
-            )
-            if not readiness.get("ok"):
-                blockers = readiness.get("blockers") or []
-                return {
-                    "executed": False,
-                    "delivery": "rejected",
-                    "kind": "locomotion.goto",
-                    "waypoint": params.get("waypoint") or "",
-                    "waypointSafe": False,
-                    "error": "Nav2 promotion timed out; latest blockers: "
-                    + ("; ".join(str(b) for b in blockers) if blockers else "unknown"),
-                    "navMode": get_nav_mode(),
-                    "modeTransition": mode_transition,
-                    "blockers": blockers,
-                    "snapshot": readiness.get("snapshot"),
+            else:
+                # Auto-promote from idle/localize to navigate, then wait for readiness.
+                mode_result = set_nav_mode("navigate")
+                if not mode_result.get("ok"):
+                    return {
+                        "executed": False,
+                        "delivery": "rejected",
+                        "kind": "locomotion.goto",
+                        "waypoint": params.get("waypoint") or "",
+                        "waypointSafe": False,
+                        "error": mode_result.get("error") or "failed to enter navigate mode",
+                        "navMode": current_mode,
+                        "modeResult": mode_result,
+                    }
+                mode_transition = {
+                    "from": current_mode,
+                    "to": "navigate",
+                    "started": True,
                 }
+                # Bounded readiness wait with latest blockers.
+                readiness = self._wait_for_nav2_readiness(
+                    DEFAULT_NAV2_PROMOTE_TIMEOUT_SEC, DEFAULT_NAV2_PROMOTE_POLL_SEC
+                )
+                if not readiness.get("ok"):
+                    blockers = readiness.get("blockers") or []
+                    return {
+                        "executed": False,
+                        "delivery": "rejected",
+                        "kind": "locomotion.goto",
+                        "waypoint": params.get("waypoint") or "",
+                        "waypointSafe": False,
+                        "error": "Nav2 promotion timed out; latest blockers: "
+                        + ("; ".join(str(b) for b in blockers) if blockers else "unknown"),
+                        "navMode": get_nav_mode(),
+                        "modeTransition": mode_transition,
+                        "blockers": blockers,
+                        "snapshot": readiness.get("snapshot"),
+                    }
 
         frame = str(params.get("frame") or "map")
         if frame not in DEFAULT_NAV2_ALLOWED_FRAMES:
@@ -919,21 +1313,6 @@ class DogzillaRuntime:
                 **({"modeTransition": mode_transition} if mode_transition else {}),
             }
 
-        battery_state = self.read_state()
-        battery_pct = battery_state.get("battery") if isinstance(battery_state, dict) else None
-        min_battery = DEFAULT_NAV2_MIN_BATTERY_PCT
-        if isinstance(battery_pct, (int, float)) and battery_pct >= 0 and battery_pct < min_battery:
-            return {
-                "executed": False,
-                "delivery": "battery-too-low",
-                "kind": "locomotion.goto",
-                "waypoint": params.get("waypoint") or "",
-                "waypointSafe": frame == "map",
-                "error": f"Battery {battery_pct}% below minimum {min_battery}% for navigation",
-                "battery": battery_pct,
-                "minimumBatteryPercent": min_battery,
-            }
-
         avoidance_request = get_lidar_avoidance_request(params)
         avoidance_result = {"required": False, "ok": True}
         if avoidance_request.get("required"):
@@ -971,7 +1350,22 @@ class DogzillaRuntime:
                     "lidarAvoidance": avoidance_result,
                 }
 
-        result = self.nav2_client.send_goal(frame=frame, x=x, y=y, yaw=yaw)
+        wait_for_result = params.get("waitForResult") is True
+        if wait_for_result:
+            try:
+                result_timeout = clamp(float(params.get("resultTimeoutSec") or 600.0), 1.0, 900.0)
+            except (TypeError, ValueError):
+                return {"executed": False, "error": "invalid_navigation_result_timeout"}
+            result = self.nav2_client.send_goal(
+                frame=frame,
+                x=x,
+                y=y,
+                yaw=yaw,
+                wait_for_result=True,
+                result_timeout=result_timeout,
+            )
+        else:
+            result = self.nav2_client.send_goal(frame=frame, x=x, y=y, yaw=yaw)
         if not result.get("executed"):
             if result.get("delivery") == "nav2-unavailable":
                 return {
@@ -1000,6 +1394,8 @@ class DogzillaRuntime:
             "arrivalToleranceMeters": params.get("arrivalToleranceMeters", params.get("arrival_tolerance_meters")),
             "lidarAvoidance": avoidance_result,
         }
+        if result.get("goalCompleted") is True:
+            response["status"] = "arrived"
         if mode_transition is not None:
             response["modeTransition"] = mode_transition
             response["warning"] = "Nav2 was started from idle; first command may have startup latency."
@@ -1174,7 +1570,19 @@ def _get_load_average() -> list[str] | None:
         return None
 
 
-def get_autonomous_mapping_status(maps_dir: Path = AUTONOMOUS_MAPPING_DIR) -> dict[str, Any]:
+def autonomous_mapping_marker_is_live(marker: Path, proc_root: Path = Path("/proc")) -> bool:
+    try:
+        pid = int(marker.read_text(encoding="utf-8").strip())
+        command = (proc_root / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace")
+        return "autonomous_mapping_supervisor.sh" in command
+    except Exception:
+        return False
+
+
+def get_autonomous_mapping_status(
+    maps_dir: Path = AUTONOMOUS_MAPPING_DIR,
+    proc_root: Path = Path("/proc"),
+) -> dict[str, Any]:
     def read_json(name: str) -> dict[str, Any]:
         try:
             payload = json.loads((maps_dir / name).read_text(encoding="utf-8"))
@@ -1184,13 +1592,16 @@ def get_autonomous_mapping_status(maps_dir: Path = AUTONOMOUS_MAPPING_DIR) -> di
 
     status = read_json("autonomous-mapping-status.json")
     result = read_json("autonomous-mapping-result.json")
+    resume_pose = map_metadata_module.normalize_resume_pose(read_json("robodoge_home_map.json").get("resumePose"))
     return {
-        "active": (maps_dir / "autonomous-mapping.active").is_file(),
+        "active": (maps_dir / "autonomous-mapping.ready").is_file()
+        and autonomous_mapping_marker_is_live(maps_dir / "autonomous-mapping.active", proc_root),
         "state": status.get("state") or result.get("state") or "idle",
         "startedAt": status.get("startedAt"),
         "updatedAt": status.get("updatedAt"),
         "candidateAvailable": result.get("state") == "candidate-ready" or "candidate=true" in str(result.get("detail") or ""),
         "detail": result.get("detail") or status.get("reason") or "",
+        "resumePose": resume_pose,
     }
 
 
@@ -1220,6 +1631,7 @@ class Handler(BaseHTTPRequestHandler):
                     "wakeReady": not _NAV_MODE_TRANSITIONING,
                     "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
                     "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
+                    "batterySafety": runtime.get("batterySafety"),
                     "autonomousMapping": get_autonomous_mapping_status(),
                     "runtime": runtime,
                 },
@@ -1234,6 +1646,12 @@ class Handler(BaseHTTPRequestHandler):
                 nav2_snapshot = nav2.snapshot()
             except Exception as exc:
                 nav2_snapshot = {"error": str(exc), "waypointReady": False, "canSendGoal": False, "backend": "unknown"}
+            localization = read_localization_status()
+            waypoint_ready = (
+                bool(nav2_snapshot.get("waypointReady"))
+                and localization.get("trusted") is True
+                and get_nav_mode() == "navigate"
+            )
             self._send_json(
                 200,
                 {
@@ -1244,8 +1662,10 @@ class Handler(BaseHTTPRequestHandler):
                     "navMode": get_nav_mode(),
                     "gaitBlocked": self.server.runtime._nav2_cmd_vel_is_blocked(),
                     "gaitBlockedReason": getattr(self.server.runtime, "nav2_cmd_vel_blocked_reason", None),
-                    "nav2Ready": bool(nav2_snapshot.get("waypointReady")) and get_nav_mode() == "navigate",
-                    "waypointReady": bool(nav2_snapshot.get("waypointReady")) and get_nav_mode() == "navigate",
+                    "batterySafety": self.server.runtime._battery_safety_snapshot(refresh=False),
+                    "nav2Ready": waypoint_ready,
+                    "waypointReady": waypoint_ready,
+                    "localization": localization,
                     "nav2Backend": nav2_snapshot.get("backend", "unknown"),
                     "canSendGoal": bool(nav2_snapshot.get("canSendGoal")),
                     "autonomousMapping": get_autonomous_mapping_status(),
@@ -1391,6 +1811,29 @@ class Handler(BaseHTTPRequestHandler):
             # send_goal() again (that was the double-send bug).
             result = self.server.runtime.execute(canonical_plan)
             command_accepted = bool(result.get("executed")) and result.get("delivery") == "accepted"
+
+            if command_accepted and result.get("goalCompleted") is True:
+                record = {
+                    "commandId": command_id,
+                    "receivedAt": utc_now(),
+                    "completedAt": utc_now(),
+                    "envelope": envelope,
+                    "canonicalPlan": canonical_plan,
+                    "result": result,
+                    "motionStatus": "arrived",
+                }
+                self.server.recent_commands.appendleft(record)
+                append_log_record(record)
+                self._send_json(
+                    200,
+                    {
+                        "accepted": True,
+                        "commandId": command_id,
+                        "result": result,
+                        **identity_payload(),
+                    },
+                )
+                return
 
             if command_accepted:
                 # Goal was accepted by Nav2. Start background motion monitor.
@@ -1620,7 +2063,10 @@ class Handler(BaseHTTPRequestHandler):
 def resolve_action_id(params: dict[str, Any]) -> int | None:
     raw_action_id = params.get("actionId", params.get("action_id"))
     if raw_action_id is not None:
-        return clamp_int(int(raw_action_id), 1, 255)
+        try:
+            return clamp_int(int(raw_action_id), 1, 255)
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     for key in ("trick", "actionName", "action_name", "name"):
         raw_name = params.get(key)

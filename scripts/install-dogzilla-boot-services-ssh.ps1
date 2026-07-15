@@ -121,6 +121,10 @@ DOGZILLA_MAP_TOPIC=/map
 DOGZILLA_LOCALIZATION_BACKEND=cartographer
 ENV
 
+if [ ! -f /etc/robodoge/yolo-vision.env ]; then
+  printf 'YOLO_DETECTION_FLAG=--raw-stream\n' | sudo tee /etc/robodoge/yolo-vision.env >/dev/null
+fi
+
 sudo tee /etc/systemd/system/robodoge-direct-bridge.service >/dev/null <<SERVICE
 [Unit]
 Description=Robo-Doge DOGZILLA Direct Bridge
@@ -179,8 +183,9 @@ Type=simple
 User=$USER_NAME
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
+EnvironmentFile=-/etc/robodoge/yolo-vision.env
 ExecStartPre=/bin/bash -lc 'pkill -f "[s]idecars/dogzilla_yolo_vision/server.py" 2>/dev/null || true; python3 "$REMOTE_ROOT/sidecars/dogzilla_yolo_vision/release_camera_consumers.py" --camera-source auto || true'
-ExecStart=/usr/bin/python3 $REMOTE_ROOT/sidecars/dogzilla_yolo_vision/server.py --host 0.0.0.0 --port $VISION_PORT --model $REMOTE_ROOT/models/dogzilla_yolo/best.onnx --labels $REMOTE_ROOT/models/dogzilla_yolo/custom.yaml --camera-url auto --camera-control-host '' --camera-control-port 0
+ExecStart=/usr/bin/python3 $REMOTE_ROOT/sidecars/dogzilla_yolo_vision/server.py --host 0.0.0.0 --port $VISION_PORT --model $REMOTE_ROOT/models/dogzilla_yolo/best.onnx --labels $REMOTE_ROOT/models/dogzilla_yolo/custom.yaml --camera-url auto --camera-control-host '' --camera-control-port 0 \$YOLO_DETECTION_FLAG
 Restart=always
 RestartSec=5
 StandardOutput=append:$REMOTE_ROOT/logs/yolo-vision.log

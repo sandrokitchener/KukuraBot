@@ -17,8 +17,8 @@
           "max": 25
         },
         "yStep": {
-          "min": -18,
-          "max": 18
+          "min": 0,
+          "max": 0
         },
         "turnRate": {
           "min": -100,
@@ -52,12 +52,12 @@
       "twistCalibration": {
         "deadband": 0.05,
         "linearXFullScaleStep": 25,
-        "linearYFullScaleStep": 18,
+        "linearYFullScaleStep": 0,
         "angularZFullScaleStep": 100
       },
       "notes": [
         "Ranges above come from DOGZILLA tutorial docs and are meant as editable defaults.",
-        "Twist calibration is dummy scaffolding until the real robot is tuned."
+        "Lateral motion is disabled after sustained crab walking caused repeated falls; re-enable only after a controlled five-foot stability test."
       ]
     }
   }

@@ -345,6 +345,10 @@ html.android-app .status {
   box-shadow: none;
 }
 
+html.android-app .manual-touch-controls {
+  display: grid;
+}
+
 html.android-app .command-zone {
   min-width: 0;
   max-width: 100%;

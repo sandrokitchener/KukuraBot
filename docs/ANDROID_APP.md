@@ -16,13 +16,25 @@ Android WebView / Tauri shell
 
 Android does not run Node, PowerShell, SSH, ROS2, or DOGZILLA sidecars locally.
 
+## Operator-capability parity matrix
+
+| Capability | Android surface | Runtime owner | Required proof |
+| --- | --- | --- | --- |
+| Connection, chat, settings, map, camera, audio, and robot status | Shared `public/` UI | Configured PC backend and Pi/Isaac target | `node --test test/android-web-parity.test.mjs`; device launch check |
+| Manual control and emergency stop | Shared UI; Android touch controls | PC backend dispatches robot command | `test/frontend-modules.test.mjs`; physical neutral-stop check |
+| Map workflow and waypoint navigation | Shared UI | PC backend, Pi bridge, Cartographer/Nav2 | parity test; live Pi readiness and motion evidence |
+| Connection actions and diagnostics | Shared UI | PC backend and Pi services | parity test; manual backend/bridge probe |
+| APK installation and shell launch | Tauri Android shell | Android device | `adb shell dumpsys package com.robodoge.console`; launch/crash check |
+| Node, PowerShell, SSH, ROS2, DOGZILLA sidecars, phone-local model server | Unsupported phone-local runtime | PC/Pi only | Explicitly unsupported; no Android-local proof claimed |
+
 ## Backend URLs
 
-Set Backend URL in the app settings or Connection Center:
+On first Android launch, Connection setup opens until a backend is saved. Enter a LAN, Tailnet, or HTTPS hosted URL; the app checks `/api/config` before saving it in local storage.
 
 ```text
 LAN:     http://<pc-lan-ip>:3037
-Tailnet: http://100.89.71.113:3037
+Tailnet: http://<pc-tailnet-ip>:3037
+Hosted:  https://<host>
 ```
 
 PC runtime for phone:
@@ -70,6 +82,8 @@ adb shell dumpsys package com.robodoge.console
 | `scripts/start-robo-doge-android-lan.bat` | Android/LAN helper launcher |
 | `public/api-client.js` | Backend URL behavior shared by web and Android |
 | `test/android-web-parity.test.mjs` | Web/Android UI parity checks |
+
+Manual control safety is shared by Android and desktop: backgrounding or blurring the app, pointer cancellation, gamepad loss, command timeout, lease loss, request failure, and page unload disable control and issue one neutral command. Automated coverage lives in `test/frontend-modules.test.mjs`; physical stop behavior remains hardware verification.
 
 ## Phone-local model experiments
 

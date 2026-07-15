@@ -13,15 +13,15 @@ _SPEED_CONFIG: dict[str, Any] = {
     "linearFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE", "0.26")),
     "lateralFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_LATERAL_FULL_SCALE", "0.20")),
     "angularFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_FULL_SCALE", "1.0")),
-    "maxXStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_X_STEP", "14")),
-    "maxYStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_Y_STEP", "3")),
+    "maxXStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_X_STEP", "8")),
+    "maxYStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_Y_STEP", "0")),
     "maxTurnRate": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_TURN_RATE", "24")),
     "forwardTurnScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_FORWARD_TURN_SCALE", "0.25")),
     "linearDeadband": float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_DEADBAND", "0.025")),
     "angularDeadband": float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_DEADBAND", "0.12")),
     "trotLinear": float(os.environ.get("DOGZILLA_NAV2_GAIT_TROT_LINEAR", "0.11")),
     "highLinear": float(os.environ.get("DOGZILLA_NAV2_GAIT_HIGH_LINEAR", "0.20")),
-    "allowTrot": os.environ.get("DOGZILLA_NAV2_GAIT_ALLOW_TROT", "0") == "1",
+    "allowTrot": False,
 }
 
 DEFAULT_NAV2_GAIT_MAX_TURN_RATE = _SPEED_CONFIG["maxTurnRate"]
@@ -37,9 +37,9 @@ def update_speed_config(overrides: dict[str, Any]) -> dict[str, Any]:
     """Apply overrides to the dynamic speed config. Returns the updated config."""
     allowed = {
         "linearFullScale", "lateralFullScale", "angularFullScale",
-        "maxXStep", "maxYStep", "maxTurnRate", "forwardTurnScale",
+        "maxXStep", "maxTurnRate", "forwardTurnScale",
         "linearDeadband", "angularDeadband",
-        "trotLinear", "highLinear", "allowTrot",
+        "trotLinear", "highLinear",
     }
     for key, value in overrides.items():
         if key in allowed:
@@ -82,25 +82,15 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
     linear_y = zero_deadband(linear_y, cfg["linearDeadband"])
     angular_z = zero_deadband(angular_z, cfg["angularDeadband"])
 
-    x_step = scale_symmetric(linear_x, cfg["linearFullScale"], cfg["maxXStep"])
-    y_step = scale_symmetric(linear_y, cfg["lateralFullScale"], cfg["maxYStep"])
+    max_x_step = min(max(float(cfg["maxXStep"]), 0.0), 8.0)
+    x_step = scale_symmetric(linear_x, cfg["linearFullScale"], max_x_step)
+    y_step = 0.0
     translating = abs(x_step) > 0 or abs(y_step) > 0
     turn_scale = cfg["forwardTurnScale"] if translating and abs(x_step) > 0 else 1.0
     turn_rate = scale_symmetric(angular_z, cfg["angularFullScale"], cfg["maxTurnRate"] * turn_scale)
 
-    abs_linear = max(abs(linear_x), abs(linear_y))
-    if cfg["allowTrot"] and abs_linear >= cfg["trotLinear"]:
-        gait = "trot"
-        pace = "high" if abs_linear >= cfg["highLinear"] else "normal"
-    elif translating:
-        gait = "walk"
-        pace = "slow"
-    elif abs(turn_rate) > 0:
-        gait = "walk"
-        pace = "slow"
-    else:
-        gait = "walk"
-        pace = "slow"
+    gait = "walk"
+    pace = "slow"
 
     return {
         "x_step": round_float(x_step),
@@ -121,10 +111,10 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
         "mapping": {
             "linearFullScale": cfg["linearFullScale"],
             "angularFullScale": cfg["angularFullScale"],
-            "maxXStep": cfg["maxXStep"],
+            "maxXStep": max_x_step,
             "maxTurnRate": cfg["maxTurnRate"],
             "forwardTurnScale": cfg["forwardTurnScale"],
-            "allowTrot": cfg["allowTrot"],
+            "allowTrot": False,
         },
     }
 

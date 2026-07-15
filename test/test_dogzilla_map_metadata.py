@@ -26,6 +26,13 @@ class DogzillaMapMetadataTests(unittest.TestCase):
             pgm_path.write_bytes(b"P5\n2 2\n255\n\x00\x00\x00\x00")
             metadata_path.write_text(json.dumps({
                 "id": "scanner-map",
+                "resumePose": {
+                    "frame": "map",
+                    "x": 1.25,
+                    "y": -0.75,
+                    "yaw": 0.4,
+                    "capturedAt": "2026-07-12T12:00:00Z",
+                },
                 "yaml": yaml_path.name,
                 "pgm": pgm_path.name,
                 "artifacts": {
@@ -37,6 +44,7 @@ class DogzillaMapMetadataTests(unittest.TestCase):
             result = map_metadata.read_active_map_metadata(metadata_path, yaml_path)
             self.assertTrue(result["available"])
             self.assertEqual(result["pbstream"], "")
+            self.assertEqual(result["resumePose"]["x"], 1.25)
 
             pgm_path.write_bytes(pgm_path.read_bytes() + b"tampered")
             result = map_metadata.read_active_map_metadata(metadata_path, yaml_path)

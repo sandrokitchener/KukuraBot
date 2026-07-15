@@ -11,6 +11,7 @@ import {
   readManualForwardScale,
   readManualBarkTriggerPressed,
   readManualGamepadVector,
+  readManualTouchVector,
   shouldSendManualCommand,
   shouldSendVector,
   updateManualBarkTriggerState,
@@ -30,6 +31,7 @@ import {
   headingRadiansToCssRotation,
   lidarPointToMapPose,
   occupancyGridCellToRGBA,
+  panMapView,
   poseToMapPosition,
   projectLidarPointToEgoView,
 } from '../public/robot-map.js'
@@ -203,6 +205,13 @@ function createManualControlElements() {
     dataset: {},
     style: { setProperty() {} },
   })
+  const touchStick = () => ({
+    dataset: {},
+    style: { setProperty() {} },
+    setAttribute() {},
+    setPointerCapture() {},
+    releasePointerCapture() {},
+  })
   return {
     panel: { dataset: {} },
     chip: { textContent: '' },
@@ -224,6 +233,9 @@ function createManualControlElements() {
       removeEventListener() {},
     },
     speedValue: { textContent: '' },
+    touchControls: { hidden: true, setAttribute() {} },
+    touchLeftStick: touchStick(),
+    touchRightStick: touchStick(),
   }
 }
 
@@ -293,6 +305,158 @@ test('manual control resets forward ramp when forward input is released', () => 
   assert.equal(next.gait, 'walk')
 })
 
+test('manual control maps left-stick strafe to slow crab gait', () => {
+  const state = { forwardRampStartedAt: 1000 }
+  const motion = applyForwardRamp({ forward: 0.6, strafe: -0.5, turn: 0 }, state, 1500)
+
+  assert.equal(motion.vector.strafe, -0.5)
+  assert.equal(motion.vector.forward, 0.6)
+  assert.equal(motion.gait, 'trot')
+  assert.equal(motion.pace, 'slow')
+})
+
+test('manual touch sticks match gamepad vector semantics', () => {
+  assert.deepEqual(
+    readManualTouchVector({ left: { x: 0.5, y: -1 }, right: { x: -0.75 } }),
+    { forward: 1, strafe: -0.5, turn: 0.75 },
+  )
+})
+
+test('manual control disables and sends neutral on lifecycle loss', async () => {
+  const originalWindow = globalThis.window
+  const originalNavigator = globalThis.navigator
+  let frameCallback = null
+  const calls = []
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      requestAnimationFrame(callback) {
+        frameCallback = callback
+        return 1
+      },
+      cancelAnimationFrame() {},
+    },
+  })
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      getGamepads: () => [{ connected: true, index: 0, id: 'Test Pad', axes: [0, -1, 0], buttons: [] }],
+      sendBeacon: () => true,
+    },
+  })
+
+  try {
+    const controller = createManualControlController({
+      elements: createManualControlElements(),
+      apiFetch: async (url, options) => {
+        calls.push({ url, body: JSON.parse(options.body) })
+        return { ok: true, json: async () => ({ dispatch: { status: 'idle' }, preview: { canonicalPlan: { params: {} } } }) }
+      },
+      toApiUrl: (path) => path,
+      getRuntimeConfig: () => ({ robotRuntime: { dryRun: false } }),
+      isRealRobotTargetActive: () => true,
+      formatError: (error) => error.message,
+      setStatus: () => {},
+    })
+
+    controller.enable()
+    controller.handleVisibilityChange(true)
+    await Promise.resolve()
+    assert.equal(controller.isEnabled(), false)
+    assert.equal(calls.at(-1).body.forward, 0)
+    assert.equal(calls.at(-1).body.strafe, 0)
+    assert.equal(calls.at(-1).body.turn, 0)
+    assert.equal(frameCallback !== null, true)
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: originalNavigator })
+  }
+})
+
+test('manual touch controller combines two sticks and neutralizes on final release', async () => {
+  const originalWindow = globalThis.window
+  const originalNavigator = globalThis.navigator
+  let frameCallback = null
+  const calls = []
+  const elements = createManualControlElements()
+  const leftStick = elements.touchLeftStick
+  const rightStick = elements.touchRightStick
+  leftStick.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 })
+  rightStick.getBoundingClientRect = () => ({ left: 100, top: 0, width: 100, height: 100 })
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      requestAnimationFrame(callback) {
+        frameCallback = callback
+        return 1
+      },
+      cancelAnimationFrame() {},
+    },
+  })
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { getGamepads: () => [], sendBeacon: () => true },
+  })
+
+  try {
+    const controller = createManualControlController({
+      elements,
+      apiFetch: async (url, options) => {
+        calls.push({ url, body: JSON.parse(options.body) })
+        return { ok: true, json: async () => ({ dispatch: { status: 'idle' }, preview: { canonicalPlan: { params: {} } } }) }
+      },
+      toApiUrl: (path) => path,
+      getRuntimeConfig: () => ({ robotRuntime: { dryRun: false } }),
+      isRealRobotTargetActive: () => true,
+      formatError: (error) => error.message,
+      setStatus: () => {},
+    })
+
+    controller.enableTouch()
+    controller.handleTouchPointerDown({
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 50,
+      currentTarget: leftStick,
+      preventDefault() {},
+    }, 'left')
+    controller.handleTouchPointerDown({
+      pointerId: 2,
+      pointerType: 'touch',
+      clientX: 125,
+      clientY: 50,
+      currentTarget: rightStick,
+      preventDefault() {},
+    }, 'right')
+    frameCallback?.()
+    await Promise.resolve()
+    assert.equal(calls.some(({ body }) => body.source === 'touch'), true)
+
+    controller.handleTouchPointerUp({ pointerId: 1, currentTarget: leftStick })
+    assert.equal(controller.isEnabled(), true)
+    controller.handleTouchPointerUp({ pointerId: 2, currentTarget: rightStick })
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.equal(controller.isEnabled(), false)
+    assert.deepEqual(calls.at(-1).body, {
+      forward: 0,
+      strafe: 0,
+      turn: 0,
+      source: 'touch-pointer-up',
+      gamepadId: '',
+      gamepadIndex: null,
+      gait: 'walk',
+      pace: 'normal',
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: originalNavigator })
+  }
+})
+
 test('manual forward gait slider scales positive forward motion', () => {
   assert.equal(readManualForwardScale('45'), 0.45)
   assert.equal(readManualForwardScale('0.35'), 0.35)
@@ -323,13 +487,14 @@ test('manual control sends when forward ramp changes gait stage', () => {
   ), true)
 })
 
-test('manual control keeps non-forward movement in normal trot mode', () => {
+test('manual control strafes from a stopped position', () => {
   const state = { forwardRampStartedAt: 1000 }
   const strafe = applyForwardRamp({ forward: 0, strafe: 0.6, turn: 0 }, state, 1200)
 
   assert.equal(strafe.vector.forward, 0)
+  assert.equal(strafe.vector.strafe, 0.6)
   assert.equal(strafe.gait, 'trot')
-  assert.equal(strafe.pace, 'normal')
+  assert.equal(strafe.pace, 'slow')
   assert.equal(state.forwardRampStartedAt, 0)
 })
 
@@ -467,12 +632,20 @@ test('poseToMapPosition returns null for invalid pose', () => {
   assert.equal(poseToMapPosition({}, 4), null)
 })
 
-test('robot map route trail breaks across charger origin reset', () => {
+test('panMapView converts Android viewport drag pixels into map coordinates', () => {
+  assert.deepEqual(
+    panMapView({ centerX: 5, centerY: 2, rangeMeters: 10, rangeYMeters: 5 }, 40, -20, 400, 200),
+    { centerX: 3, centerY: 1, rangeMeters: 10, rangeYMeters: 5 },
+  )
+  assert.equal(panMapView(null, 1, 1, 400, 200), null)
+})
+
+test('robot map route segments break across legacy frame context changes', () => {
   const segments = getRobotMapRouteSegments([
     { frame: 'map', x: 1, y: 1, theta: 0, seq: 1 },
     { frame: 'map', x: 1.1, y: 1.1, theta: 0, seq: 2 },
-    { frame: 'app_map', x: 0, y: 0, theta: 0, originLabel: 'charger_origin', originSavedAt: '2026-06-21T00:41:48.567Z', seq: 3 },
-    { frame: 'app_map', x: 0.1, y: 0.05, theta: 0, originLabel: 'charger_origin', originSavedAt: '2026-06-21T00:41:48.567Z', seq: 4 },
+    { frame: 'app_map', x: 0, y: 0, theta: 0, originLabel: 'legacy_origin', originSavedAt: '2026-06-21T00:41:48.567Z', seq: 3 },
+    { frame: 'app_map', x: 0.1, y: 0.05, theta: 0, originLabel: 'legacy_origin', originSavedAt: '2026-06-21T00:41:48.567Z', seq: 4 },
   ])
 
   assert.equal(segments.length, 2)
@@ -681,7 +854,7 @@ test("createRobotMapRenderer exposes callable setPoseTrust", () => {
   renderer.setPoseTrust(undefined)
 })
 
-test('robot map keeps recent pose marker through transient missing pose', () => {
+test('robot map hides pose until trust is proven, then keeps recent trusted pose briefly', () => {
   const dot = {
     style: {
       setProperty(name, value) {
@@ -702,10 +875,15 @@ test('robot map keeps recent pose marker through transient missing pose', () => 
     formatEventTimestamp: () => 'now',
   })
 
-  renderer.renderDot({
+  const robot = {
     pose: { frame: 'map', x: 1, y: 2, theta: 0.25 },
     receivedAt: new Date().toISOString(),
-  })
+  }
+  renderer.renderDot(robot)
+  assert.equal(dot.style.opacity, '0')
+
+  renderer.setPoseTrust(true)
+  renderer.renderDot(robot)
   assert.equal(dot.style.opacity, '1')
 
   renderer.hideDot()
@@ -809,11 +987,35 @@ test('buildNavChainComponents keeps raw LiDAR separate from localization and fil
   assert.equal(summarizeNavChain(components), 'Blocked: active map cannot start Cartographer localization')
 })
 
+test('buildNavChainComponents rejects fresh TF when global localization is untrusted', () => {
+  const components = buildNavChainComponents({
+    navigation: {
+      blockers: ['Robot location is untrusted; relocalization required'],
+      actionAvailable: true,
+      odomReady: true,
+      odomTfAvailable: true,
+      lifecycleActive: true,
+      scanReady: true,
+    },
+    sensors: {
+      lidar: { ok: true, topic: '/scan' },
+      localization: {
+        ok: true,
+        waypointSafe: true,
+        mapPose: { frame: 'map', x: 0, y: 0, theta: 0 },
+      },
+    },
+  })
+
+  const localization = components.find((component) => component.id === 'localization')
+  assert.equal(localization.status, 'fail')
+  assert.match(localization.detail, /untrusted/)
+})
+
 test('dangerous maintenance actions require confirmation with consequence text', () => {
   assert.ok(isDangerousConnectionAction('sync-bridges'))
   assert.ok(isDangerousConnectionAction('stop-vendor-app'))
   assert.ok(isDangerousConnectionAction('stop-bridges'))
-  assert.ok(isDangerousConnectionAction('capture-map-origin'))
   assert.ok(isDangerousConnectionAction('start-map-pose-mapping'))
   assert.ok(isDangerousConnectionAction('save-map-pose'))
   assert.ok(isDangerousConnectionAction('start-autonomous-mapping'))

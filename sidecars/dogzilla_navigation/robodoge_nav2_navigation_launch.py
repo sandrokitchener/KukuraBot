@@ -43,6 +43,7 @@ def generate_launch_description():
             "behavior_server",
             "bt_navigator",
             "velocity_smoother",
+            "collision_monitor",
         ]
         nodes = []
         if not is_mapping_mode:
@@ -128,7 +129,18 @@ def generate_launch_description():
                     respawn_delay=2.0,
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
-                    remappings=remappings + [("cmd_vel", "cmd_vel_nav"), ("cmd_vel_smoothed", "cmd_vel")],
+                    remappings=remappings + [("cmd_vel", "cmd_vel_nav"), ("cmd_vel_smoothed", "cmd_vel_raw")],
+                ),
+                Node(
+                    package="nav2_collision_monitor",
+                    executable="collision_monitor",
+                    name="collision_monitor",
+                    output="screen",
+                    respawn=use_respawn,
+                    respawn_delay=2.0,
+                    parameters=[configured_params],
+                    arguments=["--ros-args", "--log-level", log_level],
+                    remappings=remappings,
                 ),
                 Node(
                     package="nav2_lifecycle_manager",
