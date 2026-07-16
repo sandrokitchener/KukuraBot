@@ -462,3 +462,51 @@ select {
 .battery-meter[data-state='voltage'] .battery-meter-fill {
   background: #c7822d;
 }
+
+/* Command column presentation */
+.intro-head { align-items: center; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.intro-head .eyebrow { color: var(--ink-soft); letter-spacing: 0.08em; }
+.brand-title { min-height: 42px; }
+.brand-title-logo { width: min(100%, 310px); max-height: 54px; }
+.mascot-chip { width: 46px; height: 38px; background: #11110f; }
+.mascot-chip img { width: 32px; height: 23px; }
+.chat-form { flex: 0 0 auto; grid-template-rows: auto minmax(118px, auto) auto; gap: 9px; }
+.chat-form label { color: var(--ink-soft); letter-spacing: 0.08em; }
+.chat-form textarea { min-height: 118px; background: #f2efe8; }
+.chat-form-actions { grid-template-columns: minmax(0, 1fr) auto; }
+.chat-form-actions #send-button { min-height: 46px; background: var(--accent); }
+.manual-control-panel { flex: 0 0 auto; order: initial; padding: 14px 0 0; border-top: 1px solid var(--line); background: transparent; }
+.manual-control-head h2 { font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.manual-control-actions { margin-top: 8px; }
+.manual-control-actions button { min-height: 38px; }
+.manual-control-actions button:first-child { background: #fffdf8; color: var(--ink); border-color: var(--line-strong); }
+.manual-control-actions button:first-child:hover:not(:disabled) { border-color: var(--accent); background: #fff5ef; }
+.speech-panel { flex: 0 0 150px; align-self: stretch; padding-top: 14px; }
+.speech-preview { min-height: 58px; background: #f2efe8; }
+
+.execution-timeline { flex: 0 0 auto; padding: 14px 0 2px; border-top: 1px solid var(--line); }
+.execution-timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.execution-timeline-head h2 { margin: 0; font-size: 0.82rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.execution-timeline-status { color: var(--ink-soft); font-size: 0.72rem; }
+.execution-timeline-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.execution-step { position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 7px; min-width: 0; color: var(--ink-faint); }
+.execution-step:not(:last-child)::after { content: ""; position: absolute; top: 5px; left: 13px; right: -5px; height: 1px; background: var(--line); }
+.execution-step-marker { position: relative; z-index: 1; width: 10px; height: 10px; margin-top: 1px; border: 2px solid var(--line-strong); border-radius: 50%; background: #fffdf8; }
+.execution-step strong, .execution-step small { display: block; min-width: 0; overflow-wrap: anywhere; }
+.execution-step strong { color: var(--ink-soft); font-size: 0.68rem; line-height: 1.2; }
+.execution-step small { margin-top: 4px; color: var(--ink-faint); font-size: 0.62rem; line-height: 1.25; }
+.execution-step[data-state='active'] .execution-step-marker { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px rgba(241, 90, 36, 0.12); }
+.execution-step[data-state='active'] strong, .execution-step[data-state='done'] strong { color: var(--ink); }
+.execution-step[data-state='done'] .execution-step-marker { border-color: #16855b; background: #16855b; }
+.execution-step[data-state='error'] .execution-step-marker { border-color: var(--danger); background: var(--danger); }
+.execution-step[data-state='error'] strong, .execution-step[data-state='error'] small { color: var(--danger); }
+.status { padding: 10px 0 0; }
+
+.diagnostics-detail-panel { display: grid; gap: 8px; padding: 14px 0 0; border-top: 1px solid var(--line); }
+.diagnostics-detail-note { color: var(--ink-faint); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.diagnostics-detail-panel .output-box { min-height: 150px; max-height: 280px; background: #171513; color: #f7f1e8; }
+
+.robot-identity-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.robot-identity-grid > div:nth-child(3) { display: none; }
+.robot-nav-chain-row[hidden], .robot-nav-chain-detail[hidden] { display: none !important; }
+.robot-state-panel { padding-bottom: 8px; }

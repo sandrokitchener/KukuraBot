@@ -479,6 +479,24 @@
   color: #938a80;
 }
 
+.robot-map-head h2 { font-size: 0.9rem; letter-spacing: 0.07em; text-transform: uppercase; }
+.robot-map-panel .robot-map-head { padding-bottom: 4px; }
+.robot-map { min-height: 300px; border-color: #cbc9c2; border-radius: 8px; }
+.robot-map-panel { min-height: 360px; }
+.robot-map-track { display: none !important; }
+.robot-map-meta { min-height: 24px; color: var(--ink-soft); font-size: 0.78rem; }
+
+.map-workflow-panel { border-color: var(--line); border-radius: 8px; background: #f4f1ea; }
+.map-workflow-head { min-height: 38px; padding: 8px 12px; background: #ebe7df; }
+.workflow-tabs { display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); }
+.workflow-tab { min-height: 36px; padding: 7px 12px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--ink-soft); font-size: 0.74rem; }
+.workflow-tab:hover, .workflow-tab:focus-visible { background: #fff8f1; color: var(--ink); }
+.workflow-tab.is-active { border-bottom-color: var(--accent); color: var(--ink); background: #fffdf8; }
+.workflow-tab-panel[hidden] { display: none; }
+.map-workflow-steps { padding: 8px 10px 10px; }
+.workflow-tab-panel { min-width: 0; }
+.workflow-tab-panel .map-workflow-step { background: #fffdf8; }
+
 .camera-refresh-button {
   min-width: 72px;
   min-height: 30px;

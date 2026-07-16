@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Questing Beast Operator Console — UI Direction</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #11110f;
+      --coal: #1a1a17;
+      --paper: #f4f1ea;
+      --panel: #fffdf8;
+      --line: #d8d3c8;
+      --muted: #6d6a63;
+      --soft: #e9e5dc;
+      --orange: #f15a24;
+      --orange-dark: #cf4212;
+      --green: #16855b;
+      --red: #c92a1d;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding-left: 88px;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(17, 17, 15, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(17, 17, 15, .035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      font-family: var(--sans);
+    }
+
+    button, textarea, input { font: inherit; }
+    button { cursor: pointer; }
+
+    .skip-link {
+      position: fixed;
+      z-index: 20;
+      top: 8px;
+      left: 8px;
+      transform: translateY(-150%);
+      padding: 10px 14px;
+      color: white;
+      background: var(--ink);
+    }
+
+    .skip-link:focus { transform: none; }
+
+    .nav-rail {
+      position: fixed;
+      z-index: 10;
+      inset: 0 auto 0 0;
+      display: flex;
+      width: 88px;
+      flex-direction: column;
+      align-items: stretch;
+      color: #fff;
+      background: #0e0e0d;
+      box-shadow: 8px 0 30px rgba(17, 17, 15, .14);
+    }
+
+    .rail-mark {
+      display: grid;
+      min-height: 86px;
+      place-items: center;
+      border-bottom: 1px solid #2d2c29;
+    }
+
+    .rail-mark img { width: 38px; height: 38px; border-radius: 7px; }
+    .rail-nav { display: grid; gap: 3px; padding: 14px 8px; }
+    .rail-nav:last-child { margin-top: auto; border-top: 1px solid #2d2c29; }
+
+    .rail-button {
+      display: grid;
+      min-height: 62px;
+      place-items: center;
+      gap: 4px;
+      padding: 7px 2px;
+      border: 0;
+      border-radius: 6px;
+      color: #aaa79f;
+      background: transparent;
+      font: 650 9px/1 var(--sans);
+    }
+
+    .rail-button:hover, .rail-button[aria-current="page"] { color: #fff; background: #1e1d1a; }
+    .rail-button[aria-current="page"] { color: #ff8153; box-shadow: inset 3px 0 var(--orange); }
+    .rail-icon { font: 800 17px/1 var(--mono); letter-spacing: -.08em; }
+    .rail-pi { color: #45d394; text-shadow: 0 0 10px rgba(69, 211, 148, .5); }
+
+    .review-chip {
+      padding: 7px 9px;
+      border: 1px solid #f2c3b1;
+      border-radius: 999px;
+      color: var(--orange-dark);
+      background: #fff5f0;
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto;
+      align-items: center;
+      gap: 20px;
+      min-height: 68px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 253, 248, .94);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand, .top-actions, .status-cluster, .map-tools, .tab-list, .command-actions {
+      display: flex;
+      align-items: center;
+    }
+
+    .brand { gap: 12px; }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 7px;
+    }
+
+    .brand-copy strong {
+      display: block;
+      font-size: 14px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .brand-copy span {
+      color: var(--muted);
+      font: 600 10px/1.4 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .top-actions { gap: 8px; }
+
+    .utility-button, .view-button, .tab-button, .map-tool, .secondary-button {
+      min-height: 40px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .utility-button:hover, .secondary-button:hover, .map-tool:hover { border-color: var(--ink); }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: minmax(330px, .72fr) minmax(650px, 1.62fr);
+      gap: 14px;
+      min-height: calc(100vh - 100px);
+      margin: 0;
+      padding: 14px;
+    }
+
+    .command-column, .robot-column {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgba(34, 29, 20, .08);
+    }
+
+    .command-column {
+      display: flex;
+      flex-direction: column;
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    .identity {
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .identity img {
+      width: 46px;
+      height: 46px;
+      border-radius: 10px;
+    }
+
+    .identity h1 {
+      margin: 0 0 4px;
+      font-size: clamp(20px, 2vw, 29px);
+      line-height: 1;
+      letter-spacing: -.04em;
+    }
+
+    .identity p { margin: 0; color: var(--muted); font: 11px/1.3 var(--mono); }
+
+    .online-pill, .mini-pill, .layer-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 999px;
+      font: 700 10px/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .online-pill { padding: 8px 9px; color: var(--green); border: 1px solid #9acdb8; background: #effaf5; }
+    .online-pill::before { width: 7px; height: 7px; content: ""; border-radius: 50%; background: #35c987; box-shadow: 0 0 0 4px rgba(53, 201, 135, .12); }
+
+    .section { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .section:last-child { border-bottom: 0; }
+
+    .section-kicker, .eyebrow {
+      margin: 0;
+      font: 750 10px/1 var(--mono);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .section-kicker { color: var(--muted); }
+    .eyebrow { color: var(--muted); }
+
+    .command-box {
+      width: 100%;
+      min-height: 96px;
+      margin-top: 12px;
+      padding: 14px;
+      resize: vertical;
+      border: 1px solid #c9c4b9;
+      border-radius: 8px;
+      outline: 0;
+      color: var(--ink);
+      background: #fff;
+      line-height: 1.5;
+    }
+
+    .command-box:focus { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(241, 90, 36, .18); }
+    .command-box::placeholder { color: #8b877e; }
+
+    .command-actions { gap: 8px; margin-top: 10px; }
+
+    .primary-button, .stop-button {
+      min-height: 44px;
+      border-radius: 7px;
+      font-weight: 850;
+    }
+
+    .primary-button {
+      flex: 1;
+      border: 1px solid var(--orange);
+      color: white;
+      background: var(--orange);
+      box-shadow: 0 8px 22px rgba(241, 90, 36, .18);
+    }
+
+    .primary-button:hover { background: var(--orange-dark); }
+
+    .stop-button {
+      min-width: 94px;
+      border: 1px solid #e0a39a;
+      color: var(--red);
+      background: #fff;
+    }
+
+    .stop-button:hover { color: #fff; background: var(--red); border-color: var(--red); }
+
+    .manual-panel { background: #f2efe8; }
+    .manual-head, .manual-actions, .voice-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .manual-actions { justify-content: flex-start; margin-top: 11px; }
+    .manual-actions .secondary-button { min-height: 36px; background: #fff; }
+    .manual-speed { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); font: 700 10px var(--mono); }
+    .manual-speed input { width: 100%; accent-color: var(--orange); }
+    .axis-row { display: flex; gap: 6px; margin-top: 10px; }
+    .axis-chip { flex: 1; padding: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font: 700 9px var(--mono); text-align: center; }
+    .axis-chip strong { margin-left: 4px; color: var(--ink); }
+
+    .voice-chip { padding: 6px 8px; border-radius: 999px; color: var(--green); background: #e9f7f0; font: 700 9px var(--mono); text-transform: uppercase; }
+    .voice-ready { display: flex; align-items: center; gap: 7px; margin: 11px 0 0; color: var(--green); font: 700 10px var(--mono); }
+    .voice-ready::before { width: 7px; height: 7px; content: ""; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(22, 133, 91, .12); }
+    .voice-transcript { min-height: 48px; margin: 9px 0 0; padding: 10px; border: 1px solid var(--line); background: #f2efe8; color: var(--ink); font: 11px/1.45 var(--mono); white-space: pre-wrap; }
+
+    .timeline {
+      position: relative;
+      display: grid;
+      gap: 0;
+      margin-top: 13px;
+    }
+
+    .timeline::before {
+      position: absolute;
+      top: 13px;
+      bottom: 13px;
+      left: 10px;
+      width: 1px;
+      content: "";
+      background: var(--line);
+    }
+
+    .timeline-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 10px;
+      padding: 0 0 14px;
+    }
+
+    .timeline-step:last-child { padding-bottom: 0; }
+
+    .timeline-dot {
+      z-index: 1;
+      width: 21px;
+      height: 21px;
+      border: 2px solid #77746c;
+      border-radius: 50%;
+      background: var(--panel);
+    }
+
+    .timeline-step.done .timeline-dot { border-color: #3dc98b; background: #3dc98b; box-shadow: inset 0 0 0 5px var(--panel); }
+    .timeline-step.active .timeline-dot { border-color: var(--orange); box-shadow: inset 0 0 0 5px var(--panel), 0 0 0 4px rgba(241, 90, 36, .13); }
+
+    .timeline-copy strong { display: block; font-size: 12px; }
+    .timeline-copy span { color: var(--muted); font-size: 11px; }
+    .timeline-time { color: #8b877e; font: 10px/1.5 var(--mono); }
+
+    .history { flex: 1; min-height: 180px; }
+
+    .history-head { display: flex; align-items: center; justify-content: space-between; }
+    .text-button { padding: 0; border: 0; color: var(--muted); background: transparent; font: 10px var(--mono); text-decoration: underline; }
+
+    .message {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-left: 2px solid #b5b0a5;
+      background: #f4f1ea;
+    }
+
+    .message.robot { border-left-color: var(--orange); }
+    .message-meta { display: flex; justify-content: space-between; color: #8e8b83; font: 9px var(--mono); text-transform: uppercase; }
+    .message p { margin: 8px 0 0; font-size: 12px; line-height: 1.45; }
+
+    .robot-column { display: flex; flex-direction: column; }
+
+    .robot-status {
+      display: grid;
+      grid-template-columns: minmax(150px, 1.2fr) repeat(4, minmax(105px, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .status-cell { min-width: 0; padding: 15px 16px; border-right: 1px solid var(--line); }
+    .status-cell:last-child { border-right: 0; }
+    .status-cell .label { display: block; margin-bottom: 7px; color: var(--muted); font: 700 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .status-cell strong { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .status-cell code { font: 700 11px/1.45 var(--mono); }
+
+    .robot-name-row { display: flex; align-items: center; gap: 9px; }
+    .robot-avatar { display: grid; width: 31px; height: 31px; place-items: center; border-radius: 50%; color: #fff; background: var(--ink); font: 800 10px var(--mono); }
+    .task-accent { color: var(--orange); }
+    .status-cluster { gap: 7px; }
+    .battery-icon { position: relative; width: 24px; height: 12px; border: 2px solid var(--ink); border-radius: 2px; }
+    .battery-icon::after { position: absolute; top: 2px; right: -5px; width: 3px; height: 5px; content: ""; background: var(--ink); }
+    .battery-icon span { display: block; width: 71%; height: 100%; background: var(--green); }
+
+    .visual-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .visual-title { display: flex; align-items: baseline; gap: 9px; }
+    .visual-title h2 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
+    .visual-title span { color: var(--green); font: 700 9px var(--mono); text-transform: uppercase; }
+
+    .map-tools { gap: 6px; }
+    .view-button { min-height: 34px; padding: 0 11px; }
+    .view-button[aria-pressed="true"] { color: white; border-color: var(--ink); background: var(--ink); }
+    .map-tool { min-width: 34px; min-height: 34px; padding: 0; }
+
+    .viewport-shell { padding: 12px 14px 0; }
+
+    .map-viewport {
+      position: relative;
+      min-height: clamp(410px, 53vh, 650px);
+      overflow: hidden;
+      border: 1px solid #bdb8ac;
+      background: #d8d5cd;
+    }
+
+    .map-viewport::after {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      background: repeating-linear-gradient(0deg, transparent 0 39px, rgba(17, 17, 15, .055) 40px), repeating-linear-gradient(90deg, transparent 0 39px, rgba(17, 17, 15, .055) 40px);
+      mix-blend-mode: multiply;
+    }
+
+    .map-svg { display: block; width: 100%; height: 100%; min-height: inherit; }
+
+    .layer-pills { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; gap: 5px; }
+    .layer-pill { padding: 7px 9px; color: #37352f; border: 1px solid rgba(17, 17, 15, .18); background: rgba(255, 253, 248, .86); backdrop-filter: blur(6px); }
+    .layer-pill.live::before { width: 6px; height: 6px; content: ""; border-radius: 50%; background: var(--green); }
+
+    .map-legend {
+      position: absolute;
+      z-index: 2;
+      right: 12px;
+      bottom: 12px;
+      display: flex;
+      gap: 14px;
+      padding: 8px 10px;
+      border: 1px solid rgba(17, 17, 15, .18);
+      color: #37352f;
+      background: rgba(255, 253, 248, .9);
+      font: 700 9px var(--mono);
+      text-transform: uppercase;
+    }
+
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 14px; height: 3px; background: var(--orange); }
+    .legend-swatch.robot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 3px rgba(241, 90, 36, .42); }
+
+    .controls { margin: 12px 14px 14px; border: 1px solid var(--line); }
+    .tab-list { gap: 0; border-bottom: 1px solid var(--line); background: #f0ede5; }
+
+    .tab-button {
+      position: relative;
+      min-height: 44px;
+      border: 0;
+      border-right: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      font-family: var(--mono);
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .tab-button[aria-selected="true"] { color: var(--orange-dark); background: var(--panel); }
+    .tab-button[aria-selected="true"]::after { position: absolute; right: 12px; bottom: -1px; left: 12px; height: 3px; content: ""; background: var(--orange); }
+
+    .tab-panel { display: none; padding: 14px; }
+    .tab-panel.active { display: grid; grid-template-columns: minmax(170px, 1fr) 2fr auto; gap: 12px; align-items: center; }
+    .tab-panel h3 { margin: 0 0 4px; font-size: 13px; }
+    .tab-panel p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .workflow-state { display: flex; align-items: center; gap: 8px; color: var(--green); font: 700 10px var(--mono); }
+    .workflow-state::before { width: 8px; height: 8px; content: ""; border-radius: 50%; background: currentColor; }
+    .panel-actions { display: flex; gap: 7px; justify-content: flex-end; }
+    .panel-actions .primary-button { flex: none; padding: 0 16px; }
+
+    .camera-placeholder { display: none; min-height: clamp(410px, 53vh, 650px); place-items: center; color: #c8c4bb; background: #181817; font: 700 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .robot-column[data-view="camera"] .map-viewport { display: none; }
+    .robot-column[data-view="camera"] .camera-placeholder { display: grid; }
+    .robot-column[data-view="camera"] .controls { display: none; }
+
+    button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(241, 90, 36, .4); outline-offset: 2px; }
+
+    @media (max-width: 1100px) {
+      .dashboard { grid-template-columns: 1fr; }
+      .command-column { display: grid; grid-template-columns: 1fr 1fr; }
+      .identity { grid-column: 1 / -1; }
+      .history { min-height: 0; }
+      .robot-status { grid-template-columns: repeat(3, 1fr); }
+      .status-cell { border-bottom: 1px solid var(--line); }
+    }
+
+    @media (max-width: 700px) {
+      body { padding-left: 64px; }
+      .nav-rail { width: 64px; }
+      .rail-mark { min-height: 72px; }
+      .rail-button { min-height: 56px; }
+      .rail-button span:last-child { font-size: 8px; }
+      .topbar { grid-template-columns: 1fr; }
+      .top-actions { overflow-x: auto; }
+      .dashboard { padding: 8px; }
+      .command-column { display: flex; }
+      .robot-status { grid-template-columns: 1fr 1fr; }
+      .tab-panel.active { grid-template-columns: 1fr; }
+      .panel-actions { justify-content: flex-start; flex-wrap: wrap; }
+      .map-viewport, .camera-placeholder { min-height: 360px; }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .command-column, .robot-column { animation: reveal .45s cubic-bezier(.2, .75, .3, 1) both; }
+      .robot-column { animation-delay: .08s; }
+      @keyframes reveal { from { opacity: 0; transform: translateY(8px); } }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#dashboard">Skip to operator console</a>
+
+  <aside class="nav-rail" aria-label="Primary console navigation">
+    <div class="rail-mark"><img src="../public/assets/questing-beast-qb-mark.png" alt="Questing Beast" /></div>
+    <nav class="rail-nav" aria-label="Console views">
+      <button class="rail-button" type="button" aria-current="page"><span class="rail-icon">⌁</span><span>Console</span></button>
+      <button class="rail-button" type="button"><span class="rail-icon">▦</span><span>Map</span></button>
+      <button class="rail-button" type="button"><span class="rail-icon">◉</span><span>Camera</span></button>
+      <button class="rail-button" type="button"><span class="rail-icon">◇</span><span>Waypoints</span></button>
+      <button class="rail-button" type="button"><span class="rail-icon">▣</span><span>Saved shots</span></button>
+      <button class="rail-button" type="button"><span class="rail-icon">≡</span><span>Log history</span></button>
+      <button class="rail-button" type="button"><span class="rail-icon rail-pi">●</span><span>CPU status</span></button>
+    </nav>
+    <nav class="rail-nav" aria-label="Console shell">
+      <button class="rail-button" type="button"><span class="rail-icon">‹</span><span>Collapse</span></button>
+    </nav>
+  </aside>
+
+  <header class="topbar">
+    <div class="brand">
+      <img src="../public/assets/questing-beast-qb-mark.png" alt="" />
+      <div class="brand-copy">
+        <strong>Questing Beast</strong>
+        <span>ROS 2 operator console · dogzilla_direct</span>
+      </div>
+    </div>
+    <nav class="top-actions" aria-label="Operator utilities">
+      <span class="review-chip">Concept · not connected</span>
+      <button class="utility-button" type="button">Diagnostics</button>
+      <button class="utility-button" type="button">Help</button>
+      <button class="utility-button" type="button">Settings</button>
+    </nav>
+  </header>
+
+  <main id="dashboard" class="dashboard">
+    <section class="command-column" aria-labelledby="robot-title">
+      <header class="identity">
+        <img src="../public/assets/questing-beast-qb-mark.png" alt="Questing Beast mark" />
+        <div>
+          <h1 id="robot-title">Questing Beast</h1>
+          <p>QB-2401 · quadruped inspection unit</p>
+        </div>
+        <span class="online-pill">Online</span>
+      </header>
+
+      <section class="section" aria-labelledby="command-heading">
+        <p id="command-heading" class="section-kicker">Command</p>
+        <label for="command-input" class="sr-only" hidden>Natural language robot command</label>
+        <textarea id="command-input" class="command-box" placeholder="Tell Questing Beast what to do…">Go to the living room</textarea>
+        <div class="command-actions">
+          <button class="primary-button" type="button">Send command →</button>
+          <button class="stop-button" type="button">Stop</button>
+        </div>
+      </section>
+
+      <section class="section manual-panel" aria-labelledby="manual-heading">
+        <div class="manual-head">
+          <p id="manual-heading" class="section-kicker">Manual control</p>
+          <span class="voice-chip">Gamepad off</span>
+        </div>
+        <div class="manual-actions">
+          <button class="secondary-button" type="button">Enable gamepad</button>
+          <button class="secondary-button" type="button">Neutral</button>
+        </div>
+        <label class="manual-speed">Forward gait <input type="range" min="20" max="100" value="45" /> <strong>45%</strong></label>
+        <div class="axis-row" aria-label="Manual control input">
+          <span class="axis-chip">FWD <strong>0.00</strong></span>
+          <span class="axis-chip">STRAFE <strong>0.00</strong></span>
+          <span class="axis-chip">TURN <strong>0.00</strong></span>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="execution-heading">
+        <p id="execution-heading" class="section-kicker">Mission execution · CMD-184</p>
+        <div class="timeline" aria-label="Command execution timeline">
+          <div class="timeline-step done">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <div class="timeline-copy"><strong>Intent parsed</strong><span>locomotion.goto · living_room</span></div>
+            <span class="timeline-time">10:24:15</span>
+          </div>
+          <div class="timeline-step done">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <div class="timeline-copy"><strong>Plan prepared</strong><span>Nav2 goal accepted · localization trusted</span></div>
+            <span class="timeline-time">10:24:16</span>
+          </div>
+          <div class="timeline-step active">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <div class="timeline-copy"><strong>Navigating</strong><span>Pose updates received · motion confirmed</span></div>
+            <span class="timeline-time">00:21</span>
+          </div>
+          <div class="timeline-step">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <div class="timeline-copy"><strong>Completion</strong><span>Awaiting Nav2 result</span></div>
+            <span class="timeline-time">—</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section history" aria-labelledby="history-heading">
+        <div class="history-head">
+          <p id="history-heading" class="section-kicker">Conversation</p>
+          <button class="text-button" type="button">Clear history</button>
+        </div>
+        <article class="message">
+          <div class="message-meta"><span>Operator</span><time>10:24:15</time></div>
+          <p>Go to the living room.</p>
+        </article>
+        <article class="message robot">
+          <div class="message-meta"><span>Questing Beast</span><time>10:24:16</time></div>
+          <p>Goal accepted. Navigating to Living Room.</p>
+        </article>
+      </section>
+
+      <section class="section voice-panel" aria-labelledby="voice-heading">
+        <div class="voice-head">
+          <p id="voice-heading" class="section-kicker">Voice input</p>
+          <span class="voice-chip">Browser · Moonshine</span>
+        </div>
+        <p class="voice-ready">Listening for activation phrase</p>
+        <pre class="voice-transcript" aria-live="polite">Live transcript: “go to the living room”</pre>
+      </section>
+    </section>
+
+    <section class="robot-column" data-view="map" aria-label="Robot state and visualization">
+      <header class="robot-status">
+        <div class="status-cell">
+          <span class="label">Robot</span>
+          <div class="robot-name-row"><span class="robot-avatar">QB</span><strong>Questing Beast</strong></div>
+        </div>
+        <div class="status-cell">
+          <span class="label">Battery</span>
+          <div class="status-cluster"><span class="battery-icon" aria-hidden="true"><span></span></span><strong>71%</strong></div>
+        </div>
+        <div class="status-cell">
+          <span class="label">Current task</span>
+          <strong class="task-accent">Navigating</strong>
+        </div>
+        <div class="status-cell">
+          <span class="label">Pose · map</span>
+          <code>x 2.34 · y 1.87<br />yaw 0.79 rad</code>
+        </div>
+        <div class="status-cell">
+          <span class="label">Connection</span>
+          <strong style="color: var(--green)">Bridge online</strong>
+        </div>
+      </header>
+
+      <div class="visual-head">
+        <div class="visual-title">
+          <h2>Live floor map</h2>
+          <span>Localization trusted</span>
+        </div>
+        <div class="map-tools">
+          <button class="view-button" type="button" data-view="map" aria-pressed="true">Map</button>
+          <button class="view-button" type="button" data-view="camera" aria-pressed="false">Camera</button>
+          <button class="map-tool" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+          <button class="map-tool" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+          <button class="map-tool" type="button" title="Follow robot" aria-label="Follow robot">◎</button>
+        </div>
+      </div>
+
+      <div class="viewport-shell">
+        <div class="map-viewport" role="img" aria-label="Conceptual occupancy grid showing robot, waypoints, and LiDAR overlay">
+          <div class="layer-pills" aria-hidden="true">
+            <span class="layer-pill live">Grid</span>
+            <span class="layer-pill live">LiDAR</span>
+            <span class="layer-pill live">Waypoints</span>
+          </div>
+          <svg class="map-svg" viewBox="0 0 940 560" aria-hidden="true" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <filter id="rough"><feTurbulence baseFrequency=".025" numOctaves="2" seed="8" result="noise" /><feDisplacementMap in="SourceGraphic" in2="noise" scale="7" /></filter>
+              <pattern id="scan" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#89867e" opacity=".4" /></pattern>
+            </defs>
+            <rect width="940" height="560" fill="#d8d5cd" />
+            <g filter="url(#rough)" fill="#f8f6ef" stroke="#99968f" stroke-width="9" stroke-linejoin="round">
+              <path d="M105 97 H360 V146 H462 V84 H806 V222 H855 V463 H556 V493 H343 V431 H104 Z" />
+              <path d="M382 166 H553 V301 H382 Z" fill="#d8d5cd" />
+              <path d="M120 306 H279 V430 H120 Z" fill="#d8d5cd" />
+              <path d="M634 102 V222 H802" fill="none" />
+            </g>
+            <rect x="88" y="78" width="784" height="430" fill="url(#scan)" opacity=".45" />
+            <g fill="#fffdf8" stroke="#11110f" stroke-width="3">
+              <circle cx="727" cy="189" r="10" />
+              <circle cx="533" cy="303" r="8" />
+              <circle cx="211" cy="381" r="10" fill="#11110f" />
+            </g>
+            <circle cx="211" cy="381" r="25" fill="none" stroke="#f15a24" stroke-width="2" opacity=".75" />
+            <circle cx="211" cy="381" r="42" fill="none" stroke="#f15a24" stroke-width="1" opacity=".3" />
+            <path d="M211 381 l20 -9 -8 19 z" fill="#f15a24" />
+            <g font-family="Consolas, monospace" font-size="13" font-weight="700">
+              <g transform="translate(693 145)"><rect width="105" height="28" rx="4" fill="#11110f" /><text x="52" y="18" fill="#fff" text-anchor="middle">LIVING ROOM</text></g>
+              <g transform="translate(493 325)"><rect width="80" height="26" rx="4" fill="#fffdf8" stroke="#aaa69d" /><text x="40" y="17" fill="#11110f" text-anchor="middle">HALLWAY</text></g>
+              <g transform="translate(151 420)"><rect width="120" height="27" rx="4" fill="#11110f" /><text x="60" y="18" fill="#fff" text-anchor="middle">QUESTING BEAST</text></g>
+            </g>
+          </svg>
+          <div class="map-legend" aria-hidden="true">
+            <span class="legend-item"><span class="legend-swatch robot"></span>Robot</span>
+          </div>
+        </div>
+        <div class="camera-placeholder">Existing live camera view occupies this same viewport</div>
+      </div>
+
+      <section class="controls" aria-label="Map and navigation controls">
+        <div class="tab-list" role="tablist" aria-label="Robot workflow controls">
+          <button id="tab-mapping" class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="panel-mapping">Mapping</button>
+          <button id="tab-navigation" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-navigation">Navigation</button>
+          <button id="tab-waypoints" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-waypoints">Waypoints</button>
+        </div>
+
+        <div id="panel-mapping" class="tab-panel active" role="tabpanel" aria-labelledby="tab-mapping">
+          <div><h3>Build or continue a map</h3><p>Existing Cartographer mapping flow with one action per state.</p></div>
+          <span class="workflow-state">Saved map loaded · ready</span>
+          <div class="panel-actions">
+            <button class="secondary-button" type="button">Continue current map</button>
+            <button class="primary-button" type="button">Map this floor</button>
+          </div>
+        </div>
+
+        <div id="panel-navigation" class="tab-panel" role="tabpanel" aria-labelledby="tab-navigation" hidden>
+          <div><h3>Nav2 readiness</h3><p>Relocalization and repair stay in the navigation context.</p></div>
+          <span class="workflow-state">Nav2 ready · goal active</span>
+          <div class="panel-actions">
+            <button class="secondary-button" type="button">Relocalize on map</button>
+            <button class="secondary-button" type="button">Restart navigation</button>
+          </div>
+        </div>
+
+        <div id="panel-waypoints" class="tab-panel" role="tabpanel" aria-labelledby="tab-waypoints" hidden>
+          <div><h3>Saved map waypoints</h3><p>Capture, review, and use the existing authoritative waypoint registry.</p></div>
+          <span class="workflow-state">4 waypoints ready</span>
+          <div class="panel-actions">
+            <input class="secondary-button" type="text" value="Kitchen entry" aria-label="Waypoint name" />
+            <button class="primary-button" type="button">Save spot</button>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const column = document.querySelector('.robot-column');
+    document.querySelectorAll('.view-button').forEach((button) => button.addEventListener('click', () => {
+      column.dataset.view = button.dataset.view;
+      document.querySelectorAll('.view-button').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    }));
+
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    tabs.forEach((tab) => tab.addEventListener('click', () => {
+      tabs.forEach((item) => {
+        const selected = item === tab;
+        item.setAttribute('aria-selected', String(selected));
+        const panel = document.getElementById(item.getAttribute('aria-controls'));
+        panel.hidden = !selected;
+        panel.classList.toggle('active', selected);
+      });
+    }));
+  </script>
+</body>
+</html>

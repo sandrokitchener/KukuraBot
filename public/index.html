@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#chat-form">Skip to command console</a>
     <main class="shell">
       <header class="app-header" aria-label="Questing Beast actions">
         <div class="app-header-brand">
@@ -64,19 +65,15 @@
           <div class="rail-brand" title="Questing Beast">
             <img src="/assets/questing-beast-qb-mark.png" alt="Questing Beast icon" />
           </div>
-          <button
-            id="recon-gallery-toggle"
-            class="rail-icon rail-icon-button"
-            type="button"
-            aria-controls="recon-gallery-drawer"
-            aria-expanded="false"
-            aria-label="Open snapshot gallery"
-            title="Snapshot gallery"
-          >
-            <span class="camera-rail-icon" aria-hidden="true">
-              <span></span>
-            </span>
-          </button>
+          <nav class="rail-nav" aria-label="Operator views">
+            <button class="rail-icon rail-icon-button is-active" type="button" data-rail-target="console" aria-current="page" aria-label="Open command console" title="Console"><span aria-hidden="true">⌁</span></button>
+            <button class="rail-icon rail-icon-button" type="button" data-rail-target="map" aria-label="Show map" title="Map"><span aria-hidden="true">⊞</span></button>
+            <button class="rail-icon rail-icon-button" type="button" data-rail-target="camera" aria-label="Show camera" title="Camera"><span class="camera-rail-icon" aria-hidden="true"><span></span></span></button>
+            <button class="rail-icon rail-icon-button" type="button" data-rail-target="waypoints" aria-label="Show waypoints" title="Waypoints"><span aria-hidden="true">◇</span></button>
+            <button id="recon-gallery-toggle" class="rail-icon rail-icon-button" type="button" data-rail-target="snapshots" aria-controls="recon-gallery-drawer" aria-expanded="false" aria-label="Open saved snapshots" title="Saved shots"><span aria-hidden="true">▣</span></button>
+            <button class="rail-icon rail-icon-button" type="button" data-rail-target="logs" aria-label="Show conversation history" title="Log history"><span aria-hidden="true">≡</span></button>
+            <button class="rail-icon rail-icon-button rail-icon-accent" type="button" data-rail-target="cpu" aria-label="Open CPU status" title="CPU status"><span aria-hidden="true">●</span></button>
+          </nav>
           <span class="rail-spacer" aria-hidden="true"></span>
           <img class="rail-company-logo" src="/assets/dtx-logo-black.webp" alt="DTX" title="DTX" />
         </aside>
@@ -98,14 +95,14 @@
           <p id="app-description" class="lede" hidden></p>
 
           <form id="chat-form" class="chat-form">
-            <label for="user-input">Message</label>
+            <label for="user-input">Command</label>
             <textarea
               id="user-input"
               rows="6"
               placeholder="Try: go to the living room"
             ></textarea>
  <div class="chat-form-actions">
- <button id="send-button" type="submit">Ask Assistant</button>
+ <button id="send-button" type="submit">Send request</button>
  <button
  id="persistent-emergency-stop"
  class="persistent-emergency-stop"
@@ -117,9 +114,44 @@
  </div>
  </form>
 
+          <section id="execution-timeline" class="execution-timeline" aria-labelledby="execution-timeline-title">
+            <div class="execution-timeline-head">
+              <h2 id="execution-timeline-title">Execution</h2>
+              <span id="execution-timeline-status" class="execution-timeline-status">Ready.</span>
+            </div>
+            <ol class="execution-timeline-list">
+              <li class="execution-step" data-execution-step="intent"><span class="execution-step-marker" aria-hidden="true"></span><span><strong>Intent parsing</strong><small id="execution-intent-detail">Waiting for a command.</small></span></li>
+              <li class="execution-step" data-execution-step="planning"><span class="execution-step-marker" aria-hidden="true"></span><span><strong>Planning</strong><small id="execution-planning-detail">Not started.</small></span></li>
+              <li class="execution-step" data-execution-step="navigation"><span class="execution-step-marker" aria-hidden="true"></span><span><strong>Navigation</strong><small id="execution-navigation-detail">Not applicable.</small></span></li>
+              <li class="execution-step" data-execution-step="completion"><span class="execution-step-marker" aria-hidden="true"></span><span><strong>Completion</strong><small id="execution-completion-detail">Waiting for a command.</small></span></li>
+            </ol>
+          </section>
+
+          <section id="manual-control-panel" class="manual-control-panel" data-state="disabled">
+            <div class="manual-control-head">
+              <h2>Manual Control</h2>
+              <span id="manual-control-chip" class="manual-control-chip">Off</span>
+            </div>
+            <div class="manual-control-actions">
+              <button id="manual-control-toggle-button" type="button">Enable gamepad</button>
+              <button id="manual-control-neutral-button" type="button">Neutral</button>
+            </div>
+            <div id="manual-touch-controls" class="manual-touch-controls" hidden aria-label="Android touch controller">
+              <div id="manual-touch-left-stick" class="manual-touch-stick" role="slider" tabindex="0" aria-label="Forward and strafe touch stick" aria-valuemin="-1" aria-valuemax="1" aria-valuenow="0" aria-valuetext="centered"><span class="manual-touch-stick-label">Move</span></div>
+              <div id="manual-touch-right-stick" class="manual-touch-stick" role="slider" tabindex="0" aria-label="Turn touch stick" aria-valuemin="-1" aria-valuemax="1" aria-valuenow="0" aria-valuetext="centered"><span class="manual-touch-stick-label">Turn</span></div>
+            </div>
+            <label class="manual-control-speed" for="manual-control-speed-slider"><span>Forward gait</span><input id="manual-control-speed-slider" type="range" min="20" max="100" step="5" value="45" /><output id="manual-control-speed-value" for="manual-control-speed-slider">45%</output></label>
+            <div class="manual-control-readout" aria-label="Manual control input">
+              <div class="manual-control-axis"><span>Forward</span><strong id="manual-control-forward-value">0.00</strong><span id="manual-control-forward-meter" class="manual-control-meter" aria-hidden="true"></span></div>
+              <div class="manual-control-axis"><span>Strafe</span><strong id="manual-control-strafe-value">0.00</strong><span id="manual-control-strafe-meter" class="manual-control-meter" aria-hidden="true"></span></div>
+              <div class="manual-control-axis"><span>Turn</span><strong id="manual-control-turn-value">0.00</strong><span id="manual-control-turn-meter" class="manual-control-meter" aria-hidden="true"></span></div>
+            </div>
+            <div class="manual-control-meta"><span id="manual-control-pad-name">No gamepad</span><span id="manual-control-status" aria-live="polite">Real robot target required.</span></div>
+          </section>
+
           <section class="output-panel">
             <div class="response-head">
-              <h2>Output Log</h2>
+              <h2>Conversation History</h2>
             </div>
             <div class="output-scroll">
               <div id="chat-log" class="chat-log" aria-live="polite">
@@ -130,12 +162,6 @@
                 </article>
               </div>
 
-              <div class="parsed-log">
-                <div class="response-head">
-                  <h2>Parsed JSON</h2>
-                </div>
-                <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
-              </div>
             </div>
           </section>
 
@@ -147,7 +173,7 @@
 
           <section class="speech-panel">
             <div class="speech-head">
-              <h2>Speech Input</h2>
+              <h2>Voice readiness</h2>
               <span id="speech-profile-name" class="speech-chip">Loading...</span>
             </div>
             <p id="speech-status" class="speech-status">Starting microphone...</p>
@@ -175,71 +201,6 @@
             </div>
             <button class="robot-tab" type="button" aria-selected="false" data-robot-view="camera">Camera</button>
           </nav>
-
-          <section id="manual-control-panel" class="manual-control-panel" data-state="disabled">
-            <div class="manual-control-head">
-              <h2>Manual Control</h2>
-              <span id="manual-control-chip" class="manual-control-chip">Off</span>
-            </div>
-            <div class="manual-control-actions">
-              <button id="manual-control-toggle-button" type="button">Enable gamepad</button>
-              <button id="manual-control-neutral-button" type="button">Neutral</button>
-            </div>
-            <div id="manual-touch-controls" class="manual-touch-controls" hidden aria-label="Android touch controller">
-              <div
-                id="manual-touch-left-stick"
-                class="manual-touch-stick"
-                role="slider"
-                tabindex="0"
-                aria-label="Forward and strafe touch stick"
-                aria-valuemin="-1"
-                aria-valuemax="1"
-                aria-valuenow="0"
-                aria-valuetext="centered"
-              >
-                <span class="manual-touch-stick-label">Move</span>
-              </div>
-              <div
-                id="manual-touch-right-stick"
-                class="manual-touch-stick"
-                role="slider"
-                tabindex="0"
-                aria-label="Turn touch stick"
-                aria-valuemin="-1"
-                aria-valuemax="1"
-                aria-valuenow="0"
-                aria-valuetext="centered"
-              >
-                <span class="manual-touch-stick-label">Turn</span>
-              </div>
-            </div>
-            <label class="manual-control-speed" for="manual-control-speed-slider">
-              <span>Forward gait</span>
-              <input id="manual-control-speed-slider" type="range" min="20" max="100" step="5" value="45" />
-              <output id="manual-control-speed-value" for="manual-control-speed-slider">45%</output>
-            </label>
-            <div class="manual-control-readout" aria-label="Manual control input">
-              <div class="manual-control-axis">
-                <span>Forward</span>
-                <strong id="manual-control-forward-value">0.00</strong>
-                <span id="manual-control-forward-meter" class="manual-control-meter" aria-hidden="true"></span>
-              </div>
-              <div class="manual-control-axis">
-                <span>Strafe</span>
-                <strong id="manual-control-strafe-value">0.00</strong>
-                <span id="manual-control-strafe-meter" class="manual-control-meter" aria-hidden="true"></span>
-              </div>
-              <div class="manual-control-axis">
-                <span>Turn</span>
-                <strong id="manual-control-turn-value">0.00</strong>
-                <span id="manual-control-turn-meter" class="manual-control-meter" aria-hidden="true"></span>
-              </div>
-            </div>
-            <div class="manual-control-meta">
-              <span id="manual-control-pad-name">No gamepad</span>
-              <span id="manual-control-status" aria-live="polite">Real robot target required.</span>
-            </div>
-          </section>
 
           <section id="robot-state-panel" class="robot-state-panel" data-state="waiting">
             <div class="robot-state-head">
@@ -328,8 +289,14 @@
                 <span class="map-workflow-title">Map Controls</span>
                 <span id="map-workflow-status" class="map-workflow-status" aria-live="polite">Ready.</span>
               </summary>
+              <div class="workflow-tabs" role="tablist" aria-label="Map controls">
+                <button id="workflow-tab-mapping" class="workflow-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="workflow-panel-mapping" data-workflow-tab="mapping">Mapping</button>
+                <button id="workflow-tab-navigation" class="workflow-tab" type="button" role="tab" aria-selected="false" aria-controls="workflow-panel-navigation" data-workflow-tab="navigation">Navigation</button>
+                <button id="workflow-tab-waypoints" class="workflow-tab" type="button" role="tab" aria-selected="false" aria-controls="workflow-panel-waypoints" data-workflow-tab="waypoints">Waypoints</button>
+              </div>
               <div class="map-workflow-steps">
-                <div class="map-workflow-step map-workflow-step-primary">
+                <div id="workflow-panel-mapping" class="workflow-tab-panel" role="tabpanel" data-workflow-panel="mapping">
+                <div class="map-workflow-step map-workflow-step-primary" data-workflow-panel="mapping">
                   <span class="map-step-number">1</span>
                   <span class="map-step-label">Build Map</span>
                   <div class="map-workflow-actions">
@@ -339,14 +306,19 @@
                     <button type="button" id="autonomous-map-promote-button" class="map-workflow-button" data-connection-action="promote-map-candidate" disabled>Use Candidate Map</button>
                   </div>
                 </div>
-                <div class="map-workflow-step map-workflow-step-primary">
+                </div>
+                <div id="workflow-panel-navigation" class="workflow-tab-panel" role="tabpanel" data-workflow-panel="navigation" hidden>
+                <div class="map-workflow-step map-workflow-step-primary" data-workflow-panel="navigation">
                   <span class="map-step-number">2</span>
                   <span class="map-step-label">Align Robot</span>
                   <div class="map-workflow-actions">
                     <button type="button" class="map-workflow-button" data-connection-action="start-map-pose">Relocalize on Map</button>
+                    <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Navigation</button>
                   </div>
                 </div>
-                <div class="map-workflow-step">
+                </div>
+                <div id="workflow-panel-waypoints" class="workflow-tab-panel" role="tabpanel" data-workflow-panel="waypoints" hidden>
+                <div class="map-workflow-step" data-workflow-panel="waypoints">
                   <span class="map-step-number">3</span>
                   <span class="map-step-label">Save Waypoint</span>
                   <div class="waypoint-capture-row">
@@ -359,12 +331,6 @@
                     <ul id="stale-waypoints-list" class="stale-waypoints-list"></ul>
                   </div>
                 </div>
-                <div class="map-workflow-step">
-                  <span class="map-step-number">4</span>
-                  <span class="map-step-label">Navigation</span>
-                  <div class="map-workflow-actions">
-                    <button type="button" class="map-workflow-button map-repair-button" data-connection-action="start-navigation">Restart Navigation</button>
-                  </div>
                 </div>
               </div>
             </details>
@@ -426,7 +392,7 @@
             <h2>Checks</h2>
             <div class="diagnostics-actions">
               <button id="run-dogzilla-preflight-button" type="button">Run diagnostics</button>
-              <button id="check-pi-performance-button" type="button">Pi load</button>
+              <button id="check-pi-performance-button" type="button">CPU status</button>
             </div>
           </div>
           <p id="dogzilla-preflight-status" class="connection-status" aria-live="polite">Not run.</p>
@@ -445,6 +411,14 @@
             </div>
           </div>
           <div id="dogzilla-preflight-checks" class="preflight-checks"></div>
+        </section>
+
+        <section class="diagnostics-detail-panel" aria-labelledby="parsed-output-title">
+          <div class="response-head">
+            <h2 id="parsed-output-title">Parsed command</h2>
+            <span class="diagnostics-detail-note">Developer detail</span>
+          </div>
+          <pre id="parsed-output" class="output-box">Waiting for valid JSON.</pre>
         </section>
 
         <details id="connection-setup" class="advanced-service-tools">

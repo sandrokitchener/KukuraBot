@@ -84,7 +84,7 @@ test('normalizeAppConfig derives brand strings from assistantName', () => {
   assert.equal(config.assistantName, 'Rover')
   assert.equal(config.appName, 'Rover')
   assert.equal(config.consoleTitle, 'Rover Console')
-  assert.equal(config.sendButtonLabel, 'Ask Rover')
+  assert.equal(config.sendButtonLabel, 'Send request')
   assert.equal(config.thinkingStatus, 'Rover is thinking...')
 })
 
@@ -100,7 +100,7 @@ test('normalizeAppConfig accepts app-level brand overrides', () => {
   assert.equal(config.appName, 'Questing Beast')
   assert.equal(config.pageTitle, 'Questing Beast')
   assert.equal(config.consoleTitle, 'Questing Beast')
-  assert.equal(config.sendButtonLabel, 'Ask Dog')
+  assert.equal(config.sendButtonLabel, 'Send request')
   assert.equal(config.introDescription, '')
 })
 

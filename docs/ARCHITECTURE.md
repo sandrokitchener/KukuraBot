@@ -34,12 +34,13 @@ On Pi installations with `robodoge-yolo-vision.service`, the toggle writes `/etc
 | `lib/robot-command-compiler.mjs` | Real robot command preview and waypoint pose resolution |
 | `lib/isaacsim-command-compiler.mjs` | Isaac Sim preview construction |
 | `lib/dogzilla-connection-center.mjs` | In-app DOGZILLA service actions and SSH script wiring |
-| `lib/dogzilla-startup-watchdog.mjs` | Optional app-up support-service/direct-bridge check; does not start Nav2 |
 | `sidecars/` | Python/ROS/DOGZILLA support services |
 
 ## Operator UI boundaries
 
 Keep routine controls narrow: Settings owns model, runtime target, performance profile, sound volume, and speech profile; Diagnostics owns aggregate preflight and Pi-load checks, with connection setup and service repair collapsed. Robot Info is the persistent navigation-status surface, and its Nav-chain detail stays operator-expanded; do not duplicate Nav2 blockers into command or minimap overlays. The Overview and Camera tabs share the primary visualization slot; Camera hides the minimap and Map Controls until Overview is restored.
+
+The operator shell uses a fixed full-height black rail beside two light work columns. The left column owns command input, emergency stop, manual control, execution timeline, conversation history, and voice readiness. The right column owns compact robot state, the primary map, the shared Camera slot, and Mapping/Navigation/Waypoints presentation tabs. Rail destinations reuse existing drawers and focus targets; they do not create new backend surfaces. Parsed command JSON, expanded Nav-chain detail, and CPU/Pi diagnostic output remain in Diagnostics.
 
 ## Runtime targets
 
@@ -133,7 +134,8 @@ DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists onl
 
 ## Tests
 
-Use `npm test` for the Node test suite. Python sidecar tests live under `test/test_*.py`; current package script does not run them directly unless invoked separately.
+Use `npm test` for the Node test suite. Use `npm run verify` to run both the
+Node suite and the Python sidecar tests under `test/test_*.py`.
 
 Control ownership uses the in-memory per-robot lease API at `/api/robot/lease`:
 `GET` reports state, `POST` acquires or deliberately takes over, `PATCH` renews,

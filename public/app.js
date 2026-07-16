@@ -1,6 +1,7 @@
 import { createSpeechInputController } from './speech-input.js'
 import { createCommandCuePlayer } from './command-cue.js'
 import { splitRecentChatHistory } from './chat-history.js'
+import { createMobileNavigationController, isAndroidAppShell } from './mobile-navigation.js'
 import { apiFetch, getApiBaseUrl, normalizeApiBaseUrl, setApiBaseUrl, toApiUrl } from './api-client.js'
 import { createDogzillaAudioController } from './dogzilla-audio.js'
 import { createManualControlController } from './manual-control.js'
@@ -144,6 +145,17 @@ const statusText = document.querySelector('#status-text')
 const statusTimer = document.querySelector('#status-timer')
 const chatLog = document.querySelector('#chat-log')
 const parsedOutput = document.querySelector('#parsed-output')
+const executionTimeline = document.querySelector('#execution-timeline')
+const executionTimelineStatus = document.querySelector('#execution-timeline-status')
+const executionTimelineSteps = document.querySelectorAll('.execution-step[data-execution-step]')
+const executionTimelineDetails = {
+  intent: document.querySelector('#execution-intent-detail'),
+  planning: document.querySelector('#execution-planning-detail'),
+  navigation: document.querySelector('#execution-navigation-detail'),
+  completion: document.querySelector('#execution-completion-detail'),
+}
+const workflowTabs = document.querySelectorAll('[data-workflow-tab]')
+const workflowPanels = document.querySelectorAll('[data-workflow-panel]')
 const emptyMessageRole = document.querySelector('#empty-message-role')
 const emptyMessageBubble = document.querySelector('#empty-message-bubble')
 const emptyMessageMeta = document.querySelector('#empty-message-meta')
@@ -158,13 +170,6 @@ const THINKING_CUE_URLS = [
   '/sounds/robot-think-pant-1.wav',
 ]
 const ANDROID_LOCAL_MODEL_PROVIDER = 'llama-cpp-http'
-const MOBILE_VIEWS = ['robot', 'chat', 'audio']
-const MOBILE_DEFAULT_VIEW = 'chat'
-const MOBILE_SWIPE_INTENT_PX = 14
-const MOBILE_SWIPE_MIN_PX = 34
-const MOBILE_SWIPE_MAX_MS = 1200
-const MOBILE_SWIPE_HORIZONTAL_RATIO = 1.05
-const MOBILE_SWIPE_VERTICAL_CANCEL_RATIO = 1.2
 const DEFAULT_ACTIVATION_PHRASES = ['hey kukura', 'ok kukura', 'okay kukura', 'kukura']
 const DEFAULT_SPEECH_ACTIVE_PROFILE = {
   silenceDurationMs: 500,
@@ -234,6 +239,8 @@ let emergencyStopStateKnown = false
 let activeThinkingCue = null
 let thinkingCueToken = 0
 let reconSnapshots = []
+let executionTimelinePayload = null
+let executionTimelineNavigation = false
 const commandCuePlayer = createCommandCuePlayer(COMMAND_CUE_URLS, {
   gain: 0.28,
   playbackRate: 1,
@@ -254,7 +261,7 @@ let appConfig = {
   assistantName: 'Assistant',
   pageTitle: 'Questing Beast',
   consoleTitle: 'Questing Beast',
-  sendButtonLabel: 'Ask Assistant',
+  sendButtonLabel: 'Send request',
   thinkingStatus: 'Assistant is thinking',
   introEyebrow: 'Quadruped inspection console',
   introDescription: '',
@@ -294,8 +301,6 @@ let runtimeConfig = {
 }
 let dogzillaConnection = null
 let speechController = null
-let mobileView = MOBILE_DEFAULT_VIEW
-let mobileTouch = null
 let dogzillaStartupRepairAttempted = false
 const isaacCompletionState = {
   initialized: false,
@@ -336,6 +341,14 @@ const manualControl = createManualControlController({
   setStatus,
   playBarkCue: () => dogzillaAudio.playPiCue('bark'),
 })
+const mobileNavigation = createMobileNavigationController({
+  documentRef: document,
+  navigatorRef: navigator,
+  windowRef: window,
+  manualControl,
+  manualTouchLeftStick,
+  manualTouchRightStick,
+})
 const robotMap = createRobotMapRenderer({
   elements: {
     map: robotMapElement,
@@ -351,7 +364,7 @@ const robotMap = createRobotMapRenderer({
   formatEventTimestamp,
 })
 
-initAndroidAppShell()
+mobileNavigation.init()
 boot()
 
 form.addEventListener('submit', handleChatSubmit)
@@ -478,6 +491,14 @@ for (const tab of robotTabs) {
   tab.addEventListener('click', handleRobotTabClick)
 }
 
+for (const tab of workflowTabs) {
+  tab.addEventListener('click', () => setWorkflowTab(tab.dataset.workflowTab))
+}
+
+for (const railButton of document.querySelectorAll('[data-rail-target]')) {
+  railButton.addEventListener('click', () => handleRailNavigation(railButton.dataset.railTarget))
+}
+
 robotCameraFrame.addEventListener('error', handleDogzillaCameraFrameError)
 robotCameraFrame.addEventListener('load', handleDogzillaCameraFrameLoad)
 window.addEventListener('gamepadconnected', manualControl.handleGamepadConnected)
@@ -486,136 +507,6 @@ window.addEventListener('blur', manualControl.handleWindowBlur)
 document.addEventListener('visibilitychange', () => manualControl.handleVisibilityChange(document.hidden))
 manualControlPanel?.addEventListener('pointercancel', manualControl.handlePointerLoss)
 manualControlPanel?.addEventListener('lostpointercapture', manualControl.handlePointerLoss)
-
-function initAndroidAppShell() {
-  if (!isAndroidAppShell()) {
-    return
-  }
-
-  document.documentElement.classList.add('android-app')
-  manualControl.enableTouch()
-  bindManualTouchStick(manualTouchLeftStick, 'left')
-  bindManualTouchStick(manualTouchRightStick, 'right')
-  setMobileView(MOBILE_DEFAULT_VIEW)
-  document.addEventListener('touchstart', handleMobileTouchStart, { passive: true })
-  document.addEventListener('touchmove', handleMobileTouchMove, { passive: false })
-  document.addEventListener('touchend', handleMobileTouchEnd, { passive: true })
-  document.addEventListener('touchcancel', handleMobileTouchCancel, { passive: true })
-}
-
-function isAndroidAppShell() {
-  const userAgent = navigator.userAgent || ''
-  return /Android/i.test(userAgent) && (/\bwv\b/i.test(userAgent) || !!window.__TAURI_INTERNALS__)
-}
-
-function handleMobileTouchStart(event) {
-  if (
-    !document.documentElement.classList.contains('android-app') ||
-    isSwipeBlockedTarget(event.target) ||
-    event.touches?.length > 1
-  ) {
-    mobileTouch = null
-    return
-  }
-
-  const touch = event.changedTouches?.[0] || event.touches?.[0]
-  mobileTouch = touch
-    ? {
-      id: touch.identifier,
-      x: touch.clientX,
-      y: touch.clientY,
-      at: Date.now(),
-      horizontal: false,
-      canceled: false,
-    }
-    : null
-}
-
-function handleMobileTouchMove(event) {
-  if (!mobileTouch || mobileTouch.canceled) {
-    return
-  }
-
-  const touch = findTouchById(event.changedTouches, mobileTouch.id) ||
-    findTouchById(event.touches, mobileTouch.id)
-  if (!touch) {
-    return
-  }
-
-  const deltaX = touch.clientX - mobileTouch.x
-  const deltaY = touch.clientY - mobileTouch.y
-  const absX = Math.abs(deltaX)
-  const absY = Math.abs(deltaY)
-
-  if (!mobileTouch.horizontal) {
-    if (absY >= MOBILE_SWIPE_INTENT_PX && absY > absX * MOBILE_SWIPE_VERTICAL_CANCEL_RATIO) {
-      mobileTouch.canceled = true
-      return
-    }
-
-    mobileTouch.horizontal = absX >= MOBILE_SWIPE_INTENT_PX && absX > absY * MOBILE_SWIPE_HORIZONTAL_RATIO
-  }
-
-  if (mobileTouch.horizontal) {
-    event.preventDefault()
-  }
-}
-
-function handleMobileTouchEnd(event) {
-  if (!mobileTouch) {
-    return
-  }
-
-  const touch = findTouchById(event.changedTouches, mobileTouch.id)
-  const start = mobileTouch
-  mobileTouch = null
-
-  if (!touch || start.canceled) {
-    return
-  }
-
-  const deltaX = touch.clientX - start.x
-  const deltaY = touch.clientY - start.y
-  const elapsedMs = Date.now() - start.at
-
-  if (
-    elapsedMs > MOBILE_SWIPE_MAX_MS ||
-    Math.abs(deltaX) < MOBILE_SWIPE_MIN_PX ||
-    Math.abs(deltaX) < Math.abs(deltaY) * MOBILE_SWIPE_HORIZONTAL_RATIO
-  ) {
-    return
-  }
-
-  const currentIndex = MOBILE_VIEWS.indexOf(mobileView)
-  const nextIndex = deltaX < 0
-    ? Math.min(MOBILE_VIEWS.length - 1, currentIndex + 1)
-    : Math.max(0, currentIndex - 1)
-  setMobileView(MOBILE_VIEWS[nextIndex])
-}
-
-function handleMobileTouchCancel() {
-  mobileTouch = null
-}
-
-function setMobileView(view) {
-  mobileView = MOBILE_VIEWS.includes(view) ? view : MOBILE_DEFAULT_VIEW
-  document.documentElement.dataset.mobileView = mobileView
-}
-
-function isSwipeBlockedTarget(target) {
-  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .settings-drawer, .connection-drawer, .recon-gallery-drawer')
-}
-
-function findTouchById(touchList, id) {
-  for (let index = 0; index < (touchList?.length || 0); index += 1) {
-    const touch = touchList[index]
-    if (touch.identifier === id) {
-      return touch
-    }
-  }
-
-  return null
-}
 
 async function boot() {
   applyBackendControls()
@@ -675,6 +566,7 @@ async function handleChatSubmit(event) {
   }
 
   clearEmptyChat()
+  startExecutionTimeline(message)
   appendMessage({
     role: 'You',
     text: message,
@@ -695,6 +587,7 @@ async function handleChatSubmit(event) {
 
   try {
     const payload = await submitChatMessage(message)
+    updateExecutionTimelineFromPayload(payload)
     applyVisionDispatchResult(payload)
 
     const completionMeta = buildAssistantMeta(payload, thinkingState?.startedAt ?? Date.now())
@@ -709,6 +602,13 @@ async function handleChatSubmit(event) {
     setStatus(buildCompletionStatus(payload), completionState)
     await refreshRobotFeedback()
   } catch (error) {
+    executionTimelinePayload = null
+    executionTimelineNavigation = false
+    setExecutionStep('intent', 'error', formatError(error))
+    setExecutionStep('planning', 'idle', 'Not reached.')
+    setExecutionStep('navigation', 'idle', 'Not applicable.')
+    setExecutionStep('completion', 'error', 'Request failed.')
+    if (executionTimelineStatus) executionTimelineStatus.textContent = 'Request failed.'
     finishThinkingFeedback(pendingMessage, {
       text: `Error: ${formatError(error)}`,
       meta: 'Request failed.',
@@ -744,18 +644,6 @@ async function submitChatMessage(message) {
   }
 
   return enforceExplicitVisionCommand(message, payload)
-}
-
-function bindManualTouchStick(element, stick) {
-  if (!element) {
-    return
-  }
-
-  element.addEventListener('pointerdown', (event) => manualControl.handleTouchPointerDown(event, stick))
-  element.addEventListener('pointermove', manualControl.handleTouchPointerMove)
-  element.addEventListener('pointerup', manualControl.handleTouchPointerUp)
-  element.addEventListener('pointercancel', manualControl.handleTouchPointerCancel)
-  element.addEventListener('lostpointercapture', manualControl.handleTouchPointerCancel)
 }
 
 async function enforceExplicitVisionCommand(message, payload) {
@@ -1867,6 +1755,130 @@ function handleHelpToggle() {
   }
 }
 
+function handleRailNavigation(target) {
+  const railButtons = document.querySelectorAll('[data-rail-target]')
+  const activeTarget = target === 'snapshots' ? null : target
+  for (const button of railButtons) {
+    const isActive = activeTarget && button.dataset.railTarget === activeTarget
+    button.classList.toggle('is-active', Boolean(isActive))
+    if (isActive) button.setAttribute('aria-current', 'page')
+    else button.removeAttribute('aria-current')
+  }
+
+  if (target === 'snapshots') return
+  if (target === 'cpu') {
+    if (connectionDrawer?.hidden) handleConnectionToggle()
+    document.querySelector('#check-pi-performance-button')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    return
+  }
+
+  if (target === 'camera') {
+    document.querySelector('.robot-tab[data-robot-view="camera"]')?.click()
+  } else {
+    document.querySelector('.robot-tab[data-robot-view="overview"]')?.click()
+  }
+
+  const destination = target === 'console'
+    ? document.querySelector('#chat-form')
+    : target === 'logs'
+      ? document.querySelector('#chat-log')
+      : target === 'waypoints'
+        ? document.querySelector('#map-workflow-panel')
+        : document.querySelector('#robot-map-panel, .robot-map-panel')
+
+  if (target === 'waypoints') setWorkflowTab('waypoints')
+  destination?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  if (target === 'console') input?.focus()
+}
+
+function setWorkflowTab(tabName = 'mapping') {
+  const nextTab = ['mapping', 'navigation', 'waypoints'].includes(tabName) ? tabName : 'mapping'
+  for (const tab of workflowTabs) {
+    const isActive = tab.dataset.workflowTab === nextTab
+    tab.classList.toggle('is-active', isActive)
+    tab.setAttribute('aria-selected', String(isActive))
+  }
+  for (const panel of workflowPanels) {
+    if (!panel.id?.startsWith('workflow-panel-')) continue
+    panel.hidden = panel.dataset.workflowPanel !== nextTab
+  }
+}
+
+function setExecutionStep(name, state, detail) {
+  const step = document.querySelector(`.execution-step[data-execution-step="${name}"]`)
+  if (!step) return
+  step.dataset.state = state
+  if (executionTimelineDetails[name]) executionTimelineDetails[name].textContent = detail
+}
+
+function resetExecutionTimeline() {
+  setExecutionStep('intent', 'idle', 'Waiting for a command.')
+  setExecutionStep('planning', 'idle', 'Not started.')
+  setExecutionStep('navigation', 'idle', 'Not applicable.')
+  setExecutionStep('completion', 'idle', 'Waiting for a command.')
+  if (executionTimelineStatus) executionTimelineStatus.textContent = 'Ready.'
+}
+
+function startExecutionTimeline(message) {
+  executionTimelinePayload = null
+  executionTimelineNavigation = false
+  setExecutionStep('intent', 'active', `Parsing “${message}”.`)
+  setExecutionStep('planning', 'idle', 'Waiting for parsed intent.')
+  setExecutionStep('navigation', 'idle', 'Not applicable.')
+  setExecutionStep('completion', 'idle', 'Waiting for dispatch.')
+  if (executionTimelineStatus) executionTimelineStatus.textContent = 'Working…'
+}
+
+function getCanonicalPlan(payload) {
+  const preview = isRobotRuntimeTarget(payload) ? payload?.robotRuntime : payload?.isaacSim
+  return preview?.canonicalPlan || preview?.payload?.canonicalPlan || null
+}
+
+function updateExecutionTimelineFromPayload(payload) {
+  executionTimelinePayload = payload
+  const plan = getCanonicalPlan(payload)
+  const planKind = plan?.kind || ''
+  const isNavigation = planKind === 'locomotion.goto'
+  const dispatch = isRobotRuntimeTarget(payload) ? payload?.robotDispatch : payload?.isaacDispatch
+  const failed = isActiveDispatchFailure(payload) || dispatch?.status === 'error' || dispatch?.status === 'rejected'
+  executionTimelineNavigation = isNavigation
+
+  setExecutionStep('intent', payload?.parsed ? 'done' : 'error', payload?.parsed ? `Parsed ${formatCommandName(payload.parsed.command || 'command')}.` : 'No structured intent returned.')
+  setExecutionStep('planning', plan?.kind ? 'done' : failed ? 'error' : 'idle', plan?.kind ? `${plan.kind} ready.` : failed ? 'Plan unavailable.' : 'No plan required.')
+
+  if (!isNavigation) {
+    setExecutionStep('navigation', 'done', 'Not applicable for this command.')
+  } else if (failed) {
+    setExecutionStep('navigation', 'error', dispatch?.error || 'Navigation was not accepted.')
+  } else if (dispatch?.status === 'accepted' || dispatch?.status === 'sent') {
+    setExecutionStep('navigation', 'active', dispatch.status === 'accepted' ? 'Nav2 goal accepted; awaiting feedback.' : 'Navigation command sent.')
+  } else {
+    setExecutionStep('navigation', 'idle', 'Waiting for dispatch.')
+  }
+
+  setExecutionStep('completion', failed ? 'error' : isNavigation && (dispatch?.status === 'accepted' || dispatch?.status === 'sent') ? 'active' : 'done', failed ? 'Command blocked or failed.' : isNavigation ? 'Awaiting robot feedback.' : 'Command complete.')
+  if (executionTimelineStatus) executionTimelineStatus.textContent = failed ? 'Action needs attention.' : isNavigation ? 'Awaiting robot.' : 'Complete.'
+}
+
+function updateExecutionTimelineFromNavigation(navStatus) {
+  if (!executionTimelinePayload || !executionTimelineNavigation || !navStatus) return
+  const status = navStatus.status || 'unknown'
+  const text = navStatus.text || status
+  if (['arrived', 'complete', 'completed'].includes(status)) {
+    setExecutionStep('navigation', 'done', text)
+    setExecutionStep('completion', 'done', 'Robot reached the target.')
+    if (executionTimelineStatus) executionTimelineStatus.textContent = 'Complete.'
+  } else if (['blocked', 'stuck', 'failed', 'cancelled'].includes(status)) {
+    setExecutionStep('navigation', 'error', text)
+    setExecutionStep('completion', 'error', 'Operator attention required.')
+    if (executionTimelineStatus) executionTimelineStatus.textContent = 'Action needs attention.'
+  } else {
+    setExecutionStep('navigation', 'active', text)
+    setExecutionStep('completion', 'active', 'Awaiting robot feedback.')
+    if (executionTimelineStatus) executionTimelineStatus.textContent = 'Awaiting robot.'
+  }
+}
+
 function handleRobotTabClick(event) {
   for (const tab of robotTabs) {
     const isActive = tab === event.currentTarget
@@ -2793,7 +2805,6 @@ function applyPayload(payload) {
   applyRobotRuntimeConfig()
   robotMap.renderWaypoints()
   applyDogzillaCameraConfig()
-  startDogzillaCameraViewer()
 }
 
 function applyModelConfig() {
@@ -3034,6 +3045,8 @@ function renderRobotStateSnapshot(snapshot) {
     delete robotNavStatusRow?.dataset?.severity
     robotNavTarget.textContent = ''
   }
+
+  updateExecutionTimelineFromNavigation(navStatus)
 
   robotMap.setPoseTrust(poseTrusted)
   document.getElementById('robot-map')?.setAttribute('data-pose-trusted', String(poseTrusted))
@@ -3280,10 +3293,16 @@ function applyRobotView(view) {
   if (showCamera) {
     startDogzillaCameraViewer()
     void refreshReconSnapshots()
+  } else {
+    stopDogzillaCameraViewer()
   }
 }
 
 function startDogzillaCameraViewer({ forceRefresh = false } = {}) {
+  if (robotCameraPanel.hidden) {
+    return
+  }
+
   const streamUrl = robotCameraFrame.dataset.streamUrl || ''
   if (!streamUrl) {
     return
@@ -3301,6 +3320,11 @@ function startDogzillaCameraViewer({ forceRefresh = false } = {}) {
   robotCameraFrame.removeAttribute('src')
   setDogzillaCameraFrameSource(streamUrl, { cacheBust: forceRefresh })
   scheduleDogzillaCameraLoadTimeout()
+}
+
+function stopDogzillaCameraViewer() {
+  clearDogzillaCameraTimers()
+  robotCameraFrame.removeAttribute('src')
 }
 
 function setDogzillaCameraFrameSource(streamUrl, { cacheBust = false } = {}) {

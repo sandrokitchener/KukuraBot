@@ -3,18 +3,19 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import test from 'node:test'
 
 test('Android shell and web app share the connection center surface', async () => {
-  const [html, css, appJs, dogzillaAudioJs, manualControlJs, robotMapJs, serverJs, tauriConfigText] = await Promise.all([
+  const [html, css, appJs, mobileNavigationJs, dogzillaAudioJs, manualControlJs, robotMapJs, serverJs, tauriConfigText] = await Promise.all([
     readFile('public/index.html', 'utf-8'),
     readCssBundle(),
     readFile('public/app.js', 'utf-8'),
+    readFile('public/mobile-navigation.js', 'utf-8'),
     readFile('public/dogzilla-audio.js', 'utf-8'),
     readFile('public/manual-control.js', 'utf-8'),
     readFile('public/robot-map.js', 'utf-8'),
     readFile('server.mjs', 'utf-8'),
     readFile('src-tauri/tauri.conf.json', 'utf-8'),
   ])
-  const browserJs = [appJs, dogzillaAudioJs, manualControlJs, robotMapJs].join('\n')
-  const swipeBlocker = appJs.match(/function isSwipeBlockedTarget[\s\S]+?\n}/)?.[0] || ''
+  const browserJs = [appJs, mobileNavigationJs, dogzillaAudioJs, manualControlJs, robotMapJs].join('\n')
+  const swipeBlocker = mobileNavigationJs.match(/function isSwipeBlockedTarget[\s\S]+?\n}/)?.[0] || ''
   const commandCueHandler = appJs.match(/function playCommandCueIfNeeded[\s\S]+?\n}/)?.[0] || ''
   const piConfirmCue = appJs.match(/async function playRobotConfirmCue[\s\S]+?\n}/)?.[0] || ''
   const piThinkingCue = appJs.match(/async function playRobotThinkingCue[\s\S]+?\n}/)?.[0] || ''
@@ -33,6 +34,7 @@ test('Android shell and web app share the connection center surface', async () =
   const statusIndex = html.indexOf('id="status"')
   const robotMapIndex = html.indexOf('id="robot-map"')
   const mapControlsIndex = html.indexOf('id="map-workflow-panel"')
+  const parsedOutputIndex = html.indexOf('id="parsed-output"')
   const headerActionButtonCount = (html.match(/class="app-header-button /g) || []).length
   const tauriConfig = JSON.parse(tauriConfigText)
   const [logo, appIcon, qbMark] = await Promise.all([
@@ -51,6 +53,15 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(html, /class="app-header-actions"/)
   assert.equal(headerActionButtonCount, 3)
   assert.match(html, /rail-brand[\s\S]+questing-beast-qb-mark\.png/)
+  assert.match(html, /class="skip-link"[\s\S]+#chat-form/)
+  assert.equal((html.match(/data-rail-target="/g) || []).length, 7)
+  assert.match(html, /data-rail-target="cpu"[\s\S]+CPU status/)
+  assert.match(html, /id="execution-timeline"[\s\S]+Intent parsing[\s\S]+Planning[\s\S]+Navigation[\s\S]+Completion/)
+  assert.match(html, /data-workflow-tab="mapping"/)
+  assert.match(html, /data-workflow-tab="navigation"/)
+  assert.match(html, /data-workflow-tab="waypoints"/)
+  assert.ok(parsedOutputIndex > html.indexOf('id="connection-drawer"'), 'Parsed command detail belongs in Diagnostics')
+  assert.doesNotMatch(html, /Pi load/)
   assert.match(html, /mascot-chip[\s\S]+questing-beast-qb-mark\.png/)
   assert.match(html, /brand-title-logo[\s\S]+questing-beast-logo\.png/)
   assert.match(html, /Quadruped inspection console/)
@@ -150,6 +161,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(html, /id="robot-camera-snapshot-note"/)
   assert.match(html, /id="recon-snapshot-list"/)
   assert.match(html, /id="robot-map-track"/)
+  assert.match(css, /\.robot-map-track\s*\{\s*display:\s*none\s*!important;/)
   assert.match(html, /id="robot-map-waypoints"/)
   assert.match(html, /id="robot-map-layer-grid"/)
   assert.match(html, /id="robot-map-layer-scan"/)
@@ -169,7 +181,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.match(browserJs, /apiFetch\('\/api\/robot\/manual-control'/)
   assert.match(manualControlJs, /handleTouchPointerDown/)
   assert.match(manualControlJs, /readManualTouchVector/)
-  assert.match(appJs, /manualControl\.enableTouch\(\)/)
+  assert.match(mobileNavigationJs, /manualControl\.enableTouch\(\)/)
   assert.match(appJs, /apiFetch\('\/api\/robot\/stop'/)
   assert.match(appJs, /apiFetch\('\/api\/recon\/snapshots'/)
   assert.match(appJs, /method: 'PATCH'/)
@@ -211,7 +223,7 @@ test('Android shell and web app share the connection center surface', async () =
   assert.doesNotMatch(css, /floorplan\.png/)
   assert.match(appJs, /robotMap\.renderWaypoints/)
   assert.match(robotMapJs, /getRobotMapRangeMeters/)
-  assert.match(appJs, /document\.addEventListener\('touchmove', handleMobileTouchMove, \{ passive: false \}\)/)
+  assert.match(mobileNavigationJs, /documentRef\.addEventListener\('touchmove', handleMobileTouchMove, \{ passive: false \}\)/)
   assert.ok(swipeBlocker)
   assert.match(swipeBlocker, /\.recon-gallery-drawer/)
   assert.doesNotMatch(swipeBlocker, /\.output-scroll/)
