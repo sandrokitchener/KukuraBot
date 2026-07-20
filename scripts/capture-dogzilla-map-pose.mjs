@@ -82,19 +82,22 @@ export async function captureWaypoint({
   allowOdom = false,
   allowMissingMapIdentity = false,
   poseTimeoutMs = 10_000,
+  startDogzillaLidarClientImpl = startDogzillaLidarClient,
+  getDogzillaRobotPoseImpl = getDogzillaRobotPose,
+  getRobotSidecarHealthImpl = getRobotSidecarHealth,
 } = {}) {
   const waypointName = normalizeWaypointName(name)
   if (!waypointName) {
     throw new Error('waypoint name is required')
   }
 
-  await startDogzillaLidarClient()
-  const posePayload = await waitForMapPose(poseTimeoutMs)
+  await startDogzillaLidarClientImpl()
+  const posePayload = await waitForMapPose(poseTimeoutMs, getDogzillaRobotPoseImpl)
   if (!posePayload.ok) {
     throw new Error(posePayload.error || 'pose not available')
   }
 
-  const health = await getRobotSidecarHealth().catch(() => null)
+  const health = await getRobotSidecarHealthImpl().catch(() => null)
   const mapMetadata = normalizeDogzillaMapMetadata(health?.body?.runtime?.map)
   const waypoint = poseToWaypoint(posePayload, { physicalSpot, arrivalToleranceMeters, mapMetadata })
   if (waypoint.frame !== 'map' && !allowOdom) {
@@ -118,17 +121,17 @@ export async function captureWaypoint({
   return { waypointName, waypoint, waypointFile, captureFile }
 }
 
-async function waitForMapPose(timeoutMs) {
+async function waitForMapPose(timeoutMs, getDogzillaRobotPoseImpl = getDogzillaRobotPose) {
   const startedAt = Date.now()
   do {
-    const pose = await getDogzillaRobotPose()
+    const pose = await getDogzillaRobotPoseImpl()
     if (pose.ok && pose.waypointSafe) {
       return pose
     }
     await sleep(250)
   } while (Date.now() - startedAt < timeoutMs)
 
-  const last = await getDogzillaRobotPose()
+  const last = await getDogzillaRobotPoseImpl()
   return last
 }
 

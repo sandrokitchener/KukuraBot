@@ -408,8 +408,12 @@ async function buildCurrentRobotStateSnapshot() {
   const robotRos2Config = await loadRobotRos2Config()
   const robotStateProbeConfig = withRobotStateProbeTimeout(robotRos2Config, 4000)
   const streamSnapshot = getRobotStateSnapshot()
-  void refreshDogzillaBridgeHealth(robotRuntimeConfig, robotRos2Config)
-  void refreshDogzillaRuntimeFeedback()
+  if (!getFreshDogzillaBridgeHealth() && !dogzillaBridgeHealthRefresh) {
+    void refreshDogzillaBridgeHealth(robotRuntimeConfig, robotRos2Config)
+  }
+  if (!getFreshDogzillaRuntimeFeedback() && !dogzillaRuntimeFeedbackRefresh) {
+    void refreshDogzillaRuntimeFeedback()
+  }
   const [bridgeState, poseState, mapOrigin, waypointConfig] = await Promise.all([
   fetchRobotBridgeState(robotRuntimeConfig, robotStateProbeConfig),
   getDogzillaRobotPose({ timeoutMs: 1200 }),

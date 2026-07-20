@@ -20,9 +20,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mask DOGZILLA self-hit LaserScan returns before Nav2 costmaps.")
     parser.add_argument("--input-topic", default="/scan")
     parser.add_argument("--output-topic", default="/scan_nav2")
-    parser.add_argument("--mask-start-deg", type=float, default=135.0)
-    parser.add_argument("--mask-end-deg", type=float, default=255.0)
-    parser.add_argument("--mask-range-m", type=float, default=0.35)
+    parser.add_argument("--mask-start-deg", type=float, required=True)
+    parser.add_argument("--mask-end-deg", type=float, required=True)
+    parser.add_argument("--mask-range-m", type=float, required=True)
     args = parser.parse_args(argv)
 
     import rclpy

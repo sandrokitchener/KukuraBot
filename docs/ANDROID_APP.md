@@ -81,6 +81,7 @@ adb shell dumpsys package com.robodoge.console
 | `scripts/build-android-apk.mjs` | Android build wrapper and Windows symlink fallback |
 | `scripts/start-robo-doge-android-lan.bat` | Android/LAN helper launcher |
 | `public/api-client.js` | Backend URL behavior shared by web and Android |
+| `public/mobile-navigation.js` | Android shell detection, touch view navigation, and manual touch-stick binding |
 | `test/android-web-parity.test.mjs` | Web/Android UI parity checks |
 
 Manual control safety is shared by Android and desktop: backgrounding or blurring the app, pointer cancellation, gamepad loss, command timeout, lease loss, request failure, and page unload disable control and issue one neutral command. Automated coverage lives in `test/frontend-modules.test.mjs`; physical stop behavior remains hardware verification.

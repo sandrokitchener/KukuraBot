@@ -129,6 +129,15 @@ export function actionOncePreview(params = {}) {
 }
 
 export function nav2HealthBody(overrides = {}) {
+  const requiredLifecycleNodes = [
+    'map_server',
+    'controller_server',
+    'planner_server',
+    'behavior_server',
+    'bt_navigator',
+    'velocity_smoother',
+    'collision_monitor',
+  ]
   const nav2Override = overrides.nav2 ?? {}
   const nav2Available = nav2Override.available !== undefined ? nav2Override.available === true : true
   const odomOverride = nav2Override.odom && typeof nav2Override.odom === 'object' ? nav2Override.odom : {}
@@ -167,26 +176,30 @@ export function nav2HealthBody(overrides = {}) {
           publisherCount: odomAvailable ? 1 : 0,
           available: odomAvailable,
           messageAvailable: odomAvailable,
+          fresh: odomAvailable,
           tfAvailable: odomAvailable,
+          tfFresh: odomAvailable,
           ...odomOverride,
         },
         lifecycle: {
           active: lifecycleActive,
-          requiredNodes: ['controller_server', 'planner_server', 'bt_navigator', 'behavior_server'],
-          nodes: [
-            { name: 'controller_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
-            { name: 'planner_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
-            { name: 'bt_navigator', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
-            { name: 'behavior_server', active: lifecycleActive, state: lifecycleActive ? 'active' : 'inactive' },
-          ],
+          requiredNodes: requiredLifecycleNodes,
+          nodes: requiredLifecycleNodes.map((name) => ({
+            name,
+            active: lifecycleActive,
+            state: lifecycleActive ? 'active' : 'inactive',
+          })),
           error: lifecycleActive ? null : 'Nav2 lifecycle nodes are not active: controller_server',
           ...lifecycleOverride,
         },
         scan: {
           topic: '/scan_nav2',
           publisherCount: scanAvailable ? 1 : 0,
-          subscriptionCount: scanAvailable ? 2 : 0,
+          subscriptionCount: scanAvailable ? 3 : 0,
           available: scanAvailable,
+          messageAvailable: scanAvailable,
+          fresh: scanAvailable,
+          consumerNodes: scanAvailable ? ['local_costmap', 'global_costmap', 'collision_monitor'] : [],
           error: scanAvailable ? null : 'No LaserScan publishers visible on /scan_nav2',
           ...scanOverride,
         },

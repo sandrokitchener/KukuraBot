@@ -6,7 +6,7 @@ POSE_PORT="${POSE_PORT:-9090}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-16}"
 DOGZILLA_MAP_POSE_MODE="${DOGZILLA_MAP_POSE_MODE:-auto}"
 DOGZILLA_MAP_POSE_OCCUPANCY_GRID="${DOGZILLA_MAP_POSE_OCCUPANCY_GRID:-auto}"
-DOGZILLA_MAP_POSE_RESTORE_ONLY="${DOGZILLA_MAP_POSE_RESTORE_ONLY:-0}"
+DOGZILLA_MAP_POSE_SKIP_RELOCALIZATION="${DOGZILLA_MAP_POSE_SKIP_RELOCALIZATION:-0}"
 DOGZILLA_MAP_METADATA="${DOGZILLA_MAP_METADATA:-$REMOTE_ROOT/maps/robodoge_home_map.json}"
 DOGZILLA_MAP_PBSTREAM="${DOGZILLA_MAP_PBSTREAM:-}"
 DOGZILLA_IMU_AVAILABLE="${DOGZILLA_IMU_AVAILABLE:-false}"
@@ -15,12 +15,21 @@ export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/maps" "$REMOTE_ROOT/logs"
 
+# A systemd fallback may need to start the long-lived container without also
+# running the caller's explicit relocalization transaction. The SSH launcher
+# drops this one-shot marker before starting systemd.
+SKIP_RELOCALIZATION_MARKER="$REMOTE_ROOT/maps/robodoge_map_pose_skip_relocalization"
+READY_MARKER="$REMOTE_ROOT/maps/robodoge_map_pose_ready"
+rm -f "$READY_MARKER"
+if [ -f "$SKIP_RELOCALIZATION_MARKER" ]; then
+  DOGZILLA_MAP_POSE_SKIP_RELOCALIZATION=1
+  rm -f "$SKIP_RELOCALIZATION_MARKER"
+fi
+
 # Kill stale ROS2 daemon early; a stuck daemon can make topic/action probes hang.
 pkill -9 -f "ros2.*daemon" 2>/dev/null || true
 
-# Skip flock when invoked via docker exec (SSH launcher) — the systemd
-# container already holds the startup lock via its monitoring loop.
-if [ -z "$DOGZILLA_DOCKER_EXEC" ] && command -v flock >/dev/null 2>&1; then
+if command -v flock >/dev/null 2>&1; then
   exec 8>"$REMOTE_ROOT/logs/map-pose-startup.lock"
   if ! flock -w "${DOGZILLA_MAP_POSE_START_LOCK_TIMEOUT_SEC:-300}" 8; then
     echo "Timed out waiting for another DOGZILLA map-pose startup to finish." >&2
@@ -80,39 +89,37 @@ if [ "${#missing_packages[@]}" -gt 0 ]; then
   exit 2
 fi
 
-if [ -s "$DOGZILLA_MAP_METADATA" ]; then
+if [ "$DOGZILLA_MAP_POSE_MODE" != "mapping" ]; then
   requested_pbstream="$DOGZILLA_MAP_PBSTREAM"
-  DOGZILLA_MAP_PBSTREAM="$(python3 - "$DOGZILLA_MAP_METADATA" <<'PY'
-import hashlib
-import json
+  if ! manifest_pbstream="$(python3 - "$DOGZILLA_MAP_METADATA" "$REMOTE_ROOT/sidecars/dogzilla_lib_bridge" <<'PY'
 import sys
 from pathlib import Path
 
-metadata_path = Path(sys.argv[1])
-try:
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(0)
+sys.path.insert(0, sys.argv[2])
+from map_metadata import read_active_map_metadata
 
-artifact = (metadata.get("artifacts") or {}).get("pbstream") or {}
-pbstream = str(artifact.get("path") or metadata.get("pbstream") or "").strip()
-expected_hash = str(artifact.get("sha256") or "").strip()
-if not pbstream or len(expected_hash) != 64:
-    raise SystemExit(0)
-path = Path(pbstream)
-if not path.is_absolute():
-    path = metadata_path.parent / path
-if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
-    raise SystemExit(0)
-print(path)
+metadata = read_active_map_metadata(Path(sys.argv[1]))
+if metadata.get("available") is not True:
+    print(
+        f"Active map validation failed: {metadata.get('error') or 'unknown_error'}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+pbstream = str(metadata.get("pbstream") or "").strip()
+if not pbstream:
+    print("Active map validation failed: verified pbstream missing", file=sys.stderr)
+    raise SystemExit(1)
+print(pbstream)
 PY
-)"
-fi
-if [ "$DOGZILLA_MAP_POSE_MODE" != "mapping" ]; then
-  if [ -z "$DOGZILLA_MAP_PBSTREAM" ] || { [ -n "${requested_pbstream:-}" ] && [ "$requested_pbstream" != "$DOGZILLA_MAP_PBSTREAM" ]; }; then
+)"; then
     echo "Active map manifest missing, invalid, or overridden: $DOGZILLA_MAP_METADATA" >&2
     exit 2
   fi
+  if [ -n "$requested_pbstream" ] && [ "$requested_pbstream" != "$manifest_pbstream" ]; then
+    echo "Active map manifest missing, invalid, or overridden: $DOGZILLA_MAP_METADATA" >&2
+    exit 2
+  fi
+  DOGZILLA_MAP_PBSTREAM="$manifest_pbstream"
 fi
 
 IMU_CONFIG=""
@@ -255,12 +262,8 @@ elif pgrep -f "[c]artographer_node.*robodoge_dogzilla_laser_only" >/dev/null 2>&
     echo "Cartographer running in '${CURRENT_MODE:-unknown}' mode, '$mode' requested. Forcing restart." >&2
     SHOULD_RESTART=true
   elif [ "${CARTOGRAPHER_COUNT:-0}" -gt 1 ]; then
-    if [ -n "$DOGZILLA_DOCKER_EXEC" ]; then
-      echo "Cartographer has $CARTOGRAPHER_COUNT processes but running via docker exec; skipping force-restart to avoid killing the ENTRYPOINT's Cartographer." >&2
-    else
-      echo "Cartographer has $CARTOGRAPHER_COUNT matching processes in '$mode' mode. Forcing clean restart." >&2
-      SHOULD_RESTART=true
-    fi
+    echo "Cartographer has $CARTOGRAPHER_COUNT matching processes in '$mode' mode. Forcing clean restart." >&2
+    SHOULD_RESTART=true
   else
     echo "Cartographer already running in '$mode' mode. Skipping restart." >&2
   fi
@@ -270,7 +273,7 @@ fi
 
 if [ "$SHOULD_RESTART" = "true" ]; then
   stop_existing_cartographer
-  if [ "$mode" = "localization" ]; then
+  if [ "$mode" = "localization" ] && [ "$DOGZILLA_MAP_POSE_SKIP_RELOCALIZATION" != "1" ]; then
     rm -f "$REMOTE_ROOT/maps/robodoge_localization_status.json"
   fi
 
@@ -308,6 +311,13 @@ if [ "$SHOULD_RESTART" = "true" ]; then
 fi
 
 if [ "$mode" = "continue_mapping" ]; then
+  if ! pgrep -f "[s]tatic_transform_publisher.*base_link laser_frame" >/dev/null 2>&1; then
+    (
+      exec 8>&- 2>/dev/null || true
+      nohup ros2 run tf2_ros static_transform_publisher 0 0 0.18 0 0 0 base_link laser_frame > "$REMOTE_ROOT/logs/map-pose-static-tf.log" 2>&1 &
+    )
+    sleep 1
+  fi
   recovery_args=(
     python3 "$REMOTE_ROOT/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py"
     --remote-root "$REMOTE_ROOT"
@@ -324,21 +334,16 @@ if [ "$mode" = "continue_mapping" ]; then
     echo "Continue mapping could not prove and preserve the robot pose; normal localization was restored." >&2
     exit 3
   fi
-elif [ "$mode" = "localization" ] && [ "$DOGZILLA_MAP_POSE_RESTORE_ONLY" != "1" ]; then
+elif [ "$mode" = "localization" ] && [ "$DOGZILLA_MAP_POSE_SKIP_RELOCALIZATION" != "1" ]; then
   recovery_args=(
     python3 "$REMOTE_ROOT/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py"
     --remote-root "$REMOTE_ROOT"
   )
-  if [ "${DOGZILLA_NAV2_PROVEN_INACTIVE:-0}" = "1" ] || [ -z "$DOGZILLA_DOCKER_EXEC" ]; then
-    recovery_args+=(--no-pause-nav2)
-  fi
+  recovery_args+=(--no-pause-nav2)
   if "${recovery_args[@]}"; then
     echo "Cartographer global relocalization proved against the frozen map." >&2
   else
     echo "Cartographer global relocalization was not proved; navigation remains blocked." >&2
-    if [ -n "$DOGZILLA_DOCKER_EXEC" ]; then
-      exit 3
-    fi
   fi
 fi
 
@@ -357,17 +362,10 @@ else
   pkill -TERM -f "[c]artographer_occupancy_grid_node" 2>/dev/null || true
 fi
 
-python3 - <<'PY' || echo "Map-pose TF not ready after startup probe; keeping Cartographer alive for recovery." >&2
+if ! python3 - <<'PY'
 import json
 import math
-import os
 import time
-
-# When invoked via docker exec (SSH launcher), skip the pose poll — the app
-# checks pose readiness separately after the SSH command returns.
-if os.environ.get("DOGZILLA_DOCKER_EXEC"):
-    print(json.dumps({"status": "ok", "skipped": "docker-exec"}))
-    raise SystemExit(0)
 
 import rclpy
 from rclpy.node import Node
@@ -378,7 +376,6 @@ node = Node("robodoge_map_pose_ready_check")
 tf_buffer = Buffer(cache_time=rclpy.duration.Duration(seconds=5.0))
 TransformListener(tf_buffer, node)
 
-started_at = time.time()
 last = None
 for _ in range(40):
     time.sleep(0.75)
@@ -414,17 +411,17 @@ rclpy.shutdown()
 print(json.dumps({"status": "error", "last": last}, sort_keys=True))
 raise SystemExit(1)
 PY
-
-# Keep the container alive as long as Cartographer is running ONLY when we are
-# the container's main process (launched by systemd via `docker run`).
-# When invoked via `docker exec` (SSH launcher), DOGZILLA_DOCKER_EXEC is set
-# and we exit after setup so SSH returns.
-if [ -z "$DOGZILLA_DOCKER_EXEC" ]; then
-  echo "Map-pose startup complete; monitoring Cartographer..."
-  while pgrep -f "[c]artographer_node" >/dev/null 2>&1; do
-    sleep 2
-  done
-  echo "Cartographer process not found; exiting so systemd can restart." >&2
-  pkill -9 -f "ros2.*daemon" 2>/dev/null || true
-  exit 1
+then
+  echo "Map-pose TF not ready after startup probe; refusing to publish the ready marker." >&2
+  rm -f "$READY_MARKER"
+  exit 4
 fi
+
+touch "$READY_MARKER"
+echo "Map-pose startup complete; monitoring Cartographer..."
+while pgrep -f "[c]artographer_node" >/dev/null 2>&1; do
+  sleep 2
+done
+echo "Cartographer process not found; exiting so systemd can restart." >&2
+pkill -9 -f "ros2.*daemon" 2>/dev/null || true
+exit 1

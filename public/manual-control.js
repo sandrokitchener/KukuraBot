@@ -356,7 +356,7 @@ export function createManualControlController({
     state.gamepadIndex = gamepad.index
     const now = Date.now()
     if (state.lastSentAt && state.lastVector && hasManualVectorInput(state.lastVector) && now - state.lastSentAt > MANUAL_CONTROL_SAFETY_TIMEOUT_MS) {
-      stopForSafety('manual-control-timeout', 'Manual control stopped: command lease timed out.')
+      stopForSafety('manual-control-timeout', 'Manual control stopped: robot bridge stopped answering.')
       return
     }
       const rawVector = readManualGamepadVector(gamepad)
@@ -632,11 +632,13 @@ export function readManualGamepadVector(gamepad) {
   const axes = gamepad?.axes || []
   const leftX = normalizeManualAxis(axes[0])
   const leftY = normalizeManualAxis(axes[1])
-  const rightX = normalizeManualAxis(axes[2] ?? axes[3])
+  const rightXAxis = gamepad?.mapping === 'standard' || axes[3] == null ? axes[2] : axes[3]
+  const rightX = normalizeManualAxis(rightXAxis)
+  const strafe = Math.abs(leftY) >= Math.abs(leftX) ? 0 : -leftX
 
   return {
     forward: normalizeManualAxis(-leftY),
-    strafe: normalizeManualAxis(-leftX),
+    strafe: normalizeManualAxis(strafe),
     turn: normalizeManualAxis(-rightX),
   }
 }

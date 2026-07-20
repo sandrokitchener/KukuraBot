@@ -13,6 +13,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+STALLED_GOAL_RETRY_SEC = 120.0
+
 
 def _is_free(value: int) -> bool:
     return 0 <= value <= 50
@@ -37,6 +39,8 @@ def _process_is_running(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        return False
     return True
 
 
@@ -82,7 +86,9 @@ def release_explorer_lock(path: str, token: str) -> None:
 
 
 def _cancel_acknowledged(response: Any) -> bool:
-    return bool(getattr(response, "goals_canceling", None))
+    # A goal that already reached a terminal state is not returned in
+    # goals_canceling, but CancelGoal still reports success (return_code 0).
+    return int(getattr(response, "return_code", -1)) == 0 or bool(getattr(response, "goals_canceling", None))
 
 
 def _nearest_free(cells: list[int], width: int, height: int, start_x: int, start_y: int) -> tuple[int, int] | None:
@@ -212,9 +218,13 @@ class FrontierExplorer:
         self.goal_started_at = 0.0
         self.goal_progress_at = 0.0
         self.goal_best_distance = math.inf
+        self.goal_last_pose: tuple[float, float] | None = None
+        self.goal_displacement = 0.0
+        self.session_max_goal_displacement = 0.0
         self.goal_count = 0
         self.failures = 0
         self.failed_goals: list[dict[str, float]] = []
+        self.stalled_goals: list[dict[str, float]] = []
         self.no_frontier_cycles = 0
         self.finished = False
         self.cancel_future: Any | None = None
@@ -260,6 +270,7 @@ class FrontierExplorer:
             "goalCount": self.goal_count,
             "failures": self.failures,
             "failedGoals": self.failed_goals,
+            "stalledGoals": self.stalled_goals,
             "updatedAt": time.time(),
         }
         temporary = path.with_suffix(path.suffix + ".tmp")
@@ -296,20 +307,29 @@ class FrontierExplorer:
         if self.cancel_future is not None:
             return True
         handle = self.goal_handle
-        self.goal_handle = None
-        self.goal_started_at = 0.0
-        if self.current_goal is not None:
-            self.cancelled_goal_keys.add(self._goal_key(self.current_goal))
-        self.current_goal = None
         if handle is None:
+            self.goal_started_at = 0.0
+            self.goal_last_pose = None
+            self.current_goal = None
             return False
+        goal = self.current_goal
+        goal_key = self._goal_key(goal) if goal is not None else None
         try:
             self.cancel_future = handle.cancel_goal_async()
         except Exception as error:
-            self.cancellation_failed = True
-            self.status["lastError"] = f"Nav2 goal cancellation failed: {error}"
-            self._write_status()
-            return True
+            try:
+                self.cancel_future = handle.cancel_goal_async()
+            except Exception:
+                self.cancellation_failed = True
+                reason = f"Nav2 goal cancellation failed: {error}"
+                self._finish_now("stopped", reason)
+                return False
+        self.goal_handle = None
+        self.goal_started_at = 0.0
+        self.goal_last_pose = None
+        if goal_key is not None:
+            self.cancelled_goal_keys.add(goal_key)
+        self.current_goal = None
         self.cancel_deadline = time.monotonic() + max(0.1, self.args.cancel_timeout)
         self.cancel_timeout_reported = False
         return True
@@ -329,6 +349,16 @@ class FrontierExplorer:
         self.status.update({"state": "waiting", "lastError": reason})
         self._write_status()
 
+    def _record_goal_stall(self, goal: dict[str, float | int], reason: str) -> None:
+        if not any(
+            math.hypot(float(goal["x"]) - stalled["x"], float(goal["y"]) - stalled["y"])
+            < self.args.failed_goal_radius
+            for stalled in self.stalled_goals
+        ):
+            self.stalled_goals.append({"x": float(goal["x"]), "y": float(goal["y"]), "at": time.monotonic()})
+        self.status.update({"state": "waiting", "lastError": reason, "goalFailureType": "stall_observed"})
+        self._write_status()
+
     def _wait_for_goal_cancellation(self) -> bool:
         if self.cancellation_failed:
             return False
@@ -337,8 +367,10 @@ class FrontierExplorer:
         if not self.cancel_future.done():
             if time.monotonic() >= self.cancel_deadline and not self.cancel_timeout_reported:
                 self.cancel_timeout_reported = True
-                self.status.update({"state": "stopping", "lastError": "Nav2 did not acknowledge goal cancellation"})
-                self._write_status()
+                self.cancellation_failed = True
+                reason = "Nav2 did not acknowledge goal cancellation"
+                self.status.update({"state": "stopped", "reason": reason, "lastError": reason})
+                self._finish_now("stopped", reason)
             return False
         future = self.cancel_future
         self.cancel_future = None
@@ -346,13 +378,13 @@ class FrontierExplorer:
             response = future.result()
         except Exception as error:
             self.cancellation_failed = True
-            self.status["lastError"] = f"Nav2 goal cancellation failed: {error}"
-            self._write_status()
+            reason = f"Nav2 goal cancellation failed: {error}"
+            self._finish_now("stopped", reason)
             return False
         if not _cancel_acknowledged(response):
             self.cancellation_failed = True
-            self.status["lastError"] = "Nav2 did not acknowledge goal cancellation"
-            self._write_status()
+            reason = "Nav2 did not acknowledge goal cancellation"
+            self._finish_now("stopped", reason)
             return False
         return True
 
@@ -360,9 +392,21 @@ class FrontierExplorer:
         try:
             handle = future.result()
         except Exception as error:
+            if self.finished or self.current_goal is None or self._goal_key(goal) != self._goal_key(self.current_goal):
+                return
             self.goal_handle = None
             self.current_goal = None
             self._record_goal_failure(goal, str(error))
+            return
+        goal_key = self._goal_key(goal)
+        current_key = self._goal_key(self.current_goal) if self.current_goal is not None else None
+        if self.finished or current_key != goal_key or goal_key in self.cancelled_goal_keys:
+            if handle is not None and getattr(handle, "accepted", False):
+                try:
+                    handle.cancel_goal_async()
+                except Exception:
+                    pass
+            self.cancelled_goal_keys.discard(goal_key)
             return
         if not handle or not handle.accepted:
             self.goal_handle = None
@@ -378,9 +422,12 @@ class FrontierExplorer:
         if goal_key in self.cancelled_goal_keys:
             self.cancelled_goal_keys.discard(goal_key)
             return
+        if self.finished or self.current_goal is None or goal_key != self._goal_key(self.current_goal):
+            return
         self.goal_handle = None
         self.current_goal = None
         self.goal_started_at = 0.0
+        self.goal_last_pose = None
         failure_reason = "Nav2 frontier goal failed"
         try:
             result = future.result()
@@ -393,8 +440,10 @@ class FrontierExplorer:
         if succeeded:
             self.failures = 0
             self.failed_goals.clear()
+            self.stalled_goals.clear()
             self.status.update({"state": "waiting", "reason": "frontier goal reached"})
             self.status.pop("lastError", None)
+            self.status.pop("goalFailureType", None)
             self._write_status()
         else:
             self._record_goal_failure(goal, failure_reason if result_status == 0 else f"Nav2 frontier goal failed with status {result_status}")
@@ -422,11 +471,14 @@ class FrontierExplorer:
         self.goal_started_at = time.monotonic()
         self.goal_progress_at = self.goal_started_at
         self.goal_best_distance = float(goal["distance"])
+        self.goal_last_pose = self._robot_pose()
+        self.goal_displacement = 0.0
         self.current_goal = goal
         self.goal_count += 1
-        self.status.update({"state": "navigating", "goal": goal, "goalBestDistance": self.goal_best_distance})
+        self.status.update({"state": "navigating", "goal": goal, "goalBestDistance": self.goal_best_distance, "goalDisplacement": 0.0, "sessionMaxGoalDisplacement": self.session_max_goal_displacement})
         self.status.pop("reason", None)
         self.status.pop("lastError", None)
+        self.status.pop("goalFailureType", None)
         self._write_status()
         self.action_client.send_goal_async(message).add_done_callback(
             lambda response, sent_goal=goal: self._on_goal_response(response, sent_goal)
@@ -441,6 +493,10 @@ class FrontierExplorer:
             self._finish("stopped", "stop requested")
             return
         now = time.monotonic()
+        self.stalled_goals = [
+            stalled for stalled in self.stalled_goals
+            if now - float(stalled.get("at", now)) < STALLED_GOAL_RETRY_SEC
+        ]
         if self.map_message is None:
             if now - self.started_monotonic > self.args.map_timeout:
                 self._finish("stopped", "live SLAM map is stale")
@@ -458,7 +514,12 @@ class FrontierExplorer:
         if self.failures >= self.args.max_failures:
             self._finish("stopped", "too many Nav2 frontier failures")
             return
-        if self.goal_handle is not None:
+        if self.current_goal is not None:
+            if self.goal_handle is None:
+                if now - self.goal_started_at > self.args.action_timeout:
+                    self._record_goal_stall(self.current_goal, "Nav2 goal response timed out")
+                    self._cancel_goal()
+                return
             pose = self._robot_pose()
             if pose is None:
                 if self.pose_missing_at == 0.0:
@@ -469,6 +530,19 @@ class FrontierExplorer:
             self.pose_missing_at = 0.0
             goal = self.current_goal
             if goal is not None:
+                if self.goal_last_pose is not None:
+                    moved = math.hypot(pose[0] - self.goal_last_pose[0], pose[1] - self.goal_last_pose[1])
+                    if moved >= 0.05:
+                        self.goal_displacement += moved
+                        self.session_max_goal_displacement = max(
+                            getattr(self, "session_max_goal_displacement", 0.0),
+                            self.goal_displacement,
+                        )
+                        self.goal_last_pose = pose
+                        self.status.update({"goalDisplacement": self.goal_displacement, "sessionMaxGoalDisplacement": self.session_max_goal_displacement})
+                        self._write_status()
+                else:
+                    self.goal_last_pose = pose
                 distance = math.hypot(float(goal["x"]) - pose[0], float(goal["y"]) - pose[1])
                 if distance <= self.goal_best_distance - self.args.goal_progress_distance:
                     self.goal_best_distance = distance
@@ -477,11 +551,11 @@ class FrontierExplorer:
                     self._write_status()
             if now - self.goal_started_at > self.args.goal_max_duration:
                 if goal is not None:
-                    self._record_goal_failure(goal, "frontier goal exceeded maximum duration")
+                    self._record_goal_stall(goal, "frontier goal exceeded maximum duration; Nav2 result not yet failed")
                 self._cancel_goal()
             elif now - self.goal_progress_at > self.args.goal_timeout:
                 if goal is not None:
-                    self._record_goal_failure(goal, "frontier goal stalled without progress")
+                    self._record_goal_stall(goal, "frontier goal stalled; Nav2 result not yet failed")
                 self._cancel_goal()
             return
         if self.goal_count >= self.args.max_goals:
@@ -511,10 +585,18 @@ class FrontierExplorer:
             min_distance=self.args.min_goal_distance,
             max_distance=self.args.max_goal_distance,
             clearance_cells=max(0, int(math.ceil(self.args.goal_clearance / float(info.resolution)))),
-            excluded_goals=self.failed_goals,
+            excluded_goals=self.failed_goals + self.stalled_goals,
             exclusion_radius=self.args.failed_goal_radius,
         )
         if goal is None:
+            if self.stalled_goals:
+                # A stall is ambiguous: Nav2 did not report failure, so do not
+                # turn its temporary exclusion into map completion. Hold the
+                # run until the quarantine expires, then retry the frontier.
+                self.no_frontier_cycles = 0
+                self.status.update({"state": "waiting", "reason": "waiting for stalled frontier retry"})
+                self._write_status()
+                return
             self.no_frontier_cycles += 1
             self.status.update({"state": "waiting", "reason": "no safe reachable frontier"})
             self._write_status()

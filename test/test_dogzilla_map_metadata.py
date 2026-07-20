@@ -51,6 +51,128 @@ class DogzillaMapMetadataTests(unittest.TestCase):
             self.assertFalse(result["available"])
             self.assertEqual(result["error"], "active_map_artifact_hash_mismatch:pgm")
 
+    def test_goal_validation_requires_matching_map_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = root / "active.yaml"
+            pgm_path = root / "active.pgm"
+            metadata_path = root / "active_map.json"
+            yaml_path.write_text(
+                "image: active.pgm\nresolution: 0.05\norigin: [-1, -1, 0]\n",
+                encoding="utf-8",
+            )
+            pgm_path.write_bytes(b"P5\n40 40\n255\n" + bytes(1600))
+            metadata_path.write_text(json.dumps({
+                "id": "active-map",
+                "artifacts": {
+                    "yaml": {"path": yaml_path.name, "sha256": hashlib.sha256(yaml_path.read_bytes()).hexdigest()},
+                    "pgm": {"path": pgm_path.name, "sha256": hashlib.sha256(pgm_path.read_bytes()).hexdigest()},
+                },
+            }), encoding="utf-8")
+            active = map_metadata.read_active_map_metadata(metadata_path, yaml_path)
+
+            matching = map_metadata.validate_goal_inside_active_map(
+                "map",
+                0.0,
+                0.0,
+                metadata_path=metadata_path,
+                default_yaml_path=yaml_path,
+                map_id="active-map",
+                map_fingerprint=active["fingerprint"],
+            )
+            missing = map_metadata.validate_goal_inside_active_map(
+                "map",
+                0.0,
+                0.0,
+                metadata_path=metadata_path,
+                default_yaml_path=yaml_path,
+            )
+            wrong_id = map_metadata.validate_goal_inside_active_map(
+                "map",
+                0.0,
+                0.0,
+                metadata_path=metadata_path,
+                default_yaml_path=yaml_path,
+                map_id="old-map",
+                map_fingerprint=active["fingerprint"],
+            )
+            wrong_fingerprint = map_metadata.validate_goal_inside_active_map(
+                "map",
+                0.0,
+                0.0,
+                metadata_path=metadata_path,
+                default_yaml_path=yaml_path,
+                map_id="active-map",
+                map_fingerprint="old-fingerprint",
+            )
+
+            self.assertTrue(matching["ok"])
+            self.assertEqual(matching["reason"], "map-identity-match")
+            self.assertEqual(missing["reason"], "map-identity-missing")
+            self.assertEqual(wrong_id["reason"], "map-id-mismatch")
+            self.assertEqual(wrong_fingerprint["reason"], "map-fingerprint-mismatch")
+
+    def test_active_map_without_explicit_id_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = root / "active.yaml"
+            pgm_path = root / "active.pgm"
+            metadata_path = root / "active_map.json"
+            yaml_path.write_text("image: active.pgm\nresolution: 0.05\norigin: [0, 0, 0]\n", encoding="utf-8")
+            pgm_path.write_bytes(b"P5\n2 2\n255\n\x00\x00\x00\x00")
+            metadata_path.write_text(json.dumps({
+                "artifacts": {
+                    "yaml": {"path": yaml_path.name, "sha256": hashlib.sha256(yaml_path.read_bytes()).hexdigest()},
+                    "pgm": {"path": pgm_path.name, "sha256": hashlib.sha256(pgm_path.read_bytes()).hexdigest()},
+                },
+            }), encoding="utf-8")
+
+            result = map_metadata.read_active_map_metadata(metadata_path, yaml_path)
+
+            self.assertFalse(result["available"])
+            self.assertEqual(result["error"], "active_map_id_missing")
+
+    def test_yaml_image_must_resolve_to_manifest_pgm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            yaml_path = root / "active.yaml"
+            pgm_path = root / "active.pgm"
+            other_pgm_path = root / "other.pgm"
+            metadata_path = root / "active_map.json"
+            pgm_path.write_bytes(b"P5\n2 2\n255\n\x00\x00\x00\x00")
+            other_pgm_path.write_bytes(b"P5\n2 2\n255\n\xff\xff\xff\xff")
+            yaml_path.write_text(
+                "image: other.pgm\nresolution: 0.05\norigin: [0, 0, 0]\n",
+                encoding="utf-8",
+            )
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "id": "active-map",
+                        "artifacts": {
+                            "yaml": {
+                                "path": yaml_path.name,
+                                "sha256": hashlib.sha256(
+                                    yaml_path.read_bytes()
+                                ).hexdigest(),
+                            },
+                            "pgm": {
+                                "path": pgm_path.name,
+                                "sha256": hashlib.sha256(
+                                    pgm_path.read_bytes()
+                                ).hexdigest(),
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = map_metadata.read_active_map_metadata(metadata_path, yaml_path)
+
+            self.assertFalse(result["available"])
+            self.assertEqual(result["error"], "active_map_yaml_image_mismatch")
+
 
 if __name__ == "__main__":
     unittest.main()

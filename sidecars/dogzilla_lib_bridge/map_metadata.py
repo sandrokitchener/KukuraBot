@@ -52,6 +52,14 @@ def read_active_map_metadata(
             "error": "active_map_manifest_missing",
         }
 
+    map_id = str(info.get("id") or "").strip()
+    if not map_id:
+        return {
+            "available": False,
+            "metadataFile": str(metadata_path),
+            "error": "active_map_id_missing",
+        }
+
     artifacts = info.get("artifacts")
     if not isinstance(artifacts, dict):
         return {
@@ -93,9 +101,28 @@ def read_active_map_metadata(
     yaml_path = artifact_paths["yaml"]
     try:
         yaml_info = read_ros_map_yaml(yaml_path)
+        yaml_image = str(yaml_info.get("image") or "").strip()
+        if not yaml_image:
+            return {
+                "available": False,
+                "metadataFile": str(metadata_path),
+                "yaml": str(yaml_path),
+                "error": "active_map_yaml_image_missing",
+            }
+        yaml_image_path = Path(yaml_image)
+        if not yaml_image_path.is_absolute():
+            yaml_image_path = yaml_path.parent / yaml_image_path
+        pgm_path = artifact_paths["pgm"]
+        if yaml_image_path.resolve() != pgm_path.resolve():
+            return {
+                "available": False,
+                "metadataFile": str(metadata_path),
+                "yaml": str(yaml_path),
+                "pgm": str(pgm_path),
+                "error": "active_map_yaml_image_mismatch",
+            }
         resolution = float(yaml_info["resolution"])
         origin = yaml_info["origin"]
-        pgm_path = artifact_paths["pgm"]
         width_cells, height_cells = read_pgm_size(pgm_path)
         pbstream_path = artifact_paths.get("pbstream")
         files = {
@@ -111,7 +138,7 @@ def read_active_map_metadata(
         max_y = min_y + height_cells * resolution
         result = {
             "available": True,
-            "id": str(info.get("id") or yaml_path.stem),
+            "id": map_id,
             "metadataFile": str(metadata_path),
             "yaml": str(yaml_path),
             "pgm": str(pgm_path),
@@ -221,16 +248,59 @@ def validate_goal_inside_active_map(
     source_frame: str = "",
     metadata_path: Path = DEFAULT_MAP_METADATA_FILE,
     default_yaml_path: Path = DEFAULT_MAP_YAML_FILE,
+    map_id: str = "",
+    map_fingerprint: str = "",
 ) -> dict[str, Any]:
     metadata = read_active_map_metadata(metadata_path, default_yaml_path)
     if frame != "map":
         return {"ok": True, "map": metadata}
+    waypoint_identity = {
+        "id": str(map_id or "").strip(),
+        "fingerprint": str(map_fingerprint or "").strip(),
+    }
     if not metadata.get("available") or not isinstance(metadata.get("bounds"), dict):
         return {
             "ok": False,
             "reason": "map-metadata-unavailable",
             "map": metadata,
+            "waypointIdentity": waypoint_identity,
             "message": metadata.get("error") or "active map metadata unavailable",
+        }
+    active_identity = {
+        "id": str(metadata.get("id") or "").strip(),
+        "fingerprint": str(metadata.get("fingerprint") or "").strip(),
+    }
+    if not all(waypoint_identity.values()):
+        return {
+            "ok": False,
+            "reason": "map-identity-missing",
+            "map": metadata,
+            "waypointIdentity": waypoint_identity,
+            "message": "waypoint map identity is required; both mapId and mapFingerprint must be present",
+        }
+    if not all(active_identity.values()):
+        return {
+            "ok": False,
+            "reason": "map-identity-missing",
+            "map": metadata,
+            "waypointIdentity": waypoint_identity,
+            "message": "active map identity is required; both id and fingerprint must be present",
+        }
+    if waypoint_identity["id"] != active_identity["id"]:
+        return {
+            "ok": False,
+            "reason": "map-id-mismatch",
+            "map": metadata,
+            "waypointIdentity": waypoint_identity,
+            "message": f'waypoint map id "{waypoint_identity["id"]}" does not match active map id "{active_identity["id"]}"',
+        }
+    if waypoint_identity["fingerprint"] != active_identity["fingerprint"]:
+        return {
+            "ok": False,
+            "reason": "map-fingerprint-mismatch",
+            "map": metadata,
+            "waypointIdentity": waypoint_identity,
+            "message": "waypoint map fingerprint does not match the active map fingerprint",
         }
     bounds = metadata["bounds"]
     min_x = float(bounds["minX"])
@@ -242,6 +312,12 @@ def validate_goal_inside_active_map(
             "ok": False,
             "reason": "off-map",
             "map": metadata,
+            "waypointIdentity": waypoint_identity,
             "message": f"goal ({x:.2f}, {y:.2f}) outside active map bounds x {min_x:.2f}..{max_x:.2f}, y {min_y:.2f}..{max_y:.2f}",
         }
-    return {"ok": True, "map": metadata}
+    return {
+        "ok": True,
+        "reason": "map-identity-match",
+        "map": metadata,
+        "waypointIdentity": waypoint_identity,
+    }

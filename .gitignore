@@ -17,3 +17,4 @@ sidecars/isaac_bridge/command_log.ndjson
 sidecars/isaac_bridge/runtime_feedback.json
 sidecars/dogzilla_lib_bridge/command_log.ndjson
 sidecars/dogzilla_lib_bridge/runtime_feedback.json
+public/sounds/robodoge-audio-*.wav

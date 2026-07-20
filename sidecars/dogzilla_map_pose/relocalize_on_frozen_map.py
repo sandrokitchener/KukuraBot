@@ -111,7 +111,6 @@ class AtomicStatus:
             "phase": "starting",
             "error": None,
             "recoveredPose": None,
-            "localPose": None,
             "frozenTrajectoryIds": [],
             "recoveryTrajectoryId": None,
             "normalTrajectoryId": None,
@@ -342,9 +341,6 @@ class Relocalizer:
             matched_trajectory_id = select_anchor_trajectory(constraints, frozen_ids)
             map_anchor_id = frozen_ids[0]
             self.status.update(phase="stabilizing_recovered_pose", matchedAt=iso_now())
-            local_pose = self._wait_for_stable_transform(
-                "odom", "base_link", recovery_started_ns
-            )
             self.status.update(phase="finishing_recovery_trajectory")
             self.recovery_services.finish(
                 self.recovery_trajectory_id, self.args.finish_timeout_sec
@@ -357,7 +353,6 @@ class Relocalizer:
                 require_fresh=False,
             )
             self.status.update(
-                localPose=local_pose,
                 recoveredPose=recovered_pose,
                 acceptedCrossTrajectoryConstraintCount=len(constraints),
                 acceptedCrossTrajectoryConstraintScores=[
@@ -962,8 +957,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--finish-timeout-sec", type=float, default=90.0)
     parser.add_argument("--stable-timeout-sec", type=float, default=15.0)
     parser.add_argument("--process-stop-timeout-sec", type=float, default=5.0)
-    parser.add_argument("--min-score-percent", type=float, default=55.0)
-    parser.add_argument("--min-cross-nodes", type=int, default=3)
+    parser.add_argument("--min-score-percent", type=float, default=45.0)
+    parser.add_argument("--min-cross-nodes", type=int, default=2)
     parser.add_argument("--stable-samples", type=int, default=5)
     parser.add_argument("--stable-position-tolerance-m", type=float, default=0.10)
     parser.add_argument("--stable-yaw-tolerance-rad", type=float, default=0.10)
@@ -971,10 +966,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--handoff-yaw-tolerance-rad", type=float, default=0.25)
     parser.add_argument("--transform-max-age-sec", type=float, default=2.0)
     args = parser.parse_args()
-    if args.min_score_percent < 55.0:
-        parser.error("--min-score-percent cannot be lower than 55")
-    if args.min_cross_nodes < 3:
-        parser.error("--min-cross-nodes cannot be lower than 3")
+    if args.min_score_percent < 45.0:
+        parser.error("--min-score-percent cannot be lower than 45")
+    if args.min_cross_nodes < 2:
+        parser.error("--min-cross-nodes cannot be lower than 2")
     if args.stable_samples < 3:
         parser.error("--stable-samples cannot be lower than 3")
     for name in (

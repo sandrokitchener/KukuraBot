@@ -310,7 +310,16 @@ test('waypoint controls rename, delete, and revalidate against the active map', 
   await writeFile(waypointFile, `${JSON.stringify({
     activeSet: 'home',
     sets: { home: { waypoints: {
-      old_name: { kind: 'map_pose', frame: 'map', x: 1, y: 1, yaw: 0, verified: true },
+      old_name: {
+        kind: 'map_pose',
+        frame: 'map',
+        x: 1,
+        y: 1,
+        yaw: 0,
+        verified: true,
+        mapId: health.runtime.map.id,
+        mapFingerprint: health.runtime.map.fingerprint,
+      },
       remove_me: { kind: 'map_pose', frame: 'map', x: 2, y: 2, yaw: 0, verified: true },
     } } },
   }, null, 2)}\n`, 'utf-8')

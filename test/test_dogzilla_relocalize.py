@@ -1,4 +1,5 @@
 import importlib.util
+import inspect
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -36,6 +37,14 @@ def load_relocalizer_module():
 
 
 class RelocalizerTests(unittest.TestCase):
+    def test_recovery_handoff_does_not_gate_on_unused_local_odom_pose(self):
+        module = load_relocalizer_module()
+
+        source = inspect.getsource(module.Relocalizer.run)
+
+        self.assertNotIn('"odom", "base_link", recovery_started_ns', source)
+        self.assertIn('"map",\n                "base_link",', source)
+
     def test_recovery_process_detection_is_namespace_or_config_based(self):
         module = load_relocalizer_module()
 

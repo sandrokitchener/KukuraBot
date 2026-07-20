@@ -6,7 +6,7 @@ import os
 import subprocess
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from process_utils import parse_json_process_output, summarize_process_text
 
@@ -29,13 +29,57 @@ DEFAULT_NAV2_STATUS_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_STATUS_WA
 DEFAULT_NAV2_DOCKER_STATUS_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_DOCKER_STATUS_TIMEOUT", "30.0"))
 DEFAULT_NAV2_ODOM_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_ODOM_WAIT_TIMEOUT", "6.0"))
 DEFAULT_ODOM_TOPIC = os.environ.get("DOGZILLA_ODOM_TOPIC", "/odom")
-DEFAULT_NAV2_LIFECYCLE_NODES = tuple(
-    node.strip().lstrip("/")
-    for node in os.environ.get(
-        "DOGZILLA_NAV2_REQUIRED_ACTIVE_NODES",
-        "controller_server,planner_server,bt_navigator,behavior_server",
-    ).split(",")
-    if node.strip()
+DEFAULT_NAV2_ODOM_MAX_AGE_SEC = float(os.environ.get("DOGZILLA_NAV2_ODOM_MAX_AGE_SEC", "6.0"))
+DEFAULT_NAV2_TF_MAX_AGE_SEC = float(os.environ.get("DOGZILLA_NAV2_TF_MAX_AGE_SEC", "6.0"))
+_BASE_CRITICAL_LIFECYCLE_NODES = (
+    "map_server",
+    "controller_server",
+    "planner_server",
+    "behavior_server",
+    "bt_navigator",
+    "velocity_smoother",
+    "collision_monitor",
+)
+_NAV2_MAPPING_MODE = os.environ.get("DOGZILLA_NAV2_MAPPING_MODE", "0") == "1"
+_NAV2_LOCALIZATION_BACKEND = os.environ.get(
+    "DOGZILLA_LOCALIZATION_BACKEND", "cartographer"
+).strip().lower()
+
+
+def required_nav2_lifecycle_nodes(
+    configured: str | None = None,
+    *,
+    mapping_mode: bool | None = None,
+    localization_backend: str | None = None,
+) -> tuple[str, ...]:
+    """Return the mode-critical lifecycle set plus optional configured extensions."""
+
+    mapping = _NAV2_MAPPING_MODE if mapping_mode is None else bool(mapping_mode)
+    backend = str(
+        _NAV2_LOCALIZATION_BACKEND if localization_backend is None else localization_backend
+    ).strip().lower()
+    required = [
+        node for node in _BASE_CRITICAL_LIFECYCLE_NODES
+        if not (mapping and node == "map_server")
+    ]
+    if not mapping and backend == "amcl":
+        required.append("amcl")
+
+    configured_value = (
+        os.environ.get("DOGZILLA_NAV2_REQUIRED_ACTIVE_NODES", "")
+        if configured is None
+        else configured
+    )
+    for raw_node in str(configured_value or "").split(","):
+        node = raw_node.strip().lstrip("/")
+        if node and node not in required:
+            required.append(node)
+    return tuple(required)
+
+
+DEFAULT_NAV2_LIFECYCLE_NODES = required_nav2_lifecycle_nodes(
+    mapping_mode=_NAV2_MAPPING_MODE,
+    localization_backend=_NAV2_LOCALIZATION_BACKEND,
 )
 DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_LIFECYCLE_WAIT_TIMEOUT", "12.0"))
 DEFAULT_NAV2_LIFECYCLE_CACHE_INTERVAL_SEC = float(os.environ.get("DOGZILLA_NAV2_LIFECYCLE_CACHE_INTERVAL_SEC", "10.0"))
@@ -45,6 +89,9 @@ DEFAULT_NAV2_SCAN_TOPIC = os.environ.get(
     os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2"),
 )
 DEFAULT_NAV2_SCAN_WAIT_TIMEOUT = float(os.environ.get("DOGZILLA_NAV2_SCAN_WAIT_TIMEOUT", "2.0"))
+DEFAULT_NAV2_SCAN_MAX_AGE_SEC = float(os.environ.get("DOGZILLA_NAV2_SCAN_MAX_AGE_SEC", "6.0"))
+DEFAULT_NAV2_READINESS_FILE = os.environ.get("DOGZILLA_NAV2_READINESS_FILE", "/home/pi/robodoge/logs/navigation-readiness.json")
+DEFAULT_NAV2_READINESS_MAX_AGE_SEC = 6.0
 ROS_SETUP_COMMAND = (
     "source /opt/ros/humble/setup.bash 2>/dev/null || true; "
     "source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || "
@@ -52,7 +99,76 @@ ROS_SETUP_COMMAND = (
     "source /home/yahboom/yahboomcar_ws/install/setup.bash 2>/dev/null || true"
 )
 ODOM_BASE_FRAMES = ("base_link", "base_footprint")
+REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES = frozenset({"collision_monitor"})
 PRIMARY_STATE_ACTIVE = 3
+
+
+def sample_freshness(
+    timestamp: Any,
+    *,
+    max_age_sec: float,
+    now: float | None = None,
+) -> tuple[float | None, bool | None]:
+    if timestamp is None:
+        return None, None
+    try:
+        stamp = float(timestamp)
+    except (TypeError, ValueError):
+        return None, False
+    if not math.isfinite(stamp):
+        return None, False
+    age = max(0.0, (time.time() if now is None else float(now)) - stamp)
+    return age, age <= max(float(max_age_sec), 0.0)
+
+
+def goal_status_name(status: Any) -> str:
+    try:
+        status_id = int(status)
+    except (TypeError, ValueError):
+        status_id = 0
+    return {
+        1: "accepted",
+        2: "executing",
+        3: "canceling",
+        4: "succeeded",
+        5: "canceled",
+        6: "aborted",
+    }.get(status_id, f"status-{status_id}")
+
+
+def goal_uuid_hex(goal_handle: Any) -> str:
+    goal_id = getattr(goal_handle, "goal_id", None)
+    raw_uuid = getattr(goal_id, "uuid", None)
+    try:
+        value = bytes(raw_uuid).hex()
+    except (TypeError, ValueError):
+        value = ""
+    return value if len(value) == 32 else ""
+
+
+def nav2_scan_consumer_nodes(endpoint_infos: Any) -> list[str]:
+    """Return the reported ROS graph subscribers without assuming node names."""
+
+    consumers: set[str] = set()
+    for info in endpoint_infos or ():
+        node_name = str(getattr(info, "node_name", "") or "").strip().strip("/")
+        if not node_name:
+            continue
+        namespace = str(getattr(info, "node_namespace", "") or "").strip()
+        namespace = "/" + namespace.strip("/") if namespace.strip("/") else ""
+        consumers.add(f"{namespace}/{node_name}")
+    return sorted(consumers)
+
+
+def nav2_scan_consumer_status(endpoint_infos: Any) -> dict[str, list[str]]:
+    consumer_nodes = nav2_scan_consumer_nodes(endpoint_infos)
+    consumer_names = {node.rsplit("/", 1)[-1] for node in consumer_nodes}
+    return {
+        "consumerNodes": consumer_nodes,
+        "missingConsumerNodes": sorted(
+            REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES - consumer_names
+        ),
+    }
 
 
 def normalize_frame_id(value: Any) -> str:
@@ -66,20 +182,30 @@ def build_odom_unavailable_message(status: dict[str, Any]) -> str:
         return f"No publishers on {topic}"
     if status.get("messageAvailable") is not True:
         return f"{topic} has {publisher_count} publisher(s), but no live odometry samples were received."
+    if status.get("fresh") is False:
+        return f"{topic} odometry samples are stale."
     if status.get("tfAvailable") is not True:
         return f"{topic} publishes samples, but odom->base_link/base_footprint TF is unavailable."
+    if status.get("tfFresh") is False:
+        return f"{topic} publishes samples, but odom->base_link/base_footprint TF is stale."
     return f"Live odometry on {topic} is not ready."
 
 
 def build_lifecycle_unavailable_message(status: dict[str, Any]) -> str:
     nodes = status.get("nodes") if isinstance(status.get("nodes"), list) else []
+    missing = status.get("missingNodes") if isinstance(status.get("missingNodes"), list) else []
     inactive = [
         str(node.get("name") or "")
         for node in nodes
         if isinstance(node, dict) and node.get("active") is not True
     ]
-    if inactive:
-        return f"Nav2 lifecycle nodes are not active: {', '.join(inactive)}"
+    if missing or inactive:
+        details = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if inactive:
+            details.append(f"inactive: {', '.join(inactive)}")
+        return f"Nav2 lifecycle nodes are not active ({'; '.join(details)})"
     error = str(status.get("error") or "").strip()
     return error or "Nav2 lifecycle state was not proven active"
 
@@ -91,7 +217,14 @@ def build_scan_unavailable_message(status: dict[str, Any]) -> str:
     if publisher_count <= 0:
         return f"No LaserScan publishers visible on {topic}"
     if subscription_count <= 0:
-        return f"No Nav2 costmap subscribers visible on {topic}"
+        return f"No Nav2 subscribers visible on {topic}"
+    missing_consumers = status.get("missingConsumerNodes")
+    if isinstance(missing_consumers, list) and missing_consumers:
+        return f"Required safety scan consumer missing on {topic}: {', '.join(missing_consumers)}"
+    if status.get("messageAvailable") is not True:
+        return f"{topic} is connected in the ROS graph, but no live LaserScan samples were received"
+    if status.get("fresh") is False:
+        return f"{topic} LaserScan samples are stale"
     return f"Nav2 filtered scan topic {topic} is not ready"
 
 
@@ -117,7 +250,8 @@ def recover_nav2_node(
     2. If active, deactivate via ``change_state``.
     3. Wait briefly for the lifecycle manager to reactivate it.
 
-    Returns a dict with ``recovered``, ``node``, ``previousState``, ``error``.
+    Returns a dict with ``recovered``, `
+ode``, ``previousState``, ``error``.
     """
     try:
         import rclpy
@@ -574,37 +708,88 @@ def probe_scan_topic_with_retry(
 def probe_scan_topic(node: Any, *, topic: str, timeout_sec: float) -> dict[str, Any]:
     try:
         import rclpy
-    except Exception:
-        rclpy = None
+        from rclpy.qos import qos_profile_sensor_data
+        from sensor_msgs.msg import LaserScan
+    except Exception as error:
+        return {
+            "topic": topic,
+            "publisherCount": 0,
+            "subscriptionCount": 0,
+            "consumerNodes": [],
+            "missingConsumerNodes": sorted(REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES),
+            "available": False,
+            "messageAvailable": False,
+            "fresh": False,
+            "error": str(error),
+        }
 
     status: dict[str, Any] = {
         "topic": topic,
         "publisherCount": 0,
         "subscriptionCount": 0,
+        "consumerNodes": [],
+        "missingConsumerNodes": sorted(REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES),
         "available": False,
+        "messageAvailable": False,
+        "fresh": False,
         "checkedAt": time.time(),
     }
-    deadline = time.monotonic() + max(float(timeout_sec), 0.0)
-    while True:
-        try:
-            status["publisherCount"] = len(node.get_publishers_info_by_topic(topic))
-        except Exception:
-            status["publisherCount"] = 0
-        try:
-            status["subscriptionCount"] = len(node.get_subscriptions_info_by_topic(topic))
-        except Exception:
-            status["subscriptionCount"] = 0
+    def on_scan(_message: Any) -> None:
+        status["messageAvailable"] = True
+        status["lastMessageAt"] = time.time()
 
-        if status["publisherCount"] > 0 and status["subscriptionCount"] > 0:
-            break
-        if time.monotonic() >= deadline:
-            break
-        if rclpy is not None:
+    subscription = None
+    try:
+        subscription = node.create_subscription(
+            LaserScan,
+            topic,
+            on_scan,
+            qos_profile_sensor_data,
+        )
+        deadline = time.monotonic() + max(float(timeout_sec), 0.0)
+        while True:
+            try:
+                status["publisherCount"] = len(node.get_publishers_info_by_topic(topic))
+            except Exception:
+                status["publisherCount"] = 0
+            try:
+                subscription_infos = node.get_subscriptions_info_by_topic(topic)
+                status["rawSubscriptionCount"] = len(subscription_infos)
+                status.update(nav2_scan_consumer_status(subscription_infos))
+                status["subscriptionCount"] = len(status["consumerNodes"])
+            except Exception:
+                status["subscriptionCount"] = 0
+                status["consumerNodes"] = []
+                status["missingConsumerNodes"] = sorted(REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES)
+
+            if (
+                status["publisherCount"] > 0
+                and status["subscriptionCount"] > 0
+                and not status["missingConsumerNodes"]
+                and status["messageAvailable"] is True
+            ):
+                break
+            if time.monotonic() >= deadline:
+                break
             rclpy.spin_once(node, timeout_sec=0.1)
-        else:
-            time.sleep(0.1)
+    finally:
+        if subscription is not None:
+            try:
+                node.destroy_subscription(subscription)
+            except Exception:
+                pass
 
-    status["available"] = status["publisherCount"] > 0 and status["subscriptionCount"] > 0
+    status["ageSec"], status["fresh"] = sample_freshness(
+        status.get("lastMessageAt"),
+        max_age_sec=DEFAULT_NAV2_SCAN_MAX_AGE_SEC,
+    )
+    status["available"] = (
+        status["publisherCount"] > 0
+        and status["subscriptionCount"] > 0
+        and not status["missingConsumerNodes"]
+        and status["messageAvailable"] is True
+        and status["fresh"] is True
+    )
     status["error"] = None if status["available"] else build_scan_unavailable_message(status)
     return status
 
@@ -664,6 +849,8 @@ def probe_live_odom(node: Any, *, topic: str, timeout_sec: float) -> dict[str, A
         "available": False,
         "messageAvailable": False,
         "tfAvailable": False,
+        "fresh": False,
+        "tfFresh": False,
         "checkedAt": time.time(),
     }
 
@@ -695,11 +882,28 @@ def probe_live_odom(node: Any, *, topic: str, timeout_sec: float) -> dict[str, A
                         if tf_buffer.can_transform("odom", base_frame, Time(), timeout=Duration(seconds=0.0)):
                             status["tfAvailable"] = True
                             status["tfTargetFrame"] = base_frame
+                            try:
+                                transform = tf_buffer.lookup_transform("odom", base_frame, Time())
+                                stamp = getattr(getattr(transform, "header", None), "stamp", None)
+                                stamp_sec = float(getattr(stamp, "sec", 0) or 0) + (
+                                    float(getattr(stamp, "nanosec", 0) or 0) / 1_000_000_000.0
+                                )
+                                ros_now = node.get_clock().now().nanoseconds / 1_000_000_000.0
+                                status["tfStampSec"] = stamp_sec
+                                status["tfAgeSec"] = max(0.0, ros_now - stamp_sec)
+                                status["tfFresh"] = status["tfAgeSec"] <= DEFAULT_NAV2_TF_MAX_AGE_SEC
+                                status["tfLastMessageAt"] = time.time()
+                            except Exception:
+                                status["tfFresh"] = False
                             break
                     except Exception as error:
                         tf_error = str(error)
 
-            if status.get("messageAvailable") is True and status.get("tfAvailable") is True:
+            if (
+                status.get("messageAvailable") is True
+                and status.get("tfAvailable") is True
+                and status.get("tfFresh") is True
+            ):
                 break
 
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -710,6 +914,19 @@ def probe_live_odom(node: Any, *, topic: str, timeout_sec: float) -> dict[str, A
                     if tf_buffer.can_transform("odom", base_frame, Time(), timeout=Duration(seconds=0.1)):
                         status["tfAvailable"] = True
                         status["tfTargetFrame"] = base_frame
+                        try:
+                            transform = tf_buffer.lookup_transform("odom", base_frame, Time())
+                            stamp = getattr(getattr(transform, "header", None), "stamp", None)
+                            stamp_sec = float(getattr(stamp, "sec", 0) or 0) + (
+                                float(getattr(stamp, "nanosec", 0) or 0) / 1_000_000_000.0
+                            )
+                            ros_now = node.get_clock().now().nanoseconds / 1_000_000_000.0
+                            status["tfStampSec"] = stamp_sec
+                            status["tfAgeSec"] = max(0.0, ros_now - stamp_sec)
+                            status["tfFresh"] = status["tfAgeSec"] <= DEFAULT_NAV2_TF_MAX_AGE_SEC
+                            status["tfLastMessageAt"] = time.time()
+                        except Exception:
+                            status["tfFresh"] = False
                         break
                 except Exception as error:
                     tf_error = str(error)
@@ -720,7 +937,16 @@ def probe_live_odom(node: Any, *, topic: str, timeout_sec: float) -> dict[str, A
             except Exception:
                 pass
 
-    status["available"] = status.get("messageAvailable") is True and status.get("tfAvailable") is True
+    status["ageSec"], status["fresh"] = sample_freshness(
+        status.get("lastMessageAt"),
+        max_age_sec=DEFAULT_NAV2_ODOM_MAX_AGE_SEC,
+    )
+    status["available"] = (
+        status.get("messageAvailable") is True
+        and status.get("fresh") is True
+        and status.get("tfAvailable") is True
+        and status.get("tfFresh") is True
+    )
     if status.get("available") is not True:
         if tf_error and status.get("messageAvailable") is True:
             status["tfError"] = tf_error
@@ -731,12 +957,50 @@ def probe_live_odom(node: Any, *, topic: str, timeout_sec: float) -> dict[str, A
 
 
 LIVE_ODOM_PROBE_SCRIPT = r'''
+import math
+import os
 import time
 
 ODOM_BASE_FRAMES = ("base_link", "base_footprint")
+REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES = frozenset({"collision_monitor"})
+ODOM_MAX_AGE_SEC = float(os.environ.get("DOGZILLA_NAV2_ODOM_MAX_AGE_SEC", "6.0"))
+TF_MAX_AGE_SEC = float(os.environ.get("DOGZILLA_NAV2_TF_MAX_AGE_SEC", "6.0"))
+
+def sample_freshness(timestamp, max_age_sec):
+    if timestamp is None:
+        return None, None
+    try:
+        stamp = float(timestamp)
+    except (TypeError, ValueError):
+        return None, False
+    if not math.isfinite(stamp):
+        return None, False
+    age = max(0.0, time.time() - stamp)
+    return age, age <= max(float(max_age_sec), 0.0)
 
 def normalize_frame_id(value):
     return str(value or "").strip().lstrip("/")
+
+def nav2_scan_consumer_nodes(endpoint_infos):
+    consumers = set()
+    for info in endpoint_infos or ():
+        node_name = str(getattr(info, "node_name", "") or "").strip().strip("/")
+        if not node_name:
+            continue
+        namespace = str(getattr(info, "node_namespace", "") or "").strip()
+        namespace = "/" + namespace.strip("/") if namespace.strip("/") else ""
+        consumers.add(f"{namespace}/{node_name}")
+    return sorted(consumers)
+
+def nav2_scan_consumer_status(endpoint_infos):
+    consumer_nodes = nav2_scan_consumer_nodes(endpoint_infos)
+    consumer_names = {node.rsplit("/", 1)[-1] for node in consumer_nodes}
+    return {
+        "consumerNodes": consumer_nodes,
+        "missingConsumerNodes": sorted(
+            REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES - consumer_names
+        ),
+    }
 
 def build_odom_unavailable_message(status):
     topic = str(status.get("topic") or "/odom")
@@ -745,8 +1009,12 @@ def build_odom_unavailable_message(status):
         return f"No publishers on {topic}"
     if status.get("messageAvailable") is not True:
         return f"{topic} has {publisher_count} publisher(s), but no live odometry samples were received."
+    if status.get("fresh") is False:
+        return f"{topic} odometry samples are stale."
     if status.get("tfAvailable") is not True:
         return f"{topic} publishes samples, but odom->base_link/base_footprint TF is unavailable."
+    if status.get("tfFresh") is False:
+        return f"{topic} publishes samples, but odom->base_link/base_footprint TF is stale."
     return f"Live odometry on {topic} is not ready."
 
 def probe_live_odom(node, *, topic, timeout_sec):
@@ -768,6 +1036,8 @@ def probe_live_odom(node, *, topic, timeout_sec):
         "available": False,
         "messageAvailable": False,
         "tfAvailable": False,
+        "fresh": False,
+        "tfFresh": False,
         "checkedAt": time.time(),
     }
 
@@ -799,11 +1069,28 @@ def probe_live_odom(node, *, topic, timeout_sec):
                         if tf_buffer.can_transform("odom", base_frame, Time(), timeout=Duration(seconds=0.0)):
                             status["tfAvailable"] = True
                             status["tfTargetFrame"] = base_frame
+                            try:
+                                transform = tf_buffer.lookup_transform("odom", base_frame, Time())
+                                stamp = getattr(getattr(transform, "header", None), "stamp", None)
+                                stamp_sec = float(getattr(stamp, "sec", 0) or 0) + (
+                                    float(getattr(stamp, "nanosec", 0) or 0) / 1_000_000_000.0
+                                )
+                                ros_now = node.get_clock().now().nanoseconds / 1_000_000_000.0
+                                status["tfStampSec"] = stamp_sec
+                                status["tfAgeSec"] = max(0.0, ros_now - stamp_sec)
+                                status["tfFresh"] = status["tfAgeSec"] <= TF_MAX_AGE_SEC
+                                status["tfLastMessageAt"] = time.time()
+                            except Exception:
+                                status["tfFresh"] = False
                             break
                     except Exception as error:
                         tf_error = str(error)
 
-            if status.get("messageAvailable") is True and status.get("tfAvailable") is True:
+            if (
+                status.get("messageAvailable") is True
+                and status.get("tfAvailable") is True
+                and status.get("tfFresh") is True
+            ):
                 break
 
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -814,6 +1101,19 @@ def probe_live_odom(node, *, topic, timeout_sec):
                     if tf_buffer.can_transform("odom", base_frame, Time(), timeout=Duration(seconds=0.1)):
                         status["tfAvailable"] = True
                         status["tfTargetFrame"] = base_frame
+                        try:
+                            transform = tf_buffer.lookup_transform("odom", base_frame, Time())
+                            stamp = getattr(getattr(transform, "header", None), "stamp", None)
+                            stamp_sec = float(getattr(stamp, "sec", 0) or 0) + (
+                                float(getattr(stamp, "nanosec", 0) or 0) / 1_000_000_000.0
+                            )
+                            ros_now = node.get_clock().now().nanoseconds / 1_000_000_000.0
+                            status["tfStampSec"] = stamp_sec
+                            status["tfAgeSec"] = max(0.0, ros_now - stamp_sec)
+                            status["tfFresh"] = status["tfAgeSec"] <= TF_MAX_AGE_SEC
+                            status["tfLastMessageAt"] = time.time()
+                        except Exception:
+                            status["tfFresh"] = False
                         break
                 except Exception as error:
                     tf_error = str(error)
@@ -824,7 +1124,15 @@ def probe_live_odom(node, *, topic, timeout_sec):
             except Exception:
                 pass
 
-    status["available"] = status.get("messageAvailable") is True and status.get("tfAvailable") is True
+    status["ageSec"], status["fresh"] = sample_freshness(
+        status.get("lastMessageAt"), ODOM_MAX_AGE_SEC
+    )
+    status["available"] = (
+        status.get("messageAvailable") is True
+        and status.get("fresh") is True
+        and status.get("tfAvailable") is True
+        and status.get("tfFresh") is True
+    )
     if status.get("available") is not True:
         if tf_error and status.get("messageAvailable") is True:
             status["tfError"] = tf_error
@@ -858,7 +1166,14 @@ def build_scan_unavailable_message(status):
     if publisher_count <= 0:
         return f"No LaserScan publishers visible on {topic}"
     if subscription_count <= 0:
-        return f"No Nav2 costmap subscribers visible on {topic}"
+        return f"No Nav2 subscribers visible on {topic}"
+    missing_consumers = status.get("missingConsumerNodes")
+    if isinstance(missing_consumers, list) and missing_consumers:
+        return f"Required safety scan consumer missing on {topic}: {', '.join(missing_consumers)}"
+    if status.get("messageAvailable") is not True:
+        return f"{topic} is connected in the ROS graph, but no live LaserScan samples were received"
+    if status.get("fresh") is False:
+        return f"{topic} LaserScan samples are stale"
     return f"Nav2 filtered scan topic {topic} is not ready"
 
 def lifecycle_service_name(node_name):
@@ -928,31 +1243,73 @@ def probe_nav2_lifecycle(node, *, nodes, timeout_sec):
     return status
 
 def probe_scan_topic(node, *, topic, timeout_sec):
+    from rclpy.qos import qos_profile_sensor_data
+    from sensor_msgs.msg import LaserScan
+
     status = {
         "topic": topic,
         "publisherCount": 0,
         "subscriptionCount": 0,
+        "consumerNodes": [],
+        "missingConsumerNodes": sorted(REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES),
         "available": False,
+        "messageAvailable": False,
+        "fresh": False,
         "checkedAt": time.time(),
     }
-    deadline = time.monotonic() + max(float(timeout_sec), 0.0)
-    while True:
-        try:
-            status["publisherCount"] = len(node.get_publishers_info_by_topic(topic))
-        except Exception:
-            status["publisherCount"] = 0
-        try:
-            status["subscriptionCount"] = len(node.get_subscriptions_info_by_topic(topic))
-        except Exception:
-            status["subscriptionCount"] = 0
+    def on_scan(_message):
+        status["messageAvailable"] = True
+        status["lastMessageAt"] = time.time()
 
-        if status["publisherCount"] > 0 and status["subscriptionCount"] > 0:
-            break
-        if time.monotonic() >= deadline:
-            break
-        rclpy.spin_once(node, timeout_sec=0.1)
+    subscription = None
+    try:
+        subscription = node.create_subscription(
+            LaserScan, topic, on_scan, qos_profile_sensor_data
+        )
+        deadline = time.monotonic() + max(float(timeout_sec), 0.0)
+        while True:
+            try:
+                status["publisherCount"] = len(node.get_publishers_info_by_topic(topic))
+            except Exception:
+                status["publisherCount"] = 0
+            try:
+                subscription_infos = node.get_subscriptions_info_by_topic(topic)
+                status["rawSubscriptionCount"] = len(subscription_infos)
+                status.update(nav2_scan_consumer_status(subscription_infos))
+                status["subscriptionCount"] = len(status["consumerNodes"])
+            except Exception:
+                status["subscriptionCount"] = 0
+                status["consumerNodes"] = []
+                status["missingConsumerNodes"] = sorted(REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES)
 
-    status["available"] = status["publisherCount"] > 0 and status["subscriptionCount"] > 0
+            if (
+                status["publisherCount"] > 0
+                and status["subscriptionCount"] > 0
+                and not status["missingConsumerNodes"]
+                and status["messageAvailable"] is True
+            ):
+                break
+            if time.monotonic() >= deadline:
+                break
+            rclpy.spin_once(node, timeout_sec=0.1)
+    finally:
+        if subscription is not None:
+            try:
+                node.destroy_subscription(subscription)
+            except Exception:
+                pass
+
+    scan_max_age_sec = float(os.environ.get("DOGZILLA_NAV2_SCAN_MAX_AGE_SEC", "6.0"))
+    status["ageSec"], status["fresh"] = sample_freshness(
+        status.get("lastMessageAt"), scan_max_age_sec
+    )
+    status["available"] = (
+        status["publisherCount"] > 0
+        and status["subscriptionCount"] > 0
+        and not status["missingConsumerNodes"]
+        and status["messageAvailable"] is True
+        and status["fresh"] is True
+    )
     status["error"] = None if status["available"] else build_scan_unavailable_message(status)
     return status
 '''
@@ -976,6 +1333,10 @@ class Nav2NavigateClient:
         self.odom_child_frame_id: str | None = None
         self.odom_tf_target_frame: str | None = None
         self.odom_last_message_at: float | None = None
+        self.odom_fresh: bool | None = None
+        self.odom_tf_last_message_at: float | None = None
+        self.odom_tf_fresh: bool | None = None
+        self.odom_tf_age_sec: float | None = None
         self.odom_checked_at: float | None = None
         self.odom_error: str | None = None
         self.lifecycle_active = False
@@ -984,12 +1345,20 @@ class Nav2NavigateClient:
         self.scan_topic = DEFAULT_NAV2_SCAN_TOPIC
         self.scan_publisher_count = 0
         self.scan_subscription_count = 0
+        self.scan_consumer_nodes: list[str] = []
+        self.scan_missing_consumer_nodes: list[str] = sorted(
+            REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES
+        )
         self.scan_available = False
+        self.scan_message_available = False
+        self.scan_last_message_at: float | None = None
+        self.scan_fresh: bool | None = None
         self.scan_checked_at: float | None = None
         self.scan_error: str | None = None
         self.client_available = False
         self.server_available = False
         self._last_status_check = 0.0
+        self._status_refresh_lock = threading.Lock()
         self.backend = "host-rclpy"
         self.docker_container = DEFAULT_NAV2_DOCKER_CONTAINER
         self.available = False
@@ -998,6 +1367,9 @@ class Nav2NavigateClient:
         self._thread: threading.Thread | None = None
         self._action_client = None
         self._navigate_to_pose_type = None
+        self._goal_results: dict[str, dict[str, Any]] = {}
+        self._goal_results_lock = threading.Lock()
+        self._backend_recovery_attempted = False
 
         try:
             import rclpy
@@ -1042,6 +1414,7 @@ class Nav2NavigateClient:
         yaw: float,
         wait_for_result: bool = False,
         result_timeout: float = 600.0,
+        on_goal_accepted: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         if self.backend == "docker-rclpy":
             if not DEFAULT_NAV2_SEND_GOAL_DOCKER_ENABLED:
@@ -1059,6 +1432,7 @@ class Nav2NavigateClient:
                 yaw=yaw,
                 wait_for_result=wait_for_result,
                 result_timeout=result_timeout,
+                on_goal_accepted=on_goal_accepted,
             )
 
         self._refresh_status()
@@ -1143,12 +1517,41 @@ class Nav2NavigateClient:
                 "yaw": yaw,
             }
 
-        if wait_for_result:
-            result_future = goal_handle.get_result_async()
-            deadline = time.monotonic() + result_timeout
-            while not result_future.done() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            if not result_future.done():
+        goal_id = goal_uuid_hex(goal_handle)
+        result_future = goal_handle.get_result_async()
+        goal_results_lock = getattr(self, "_goal_results_lock", None)
+        if goal_results_lock is None:
+            goal_results_lock = threading.Lock()
+            self._goal_results_lock = goal_results_lock
+        with goal_results_lock:
+            goal_results = getattr(self, "_goal_results", None)
+            if not isinstance(goal_results, dict):
+                goal_results = {}
+                self._goal_results = goal_results
+            if goal_id:
+                goal_results[goal_id] = {
+                    "future": result_future,
+                    "handle": goal_handle,
+                    "acceptedAt": time.time(),
+                }
+
+        accepted_result = {
+            "executed": True,
+            "delivery": "Nav2 NavigateToPose",
+            "action": self.action_name,
+            "goalAccepted": True,
+            "goalCompleted": False,
+            "goalStatus": "accepted",
+            "goalId": goal_id,
+            "frame": frame,
+            "x": x,
+            "y": y,
+            "yaw": yaw,
+        }
+        if on_goal_accepted is not None:
+            try:
+                on_goal_accepted(dict(accepted_result))
+            except Exception as error:
                 cancel_confirmed = False
                 try:
                     cancel_future = goal_handle.cancel_goal_async()
@@ -1163,54 +1566,131 @@ class Nav2NavigateClient:
                 except Exception:
                     pass
                 return {
+                    **accepted_result,
                     "executed": False,
-                    "delivery": "nav2-result-timeout",
-                    "error": f"Nav2 goal did not finish within {result_timeout:.1f}s",
-                    "action": self.action_name,
-                    "goalAccepted": True,
+                    "delivery": "nav2-goal-acceptance-hook-failed",
+                    "error": str(error),
                     "cancelConfirmed": cancel_confirmed,
                 }
-            wrapped_result = result_future.result()
-            status = int(getattr(wrapped_result, "status", 0) or 0)
-            status_name = {
-                2: "executing",
-                4: "succeeded",
-                5: "canceled",
-                6: "aborted",
-            }.get(status, f"status-{status}")
-            if status != 4:
+
+        if wait_for_result:
+            result = self.wait_for_goal_result(goal_id, timeout=result_timeout)
+            if result.get("goalCompleted") is not True:
+                cancel_confirmed = False
+                try:
+                    cancel_future = goal_handle.cancel_goal_async()
+                    cancel_deadline = time.monotonic() + 3.0
+                    while not cancel_future.done() and time.monotonic() < cancel_deadline:
+                        time.sleep(0.05)
+                    cancel_response = cancel_future.result() if cancel_future.done() else None
+                    cancel_confirmed = bool(
+                        cancel_response is not None
+                        and int(getattr(cancel_response, "return_code", -1)) == 0
+                    )
+                except Exception:
+                    pass
                 return {
-                    "executed": False,
-                    "delivery": "nav2-result-failed",
-                    "error": f"Nav2 goal finished with status {status_name}",
-                    "action": self.action_name,
-                    "goalAccepted": True,
-                    "goalCompleted": True,
-                    "goalStatus": status_name,
+                    **result,
+                    "cancelConfirmed": cancel_confirmed,
+                    "frame": frame,
+                    "x": x,
+                    "y": y,
+                    "yaw": yaw,
                 }
             return {
-                "executed": True,
-                "delivery": "Nav2 NavigateToPose",
-                "action": self.action_name,
-                "goalAccepted": True,
-                "goalCompleted": True,
-                "goalStatus": "succeeded",
+                **result,
                 "frame": frame,
                 "x": x,
                 "y": y,
                 "yaw": yaw,
             }
 
-        return {
-            "executed": True,
-            "delivery": "Nav2 NavigateToPose",
+        return accepted_result
+
+    def wait_for_goal_result(self, goal_id: str, *, timeout: float) -> dict[str, Any]:
+        goal_id = str(goal_id or "").strip().lower()
+        if len(goal_id) != 32 or any(character not in "0123456789abcdef" for character in goal_id):
+            return {
+                "executed": False,
+                "delivery": "nav2-result-unavailable",
+                "error": "Nav2 goal UUID is missing or invalid",
+                "action": self.action_name,
+                "goalAccepted": True,
+                "goalCompleted": False,
+                "goalStatus": "unknown",
+                "goalId": goal_id,
+            }
+
+        if self.backend == "docker-rclpy":
+            return self._wait_for_goal_result_via_docker(goal_id, timeout=timeout)
+
+        lock = getattr(self, "_goal_results_lock", None)
+        goals = getattr(self, "_goal_results", None)
+        if lock is None or not isinstance(goals, dict):
+            entry = None
+        else:
+            with lock:
+                entry = goals.get(goal_id)
+        if not isinstance(entry, dict) or entry.get("future") is None:
+            return {
+                "executed": False,
+                "delivery": "nav2-result-unavailable",
+                "error": f"Nav2 goal result handle is unavailable for {goal_id}",
+                "action": self.action_name,
+                "goalAccepted": True,
+                "goalCompleted": False,
+                "goalStatus": "unknown",
+                "goalId": goal_id,
+            }
+
+        result_future = entry["future"]
+        deadline = time.monotonic() + max(float(timeout), 0.0)
+        while not result_future.done() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not result_future.done():
+            return {
+                "executed": False,
+                "delivery": "nav2-result-timeout",
+                "error": f"Nav2 goal did not finish within {float(timeout):.1f}s",
+                "action": self.action_name,
+                "goalAccepted": True,
+                "goalCompleted": False,
+                "goalStatus": "executing",
+                "goalId": goal_id,
+            }
+
+        try:
+            wrapped_result = result_future.result()
+            status = int(getattr(wrapped_result, "status", 0) or 0)
+        except Exception as error:
+            return {
+                "executed": False,
+                "delivery": "nav2-result-failed",
+                "error": str(error),
+                "action": self.action_name,
+                "goalAccepted": True,
+                "goalCompleted": False,
+                "goalStatus": "unknown",
+                "goalId": goal_id,
+            }
+
+        status_name = goal_status_name(status)
+        terminal = status in (4, 5, 6)
+        if terminal and lock is not None:
+            with lock:
+                goals.pop(goal_id, None)
+        result = {
+            "executed": status == 4,
+            "delivery": "Nav2 NavigateToPose" if status == 4 else "nav2-result-failed",
             "action": self.action_name,
             "goalAccepted": True,
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "yaw": yaw,
+            "goalCompleted": terminal,
+            "goalStatus": status_name,
+            "goalId": goal_id,
         }
+        if status != 4:
+            result["error"] = f"Nav2 goal finished with status {status_name}"
+        return result
 
     def cancel_active_goal(self, *, timeout: float = DEFAULT_NAV2_CANCEL_TIMEOUT) -> dict[str, Any]:
         if self.backend == "docker-rclpy":
@@ -1323,37 +1803,51 @@ class Nav2NavigateClient:
         if not force and now - self._last_status_check < DEFAULT_NAV2_STATUS_CACHE_SEC:
             return
 
-        self._last_status_check = now
-
-        if self.backend == "docker-rclpy":
-            self._refresh_docker_status()
-            return
-
-        if not self.client_available or self._action_client is None:
-            if self.host_import_error and DEFAULT_NAV2_DOCKER_ENABLED:
-                self._try_enable_docker_backend()
-                if self.backend == "docker-rclpy":
-                    self._refresh_docker_status()
-                    return
-            self.server_available = False
-            self.available = False
+        lock = getattr(self, "_status_refresh_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._status_refresh_lock = lock
+        if not lock.acquire(blocking=False):
             return
 
         try:
-            self.server_available = bool(
-                self._wait_for_server_with_retry(timeout_sec=DEFAULT_NAV2_STATUS_WAIT_TIMEOUT)
-            )
-            self.server_error = None if self.server_available else self._nav2_server_unavailable_message()
-            self.available = self.client_available and self.server_available
-            self.import_error = None if self.available else self.server_error
-            self._refresh_host_prerequisites()
-        except Exception as error:
-            self.server_available = False
-            self.available = False
-            self.server_error = str(error)
-            self.import_error = self.server_error
-            self.odom_available = False
-            self.odom_error = str(error)
+            now = time.monotonic()
+            if not force and now - self._last_status_check < DEFAULT_NAV2_STATUS_CACHE_SEC:
+                return
+
+            self._last_status_check = now
+
+            if self.backend == "docker-rclpy":
+                self._refresh_docker_status()
+                return
+
+            if not self.client_available or self._action_client is None:
+                if self.host_import_error and DEFAULT_NAV2_DOCKER_ENABLED:
+                    self._try_enable_docker_backend()
+                    if self.backend == "docker-rclpy":
+                        self._refresh_docker_status()
+                        return
+                self.server_available = False
+                self.available = False
+                return
+
+            try:
+                self.server_available = bool(
+                    self._wait_for_server_with_retry(timeout_sec=DEFAULT_NAV2_STATUS_WAIT_TIMEOUT)
+                )
+                self.server_error = None if self.server_available else self._nav2_server_unavailable_message()
+                self.available = self.client_available and self.server_available
+                self.import_error = None if self.available else self.server_error
+                self._refresh_host_prerequisites()
+            except Exception as error:
+                self.server_available = False
+                self.available = False
+                self.server_error = str(error)
+                self.import_error = self.server_error
+                self.odom_available = False
+                self.odom_error = str(error)
+        finally:
+            lock.release()
 
     def _wait_for_server_with_retry(self, timeout_sec: float, retries: int = 3) -> bool:
         """Wait for the NavigateToPose action server with retries.
@@ -1560,6 +2054,10 @@ finally:
             self.odom_child_frame_id = None
             self.odom_tf_target_frame = None
             self.odom_last_message_at = None
+            self.odom_fresh = None
+            self.odom_tf_last_message_at = None
+            self.odom_tf_fresh = None
+            self.odom_tf_age_sec = None
             self.odom_checked_at = None
             self.odom_error = f"Odometry topic {DEFAULT_ODOM_TOPIC} status was not reported"
             return
@@ -1578,6 +2076,26 @@ finally:
             self.odom_last_message_at = float(odom.get("lastMessageAt")) if odom.get("lastMessageAt") is not None else None
         except (TypeError, ValueError):
             self.odom_last_message_at = None
+        odom_age, computed_odom_fresh = sample_freshness(
+            self.odom_last_message_at,
+            max_age_sec=DEFAULT_NAV2_ODOM_MAX_AGE_SEC,
+        )
+        payload_odom_fresh = odom.get("fresh")
+        self.odom_fresh = payload_odom_fresh if isinstance(payload_odom_fresh, bool) else computed_odom_fresh
+        try:
+            self.odom_tf_last_message_at = (
+                float(odom.get("tfLastMessageAt"))
+                if odom.get("tfLastMessageAt") is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            self.odom_tf_last_message_at = None
+        payload_tf_fresh = odom.get("tfFresh")
+        self.odom_tf_fresh = payload_tf_fresh if isinstance(payload_tf_fresh, bool) else None
+        try:
+            self.odom_tf_age_sec = float(odom.get("tfAgeSec")) if odom.get("tfAgeSec") is not None else None
+        except (TypeError, ValueError):
+            self.odom_tf_age_sec = None
         try:
             self.odom_checked_at = float(odom.get("checkedAt")) if odom.get("checkedAt") is not None else None
         except (TypeError, ValueError):
@@ -1585,13 +2103,17 @@ finally:
         self.odom_available = (
             odom.get("available") is True
             and self.odom_message_available
+            and self.odom_fresh is True
             and self.odom_tf_available
+            and self.odom_tf_fresh is True
         )
         self.odom_error = None if self.odom_available else str(odom.get("error") or build_odom_unavailable_message({
             "topic": self.odom_topic,
             "publisherCount": self.odom_publisher_count,
             "messageAvailable": self.odom_message_available,
+            "fresh": self.odom_fresh,
             "tfAvailable": self.odom_tf_available,
+            "tfFresh": self.odom_tf_fresh,
         }))
 
     def _set_lifecycle_status_from_payload(self, lifecycle: dict[str, Any] | None) -> None:
@@ -1607,11 +2129,32 @@ finally:
             return
 
         nodes = lifecycle.get("nodes") if isinstance(lifecycle.get("nodes"), list) else []
-        self.lifecycle_active = lifecycle.get("active") is True
+        required_nodes = list(DEFAULT_NAV2_LIFECYCLE_NODES)
+        for raw_node in lifecycle.get("requiredNodes") if isinstance(lifecycle.get("requiredNodes"), list) else []:
+            node_name = str(raw_node or "").strip().lstrip("/")
+            if node_name and node_name not in required_nodes:
+                required_nodes.append(node_name)
+        nodes_by_name = {
+            str(node.get("name") or "").strip().lstrip("/"): node
+            for node in nodes
+            if isinstance(node, dict) and str(node.get("name") or "").strip()
+        }
+        missing_nodes = [name for name in required_nodes if name not in nodes_by_name]
+        inactive_nodes = [
+            name
+            for name in required_nodes
+            if name in nodes_by_name and nodes_by_name[name].get("active") is not True
+        ]
+        self.lifecycle_active = (
+            lifecycle.get("active") is True
+            and not missing_nodes
+            and not inactive_nodes
+        )
         self.lifecycle_status = {
             **lifecycle,
-            "requiredNodes": lifecycle.get("requiredNodes") or list(DEFAULT_NAV2_LIFECYCLE_NODES),
+            "requiredNodes": required_nodes,
             "nodes": nodes,
+            "missingNodes": missing_nodes,
             "active": self.lifecycle_active,
         }
         self.lifecycle_error = None if self.lifecycle_active else str(
@@ -1624,7 +2167,14 @@ finally:
             self.scan_topic = DEFAULT_NAV2_SCAN_TOPIC
             self.scan_publisher_count = 0
             self.scan_subscription_count = 0
+            self.scan_consumer_nodes = []
+            self.scan_missing_consumer_nodes = sorted(
+                REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES
+            )
             self.scan_available = False
+            self.scan_message_available = False
+            self.scan_last_message_at = None
+            self.scan_fresh = None
             self.scan_checked_at = None
             self.scan_error = f"Nav2 filtered scan topic {DEFAULT_NAV2_SCAN_TOPIC} status was not reported"
             return
@@ -1638,19 +2188,54 @@ finally:
             self.scan_subscription_count = int(scan.get("subscriptionCount") or 0)
         except (TypeError, ValueError):
             self.scan_subscription_count = 0
+        self.scan_consumer_nodes = [
+            str(node).strip()
+            for node in (scan.get("consumerNodes") if isinstance(scan.get("consumerNodes"), list) else [])
+            if str(node).strip()
+        ]
+        consumer_names = {
+            node.rstrip("/").rsplit("/", 1)[-1]
+            for node in self.scan_consumer_nodes
+        }
+        self.scan_missing_consumer_nodes = sorted(
+            REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES - consumer_names
+        )
         try:
             self.scan_checked_at = float(scan.get("checkedAt")) if scan.get("checkedAt") is not None else None
         except (TypeError, ValueError):
             self.scan_checked_at = None
+        self.scan_message_available = (
+            scan.get("messageAvailable") is True
+            or scan.get("sampleAvailable") is True
+        )
+        try:
+            self.scan_last_message_at = (
+                float(scan.get("lastMessageAt")) if scan.get("lastMessageAt") is not None else None
+            )
+        except (TypeError, ValueError):
+            self.scan_last_message_at = None
+        _scan_age, computed_scan_fresh = sample_freshness(
+            self.scan_last_message_at,
+            max_age_sec=DEFAULT_NAV2_SCAN_MAX_AGE_SEC,
+        )
+        payload_scan_fresh = scan.get("fresh")
+        self.scan_fresh = payload_scan_fresh if isinstance(payload_scan_fresh, bool) else computed_scan_fresh
         self.scan_available = (
             scan.get("available") is True
             and self.scan_publisher_count > 0
             and self.scan_subscription_count > 0
+            and not self.scan_missing_consumer_nodes
+            and self.scan_message_available
+            and self.scan_fresh is True
         )
         self.scan_error = None if self.scan_available else str(scan.get("error") or build_scan_unavailable_message({
             "topic": self.scan_topic,
             "publisherCount": self.scan_publisher_count,
             "subscriptionCount": self.scan_subscription_count,
+            "consumerNodes": self.scan_consumer_nodes,
+            "missingConsumerNodes": self.scan_missing_consumer_nodes,
+            "messageAvailable": self.scan_message_available,
+            "fresh": self.scan_fresh,
         }))
 
     def _run_docker_shell(self, command: str, *, timeout: float) -> subprocess.CompletedProcess[str]:
@@ -1680,6 +2265,7 @@ finally:
         yaw: float,
         wait_for_result: bool = False,
         result_timeout: float = 600.0,
+        on_goal_accepted: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         request = {
             "action": self.action_name,
@@ -1695,8 +2281,6 @@ finally:
             "lifecycleWaitTimeout": DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT,
             "scanTopic": DEFAULT_NAV2_SCAN_TOPIC,
             "scanWaitTimeout": DEFAULT_NAV2_SCAN_WAIT_TIMEOUT,
-            "waitForResult": wait_for_result,
-            "resultTimeout": result_timeout,
         }
         request_json = json.dumps(request)
         script = f"""
@@ -1742,32 +2326,15 @@ try:
         nodes=tuple(request["lifecycleNodes"]),
         timeout_sec=request["lifecycleWaitTimeout"],
     )
-    lifecycle_warning = None
     if lifecycle.get("active") is not True:
-        lifecycle_nodes = lifecycle.get("nodes") if isinstance(lifecycle.get("nodes"), list) else []
-        lifecycle_only_timeouts = bool(lifecycle_nodes) and all(
-            isinstance(item, dict)
-            and (
-                item.get("active") is True
-                or "timed out" in str(item.get("error") or "").lower()
-            )
-            for item in lifecycle_nodes
-        )
-        if lifecycle_only_timeouts:
-            lifecycle_warning = lifecycle
-            lifecycle_warning["warning"] = (
-                "Lifecycle state probe timed out after NavigateToPose action "
-                "server and odom were available; attempting goal."
-            )
-        else:
-            print(json.dumps({{
-                "executed": False,
-                "delivery": "nav2-prerequisite-unavailable",
-                "error": lifecycle.get("error") or "Nav2 lifecycle state was not proven active.",
-                "action": request["action"],
-                "lifecycle": lifecycle,
-            }}))
-            raise SystemExit(6)
+        print(json.dumps({{
+            "executed": False,
+            "delivery": "nav2-prerequisite-unavailable",
+            "error": lifecycle.get("error") or "Nav2 lifecycle state was not proven active.",
+            "action": request["action"],
+            "lifecycle": lifecycle,
+        }}))
+        raise SystemExit(6)
 
     scan = probe_scan_topic(
         node,
@@ -1815,73 +2382,20 @@ try:
         }}))
         raise SystemExit(4)
 
-    if request["waitForResult"]:
-        result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(
-            node,
-            result_future,
-            timeout_sec=float(request["resultTimeout"]),
-        )
-        if not result_future.done():
-            cancel_future = goal_handle.cancel_goal_async()
-            rclpy.spin_until_future_complete(node, cancel_future, timeout_sec=3.0)
-            cancel_response = cancel_future.result() if cancel_future.done() else None
-            cancel_confirmed = bool(
-                cancel_response is not None
-                and int(getattr(cancel_response, "return_code", -1)) == 0
-            )
-            print(json.dumps({{
-                "executed": False,
-                "delivery": "nav2-result-timeout",
-                "error": f"Nav2 goal did not finish within {{float(request['resultTimeout']):.1f}}s",
-                "action": request["action"],
-                "goalAccepted": True,
-                "cancelConfirmed": cancel_confirmed,
-            }}))
-            raise SystemExit(8)
-
-        wrapped_result = result_future.result()
-        status = int(getattr(wrapped_result, "status", 0) or 0)
-        status_name = {{2: "executing", 4: "succeeded", 5: "canceled", 6: "aborted"}}.get(
-            status, f"status-{{status}}"
-        )
-        if status != 4:
-            print(json.dumps({{
-                "executed": False,
-                "delivery": "nav2-result-failed",
-                "error": f"Nav2 goal finished with status {{status_name}}",
-                "action": request["action"],
-                "goalAccepted": True,
-                "goalCompleted": True,
-                "goalStatus": status_name,
-            }}))
-            raise SystemExit(9)
-
-        print(json.dumps({{
-            "executed": True,
-            "delivery": "Nav2 NavigateToPose",
-            "action": request["action"],
-            "goalAccepted": True,
-            "goalCompleted": True,
-            "goalStatus": "succeeded",
-            "frame": request["frame"],
-            "x": float(request["x"]),
-            "y": float(request["y"]),
-            "yaw": yaw,
-            "lifecycleWarning": lifecycle_warning,
-        }}))
-        raise SystemExit(0)
-
+    goal_id = bytes(goal_handle.goal_id.uuid).hex()
     print(json.dumps({{
         "executed": True,
         "delivery": "Nav2 NavigateToPose",
         "action": request["action"],
         "goalAccepted": True,
+        "goalCompleted": False,
+        "goalStatus": "accepted",
+        "goalId": goal_id,
         "frame": request["frame"],
         "x": float(request["x"]),
         "y": float(request["y"]),
         "yaw": yaw,
-        "lifecycleWarning": lifecycle_warning,
+        "lifecycle": lifecycle,
     }}))
 finally:
     node.destroy_node()
@@ -1894,7 +2408,6 @@ finally:
             + DEFAULT_NAV2_LIFECYCLE_WAIT_TIMEOUT
             + DEFAULT_NAV2_SCAN_WAIT_TIMEOUT
             + 5
-            + (result_timeout if wait_for_result else 0)
         )
         try:
             completed = self._run_docker_python(script, timeout=docker_timeout)
@@ -1909,10 +2422,57 @@ finally:
             }
         parsed = parse_json_process_output(completed.stdout)
         if isinstance(parsed, dict):
-            return {
+            accepted_result = {
                 **parsed,
                 "backend": self.backend,
                 "container": self.docker_container,
+            }
+            if accepted_result.get("executed") is not True or accepted_result.get("goalAccepted") is not True:
+                return accepted_result
+
+            if on_goal_accepted is not None:
+                try:
+                    on_goal_accepted(dict(accepted_result))
+                except Exception as error:
+                    cancel = self.cancel_active_goal(timeout=3.0)
+                    return {
+                        **accepted_result,
+                        "executed": False,
+                        "delivery": "nav2-goal-acceptance-hook-failed",
+                        "error": str(error),
+                        "cancelConfirmed": bool(
+                            cancel.get("executed") is True
+                            and int(cancel.get("returnCode", -1) or -1) == 0
+                        ),
+                        "cancel": cancel,
+                    }
+
+            if not wait_for_result:
+                return accepted_result
+
+            goal_id = str(accepted_result.get("goalId") or "")
+            result = self._wait_for_goal_result_via_docker(goal_id, timeout=result_timeout)
+            if result.get("goalCompleted") is not True:
+                cancel = self.cancel_active_goal(timeout=3.0)
+                result = {
+                    **result,
+                    "cancelConfirmed": bool(
+                        cancel.get("executed") is True
+                        and int(cancel.get("returnCode", -1) or -1) == 0
+                    ),
+                    "cancel": cancel,
+                }
+            return {
+                **result,
+                "frame": frame,
+                "x": x,
+                "y": y,
+                "yaw": yaw,
+                **(
+                    {"lifecycle": accepted_result["lifecycle"]}
+                    if isinstance(accepted_result.get("lifecycle"), dict)
+                    else {}
+                ),
             }
 
         return {
@@ -1920,6 +2480,129 @@ finally:
             "delivery": "nav2-docker-failed",
             "error": summarize_process_text(completed.stderr) or summarize_process_text(completed.stdout) or f"docker exec returned {completed.returncode}",
             "action": self.action_name,
+            "backend": self.backend,
+            "container": self.docker_container,
+        }
+
+    def _wait_for_goal_result_via_docker(self, goal_id: str, *, timeout: float) -> dict[str, Any]:
+        request = {
+            "action": self.action_name,
+            "goalId": goal_id,
+            "timeout": max(float(timeout), 0.0),
+        }
+        request_json = json.dumps(request)
+        script = f"""
+import json
+import time
+
+import rclpy
+from nav2_msgs.action import NavigateToPose
+
+request = json.loads({json.dumps(request_json)})
+action_name = str(request["action"]).strip("/") or "navigate_to_pose"
+service_name = f"/{{action_name}}/_action/get_result"
+service_type = NavigateToPose.Impl.GetResultService
+
+rclpy.init(args=None)
+node = rclpy.create_node("dogzilla_direct_nav2_result_client")
+client = node.create_client(service_type, service_name)
+
+try:
+    timeout = float(request["timeout"])
+    if not client.wait_for_service(timeout_sec=min(timeout, 3.0)):
+        print(json.dumps({{
+            "executed": False,
+            "delivery": "nav2-result-unavailable",
+            "error": "Nav2 GetResult service unavailable",
+            "action": request["action"],
+            "goalAccepted": True,
+            "goalCompleted": False,
+            "goalStatus": "unknown",
+            "goalId": request["goalId"],
+        }}))
+        raise SystemExit(2)
+
+    get_result_request = service_type.Request()
+    get_result_request.goal_id.uuid = list(bytes.fromhex(request["goalId"]))
+    future = client.call_async(get_result_request)
+    deadline = time.monotonic() + timeout
+    while not future.done() and time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+
+    if not future.done():
+        print(json.dumps({{
+            "executed": False,
+            "delivery": "nav2-result-timeout",
+            "error": f"Nav2 goal did not finish within {{timeout:.1f}}s",
+            "action": request["action"],
+            "goalAccepted": True,
+            "goalCompleted": False,
+            "goalStatus": "executing",
+            "goalId": request["goalId"],
+        }}))
+        raise SystemExit(3)
+
+    response = future.result()
+    status = int(getattr(response, "status", 0) or 0)
+    status_name = {{
+        1: "accepted",
+        2: "executing",
+        3: "canceling",
+        4: "succeeded",
+        5: "canceled",
+        6: "aborted",
+    }}.get(status, f"status-{{status}}")
+    terminal = status in (4, 5, 6)
+    payload = {{
+        "executed": status == 4,
+        "delivery": "Nav2 NavigateToPose" if status == 4 else "nav2-result-failed",
+        "action": request["action"],
+        "goalAccepted": True,
+        "goalCompleted": terminal,
+        "goalStatus": status_name,
+        "goalId": request["goalId"],
+    }}
+    if status != 4:
+        payload["error"] = f"Nav2 goal finished with status {{status_name}}"
+    print(json.dumps(payload))
+finally:
+    node.destroy_node()
+    rclpy.shutdown()
+"""
+        docker_timeout = max(float(timeout), 0.0) + 5.0
+        try:
+            completed = self._run_docker_python(script, timeout=docker_timeout)
+        except subprocess.TimeoutExpired:
+            return {
+                "executed": False,
+                "delivery": "nav2-result-timeout",
+                "error": f"Nav2 goal did not finish within {float(timeout):.1f}s",
+                "action": self.action_name,
+                "goalAccepted": True,
+                "goalCompleted": False,
+                "goalStatus": "executing",
+                "goalId": goal_id,
+                "backend": self.backend,
+                "container": self.docker_container,
+            }
+        parsed = parse_json_process_output(completed.stdout)
+        if isinstance(parsed, dict):
+            return {
+                **parsed,
+                "backend": self.backend,
+                "container": self.docker_container,
+            }
+        return {
+            "executed": False,
+            "delivery": "nav2-result-unavailable",
+            "error": summarize_process_text(completed.stderr)
+            or summarize_process_text(completed.stdout)
+            or f"docker exec returned {completed.returncode}",
+            "action": self.action_name,
+            "goalAccepted": True,
+            "goalCompleted": False,
+            "goalStatus": "unknown",
+            "goalId": goal_id,
             "backend": self.backend,
             "container": self.docker_container,
         }
@@ -2036,40 +2719,89 @@ finally:
             return self.client_available and self._action_client is not None
         return False
 
-    def snapshot(self) -> dict[str, Any]:
-        self._refresh_status()
+    def refresh_backend_for_ready_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Repair one stale goal backend when Pi readiness is already proven."""
+        readiness = snapshot.get("readiness") if isinstance(snapshot, dict) else None
+        contradiction = (
+            isinstance(readiness, dict)
+            and readiness.get("ownerMode") == "normal"
+            and readiness.get("actionServerAvailable") is True
+            and readiness.get("stackActive") is True
+            and readiness.get("odomFresh") is True
+            and readiness.get("tfFresh") is True
+            and readiness.get("scanFresh") is True
+            and readiness.get("waypointReady") is True
+            and snapshot.get("canSendGoal") is not True
+        )
+        if not contradiction:
+            self._backend_recovery_attempted = False
+            return snapshot
+        if getattr(self, "_backend_recovery_attempted", False):
+            return snapshot
+        self._backend_recovery_attempted = True
+        self._refresh_status(force=True)
+        return self.snapshot(refresh=False)
+
+    def snapshot(self, *, refresh: bool = True) -> dict[str, Any]:
+        if refresh:
+            self._refresh_status()
         odom = self._odom_snapshot()
         lifecycle = self._lifecycle_snapshot()
         scan = self._scan_snapshot()
-        stack_ready = (
-            odom.get("available") is True
-            and lifecycle.get("active") is True
-            and scan.get("available") is True
-        )
+        stack_active = lifecycle.get("active") is True
+        prerequisites_ready = odom.get("available") is True and scan.get("available") is True
         # Readiness invariant: waypointReady requires the active backend to be
         # able to send goals. If the Docker goal backend is disabled or the host
         # action client is missing, waypointReady must be false even if the
         # lifecycle/odom/scan stack is otherwise active.
         can_send = self.can_send_goal()
-        waypoint_ready = stack_ready and can_send
+        action_server_available = self.server_available is True
+        # The Pi watcher is the atomic source of truth. A forced refresh may
+        # still collect diagnostics, but slow probes must not rewrite fresh
+        # sensor state with a contradictory partial result.
+        persistent = self._read_persistent_readiness()
+        if persistent is not None:
+            action_server_available = persistent["actionServerAvailable"]
+            stack_active = persistent["stackActive"]
+            odom["fresh"] = persistent["odomFresh"]
+            odom["tfFresh"] = persistent["tfFresh"]
+            odom["available"] = persistent["odomFresh"] and persistent["tfFresh"]
+            scan["fresh"] = persistent["scanFresh"]
+            scan["available"] = persistent["scanFresh"]
+            lifecycle["active"] = persistent["stackActive"]
+            waypoint_ready = persistent["waypointReady"] and can_send and action_server_available
+        else:
+            waypoint_ready = stack_active and prerequisites_ready and can_send and action_server_available
         blockers: list[str] = []
         if not can_send:
-            blockers.append("Nav2 goal backend cannot send goals")
-        if not self.available and not stack_ready:
-            blockers.append(self.import_error or self.server_error or "Nav2 NavigateToPose action server unavailable")
+            backend_error = self.docker_import_error
+            if backend_error:
+                blockers.append(f"Nav2 Docker goal backend unavailable: {backend_error}")
+            elif self.host_import_error and not self.client_available:
+                blockers.append(f"Nav2 host goal backend unavailable: {self.host_import_error}")
+            elif self.backend == "docker-rclpy" and not self.client_available:
+                blockers.append(
+                    f"Nav2 goal backend cannot send goals (Docker backend unavailable in {self.docker_container})"
+                )
+            else:
+                blockers.append("Nav2 goal backend cannot send goals")
         if odom.get("available") is not True:
             blockers.append(odom.get("error") or f"No publishers on {odom.get('topic') or DEFAULT_ODOM_TOPIC}")
         if lifecycle.get("active") is not True:
             blockers.append(lifecycle.get("error") or "Nav2 lifecycle state was not proven active")
         if scan.get("available") is not True:
             blockers.append(scan.get("error") or f"No Nav2 costmap subscribers visible on {scan.get('topic') or DEFAULT_NAV2_SCAN_TOPIC}")
+        if not action_server_available and not blockers:
+            blockers.append(self.server_error or self.import_error or "Nav2 NavigateToPose action server unavailable")
         return {
             "available": waypoint_ready,
             "waypointReady": waypoint_ready,
+            "stackActive": stack_active,
             "blockers": blockers,
             "clientAvailable": self.client_available,
             "serverAvailable": self.server_available,
-            "actionServerDiscovered": self.server_available,
+            "actionServerAvailable": action_server_available,
+            "actionServerDiscovered": action_server_available,
             "canSendGoal": can_send,
             "action": self.action_name,
             "odom": odom,
@@ -2089,22 +2821,72 @@ finally:
             "hostImportError": self.host_import_error,
             "dockerImportError": self.docker_import_error,
             "serverError": self.server_error,
+            "readiness": persistent,
         }
 
+    def _read_persistent_readiness(self) -> dict[str, Any] | None:
+        try:
+            with open(DEFAULT_NAV2_READINESS_FILE, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            checked = float(payload.get("checkedAt"))
+            if time.time() - checked > DEFAULT_NAV2_READINESS_MAX_AGE_SEC:
+                return None
+            if payload.get("schemaVersion") != 1 or payload.get("ownerMode") != "normal":
+                return None
+            fields = ("actionServerAvailable", "stackActive", "odomFresh", "tfFresh", "scanFresh", "waypointReady")
+            if not all(isinstance(payload.get(field), bool) for field in fields):
+                return None
+            return payload
+        except (OSError, ValueError, TypeError):
+            return None
     def _odom_snapshot(self) -> dict[str, Any]:
-        return {
+        last_message_at = getattr(self, "odom_last_message_at", None)
+        age_sec, fresh = sample_freshness(
+            last_message_at,
+            max_age_sec=DEFAULT_NAV2_ODOM_MAX_AGE_SEC,
+        )
+        if last_message_at is None:
+            fresh = getattr(self, "odom_fresh", None)
+
+        checked_at = getattr(self, "odom_checked_at", None)
+        tf_age_sec = getattr(self, "odom_tf_age_sec", None)
+        if tf_age_sec is not None and checked_at is not None:
+            try:
+                tf_age_sec = max(0.0, float(tf_age_sec) + max(0.0, time.time() - float(checked_at)))
+            except (TypeError, ValueError):
+                tf_age_sec = None
+        tf_fresh = (
+            tf_age_sec <= DEFAULT_NAV2_TF_MAX_AGE_SEC
+            if tf_age_sec is not None
+            else getattr(self, "odom_tf_fresh", None)
+        )
+        available = (
+            getattr(self, "odom_message_available", False) is True
+            and fresh is True
+            and getattr(self, "odom_tf_available", False) is True
+            and tf_fresh is True
+        )
+        status = {
             "topic": getattr(self, "odom_topic", DEFAULT_ODOM_TOPIC) or DEFAULT_ODOM_TOPIC,
             "publisherCount": int(getattr(self, "odom_publisher_count", 0) or 0),
-            "available": getattr(self, "odom_available", False) is True,
+            "available": available,
             "messageAvailable": getattr(self, "odom_message_available", False) is True,
+            "fresh": fresh,
+            "ageSec": age_sec,
+            "maxAgeSec": DEFAULT_NAV2_ODOM_MAX_AGE_SEC,
             "tfAvailable": getattr(self, "odom_tf_available", False) is True,
+            "tfFresh": tf_fresh,
+            "tfAgeSec": tf_age_sec,
+            "tfMaxAgeSec": DEFAULT_NAV2_TF_MAX_AGE_SEC,
             "frameId": getattr(self, "odom_frame_id", None),
             "childFrameId": getattr(self, "odom_child_frame_id", None),
             "tfTargetFrame": getattr(self, "odom_tf_target_frame", None),
-            "lastMessageAt": getattr(self, "odom_last_message_at", None),
-            "checkedAt": getattr(self, "odom_checked_at", None),
-            "error": getattr(self, "odom_error", None),
+            "lastMessageAt": last_message_at,
+            "tfLastMessageAt": getattr(self, "odom_tf_last_message_at", None),
+            "checkedAt": checked_at,
         }
+        status["error"] = None if available else build_odom_unavailable_message(status)
+        return status
 
     def _lifecycle_snapshot(self) -> dict[str, Any]:
         status = getattr(self, "lifecycle_status", None)
@@ -2122,11 +2904,38 @@ finally:
         }
 
     def _scan_snapshot(self) -> dict[str, Any]:
-        return {
+        last_message_at = getattr(self, "scan_last_message_at", None)
+        age_sec, fresh = sample_freshness(
+            last_message_at,
+            max_age_sec=DEFAULT_NAV2_SCAN_MAX_AGE_SEC,
+        )
+        if last_message_at is None:
+            fresh = getattr(self, "scan_fresh", None)
+        status = {
             "topic": getattr(self, "scan_topic", DEFAULT_NAV2_SCAN_TOPIC) or DEFAULT_NAV2_SCAN_TOPIC,
             "publisherCount": int(getattr(self, "scan_publisher_count", 0) or 0),
             "subscriptionCount": int(getattr(self, "scan_subscription_count", 0) or 0),
-            "available": getattr(self, "scan_available", False) is True,
+            "consumerNodes": list(getattr(self, "scan_consumer_nodes", []) or []),
+            "missingConsumerNodes": list(
+                getattr(
+                    self,
+                    "scan_missing_consumer_nodes",
+                    sorted(REQUIRED_SAFETY_SCAN_CONSUMER_NODE_NAMES),
+                )
+                or []
+            ),
+            "messageAvailable": getattr(self, "scan_message_available", False) is True,
+            "fresh": fresh,
+            "ageSec": age_sec,
+            "maxAgeSec": DEFAULT_NAV2_SCAN_MAX_AGE_SEC,
             "checkedAt": getattr(self, "scan_checked_at", None),
-            "error": getattr(self, "scan_error", None),
         }
+        status["available"] = (
+            status["publisherCount"] > 0
+            and status["subscriptionCount"] > 0
+            and not status["missingConsumerNodes"]
+            and status["messageAvailable"] is True
+            and status["fresh"] is True
+        )
+        status["error"] = None if status["available"] else build_scan_unavailable_message(status)
+        return status

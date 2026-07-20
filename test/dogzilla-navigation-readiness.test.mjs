@@ -18,7 +18,7 @@ test('DOGZILLA waypoint readiness requires action, odom, lifecycle, and filtered
   assert.equal(ready.scanReady, true)
 })
 
-test('DOGZILLA waypoint readiness trusts explicit bridge waypointReady for Nav2 chain', () => {
+test('DOGZILLA waypoint readiness trusts the bridge instead of rebuilding its Nav2 topology', () => {
   const readiness = getDogzillaWaypointNavigationReadiness({
     nav2: {
       ...readyNav2(),
@@ -36,6 +36,60 @@ test('DOGZILLA waypoint readiness trusts explicit bridge waypointReady for Nav2 
   assert.equal(readiness.reason, '')
 })
 
+test('DOGZILLA waypoint readiness requires fresh odom samples and fresh odom TF', () => {
+  for (const staleField of ['fresh', 'tfFresh']) {
+    const nav2 = readyNav2()
+    nav2.waypointReady = false
+    nav2.odom.available = false
+    nav2.odom[staleField] = false
+
+    const readiness = getDogzillaWaypointNavigationReadiness({ nav2 })
+
+    assert.equal(readiness.ready, false, `${staleField} must fail closed`)
+    assert.equal(readiness.odomReady, false)
+    assert.match(readiness.reason, /stale/i)
+  }
+})
+
+test('DOGZILLA waypoint readiness fallback uses the bridge lifecycle result without hard-coded node names', () => {
+  const nav2 = readyNav2()
+  delete nav2.waypointReady
+  nav2.lifecycle = {
+    active: true,
+    requiredNodes: ['controller_server'],
+    nodes: [{ name: 'controller_server', active: true }],
+  }
+
+  const readiness = getDogzillaWaypointNavigationReadiness({ nav2 })
+
+  assert.equal(readiness.ready, true)
+  assert.equal(readiness.lifecycleActive, true)
+  assert.deepEqual(readiness.lifecycleRequiredNodes, ['controller_server'])
+})
+
+test('DOGZILLA waypoint readiness fallback accepts bridge scan readiness without exact consumer names', () => {
+  const nav2 = readyNav2()
+  delete nav2.waypointReady
+  nav2.scan.consumerNodes = ['/robot/nav2_costmap']
+
+  const readiness = getDogzillaWaypointNavigationReadiness({ nav2 })
+
+  assert.equal(readiness.ready, true)
+  assert.equal(readiness.scanReady, true)
+  assert.deepEqual(readiness.scanConsumerNodes, ['/robot/nav2_costmap'])
+})
+
+test('DOGZILLA bridge readiness never bypasses map-pose safety', () => {
+  const readiness = getDogzillaWaypointNavigationReadiness(
+    { nav2: readyNav2() },
+    { waypointSafe: false },
+  )
+
+  assert.equal(readiness.ready, false)
+  assert.equal(readiness.poseReady, false)
+  assert.match(readiness.reason, /waypointSafe=false/)
+})
+
 test('DOGZILLA waypoint readiness steps expose missing odom TF as its own startup gate', () => {
   const readiness = getDogzillaWaypointNavigationReadiness({
     nav2: {
@@ -46,7 +100,9 @@ test('DOGZILLA waypoint readiness steps expose missing odom TF as its own startu
         publisherCount: 1,
         available: true,
         messageAvailable: true,
+        fresh: true,
         tfAvailable: false,
+        tfFresh: false,
       },
     },
   })
@@ -60,6 +116,15 @@ test('DOGZILLA waypoint readiness steps expose missing odom TF as its own startu
 })
 
 function readyNav2() {
+  const lifecycleNodes = [
+    'map_server',
+    'controller_server',
+    'planner_server',
+    'behavior_server',
+    'bt_navigator',
+    'velocity_smoother',
+    'collision_monitor',
+  ]
   return {
     available: true,
     waypointReady: true,
@@ -68,17 +133,27 @@ function readyNav2() {
       publisherCount: 1,
       available: true,
       messageAvailable: true,
+      fresh: true,
       tfAvailable: true,
+      tfFresh: true,
     },
     lifecycle: {
       active: true,
-      nodes: [{ name: 'controller_server', active: true, state: 'active' }],
+      requiredNodes: lifecycleNodes,
+      nodes: lifecycleNodes.map((name) => ({ name, active: true, state: 'active' })),
     },
     scan: {
       topic: '/scan_nav2',
       publisherCount: 1,
-      subscriptionCount: 2,
+      subscriptionCount: 3,
       available: true,
+      messageAvailable: true,
+      fresh: true,
+      consumerNodes: [
+        '/local_costmap/local_costmap',
+        '/global_costmap/global_costmap',
+        '/collision_monitor',
+      ],
     },
   }
 }

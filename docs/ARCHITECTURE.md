@@ -38,7 +38,7 @@ On Pi installations with `robodoge-yolo-vision.service`, the toggle writes `/etc
 
 ## Operator UI boundaries
 
-Keep routine controls narrow: Settings owns model, runtime target, performance profile, sound volume, and speech profile; Diagnostics owns aggregate preflight and Pi-load checks, with connection setup and service repair collapsed. Robot Info is the persistent navigation-status surface, and its Nav-chain detail stays operator-expanded; do not duplicate Nav2 blockers into command or minimap overlays. The Overview and Camera tabs share the primary visualization slot; Camera hides the minimap and Map Controls until Overview is restored.
+Keep routine controls narrow: Settings owns model, runtime target, sound volume, and speech profile; Diagnostics owns aggregate preflight and Pi-load checks, with connection setup and service repair collapsed. Robot Info is the persistent navigation-status surface, and its Nav-chain detail stays operator-expanded; do not duplicate Nav2 blockers into command or minimap overlays. The Overview and Camera tabs share the primary visualization slot; Camera hides the minimap and Map Controls until Overview is restored.
 
 The operator shell uses a fixed full-height black rail beside two light work columns. The left column owns command input, emergency stop, manual control, execution timeline, conversation history, and voice readiness. The right column owns compact robot state, the primary map, the shared Camera slot, and Mapping/Navigation/Waypoints presentation tabs. Rail destinations reuse existing drawers and focus targets; they do not create new backend surfaces. Parsed command JSON, expanded Nav-chain detail, and CPU/Pi diagnostic output remain in Diagnostics.
 
@@ -74,21 +74,20 @@ green:
 `DOGZILLA_NAV2_SEND_GOAL_DOCKER_ENABLED` defaults to `1`. The bridge sends the
 goal synchronously and returns `202` with `delivery: "accepted"` only after the
 Nav2 action server accepts it. The background thread monitors motion only (no
-double goal send). `locomotion.goto` auto-promotes from `idle` to `navigate`
-with a 45 s bounded readiness wait (`DOGZILLA_NAV2_PROMOTE_TIMEOUT_SEC`), polling
-every 2 s and returning the latest blockers on timeout. Callers track
+double goal send). Navigation stays in normal `navigate` mode; waypoint dispatch
+does not run a power-mode transition or Nav2 lifecycle command. Callers track
 completion through `/feedback`. The background thread updates the same
-`commandId` record and reports `motionStatus` values (`"moving"`,
-`"no-motion"`, `"cancelled"`, `"failed"`) using lightweight cached state only
+`commandId` record and reports `motionStatus` values (`"commanding"`,
+`"no-command"`, `"cancelled"`, `"failed"`) using lightweight cached state only
 (no Docker probes in the monitor loop). Each waypoint dispatch records
 stage-level timing and failure attribution for `healthLite`, `scanInfo`,
 `fullHealth`, `readiness`, `preempt`, and `command`.
 
-direct bridge owns DOGZILLA navigation-mode state (`idle` / `localize` /
-`navigate` / `sleep`) exposed by `GET/POST /mode`, but those modes are
-logical app state. Pi boot/systemd owns Cartographer/Nav2/scan-filter
-process lifetime. Other app paths read state via `/healthz-lite`; waypoint
-dispatch reports blockers when the Pi-owned stack is unavailable.
+The direct bridge exposes the fixed `navigate` state through `GET/POST /mode`
+for compatibility. Requests for `idle`, `localize`, or `sleep` are rejected and
+cannot pause Nav2. Pi boot/systemd owns Cartographer/Nav2/scan-filter process
+lifetime. Other app paths read state via `/healthz-lite`; waypoint dispatch
+reports blockers when the Pi-owned stack is unavailable.
 
 The `/scan_nav2` scan filter (`scan_self_filter.py`) reads `/scan`, masks the
 dog's own rear body (120-260 deg under 0.45 m), and publishes to `/scan_nav2`.
@@ -113,7 +112,7 @@ DOGZILLA battery reads are transient DOGZILLALib telemetry; the app persists onl
 
 | Config | Owned behavior |
 | --- | --- |
-| `config/robot-runtime.json` | Active target, dry-run, performance profile, waypoint/action/motion selections |
+| `config/robot-runtime.json` | Active target, dry-run, fixed UI polling cadence, waypoint/action/motion selections |
 | `config/dogzilla-connection.json` | Pi host, SSH alias, bridge ports, camera/vision/audio/lidar endpoints |
 | `config/robot-waypoints.json` | Authoritative real DOGZILLA waypoint registry |
 | `config/isaacsim-waypoints.json` | Isaac waypoint registry with same semantic names where possible |

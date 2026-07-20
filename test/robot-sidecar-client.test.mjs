@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { enterDogzillaNavMode, fetchDogzillaNavMode, probeRobotSidecarHealth, sendRobotCommand, sendRobotEmergencyStop, sendRobotEmergencyStopClear } from '../lib/robot-sidecar-client.mjs'
+import { probeRobotSidecarHealth, sendRobotCommand, sendRobotEmergencyStop, sendRobotEmergencyStopClear } from '../lib/robot-sidecar-client.mjs'
 import {
   actionOncePreview,
   dogzillaMapPoseBody,
@@ -39,7 +39,16 @@ function defaultBridgeResponse(url) {
     return jsonResponse({ ok: true, mode: 'http-to-dogzillalib', receivedCount: 0, runtimeSnapshot: false })
   }
   if (String(url).endsWith('/nav2/scan_info')) {
-    return jsonResponse({ ok: true, topic: '/scan_nav2', publisherCount: 1, subscriptionCount: 2, available: true })
+    return jsonResponse({
+      ok: true,
+      topic: '/scan_nav2',
+      publisherCount: 1,
+      subscriptionCount: 3,
+      available: true,
+      messageAvailable: true,
+      fresh: true,
+      consumerNodes: ['local_costmap', 'global_costmap', 'collision_monitor'],
+    })
   }
   return undefined
 }
@@ -143,7 +152,6 @@ test('sendRobotEmergencyStop posts a stop action even when runtime dry-run is en
     },
   )
 })
-
 test('sendRobotEmergencyStopClear posts an explicit unlatch command', async () => {
   let requestBody = null
 
@@ -210,6 +218,8 @@ assert.equal(requests.length, 1)
 assert.equal(requests[0].envelope.canonicalPlan.kind, 'locomotion.goto')
 assert.equal(requests[0].envelope.canonicalPlan.params.waypoint, 'living_room')
 assert.equal(requests[0].envelope.canonicalPlan.params.frame, 'map')
+assert.equal(requests[0].envelope.canonicalPlan.params.mapId, 'test_map')
+assert.equal(requests[0].envelope.canonicalPlan.params.mapFingerprint, 'test-map-fingerprint')
 assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.required, true)
 assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.mode, 'nav2_costmap')
 assert.equal(requests[0].envelope.canonicalPlan.params.obstacleAvoidance.lidarTopic, '/scan_nav2')
@@ -434,6 +444,60 @@ test('sendRobotCommand blocks direct waypoint goto when filtered scan is not wir
   )
 })
 
+test('sendRobotCommand does not bypass strict waypoint readiness with loose action and sensor signals', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody({
+        nav2: {
+          available: false,
+          waypointReady: false,
+          canSendGoal: true,
+          serverAvailable: true,
+          odom: {
+            available: false,
+            publisherCount: 1,
+            messageAvailable: true,
+            tfAvailable: true,
+            fresh: false,
+            tfFresh: false,
+          },
+          lifecycle: {
+            active: false,
+          },
+          scan: {
+            available: true,
+            publisherCount: 1,
+            subscriptionCount: 1,
+            messageAvailable: true,
+            fresh: true,
+          },
+        },
+      }))
+    },
+    async () => {
+      const result = await sendRobotCommandWithDefaultPose(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+        { autoStartWaypointNavigation: false },
+      )
+
+      assert.equal(result.status, 'navigation-unavailable')
+      assert.equal(result.attempted, false)
+      assert.match(result.error, /lifecycle nodes are not active/i)
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+    },
+  )
+})
+
 test('sendRobotCommand sends trusted config waypoint outside active DOGZILLA map bounds', async () => {
   const requests = []
 
@@ -520,7 +584,7 @@ test('sendRobotCommand blocks trusted waypoint when live robot pose is outside a
   )
 })
 
-test('sendRobotCommand sends trusted config waypoint even with different map fingerprint (identity checks removed)', async () => {
+test('sendRobotCommand blocks a waypoint captured against a different active map', async () => {
   const requests = []
 
   await withMockedFetch(
@@ -548,16 +612,18 @@ test('sendRobotCommand sends trusted config waypoint even with different map fin
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'sent')
-      assert.equal(result.attempted, true)
-      assert.equal(requests.length, 2)
+      assert.equal(result.status, 'waypoint-map-blocked')
+      assert.equal(result.attempted, false)
+      assert.equal(result.mapIdentity.id, 'old_map')
+      assert.equal(result.mapIdentity.fingerprint, 'old-fingerprint')
+      assert.match(result.error, /map id.*does not match/i)
+      assert.equal(requests.length, 1)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
-      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
     },
   )
 })
 
-test('sendRobotCommand sends trusted config waypoint without active map identity (identity checks removed)', async () => {
+test('sendRobotCommand blocks a waypoint without complete map provenance', async () => {
   const requests = []
 
   await withMockedFetch(
@@ -582,11 +648,91 @@ test('sendRobotCommand sends trusted config waypoint without active map identity
         dogzillaTransportConfig(),
       )
 
-      assert.equal(result.status, 'sent')
-      assert.equal(result.attempted, true)
-      assert.equal(requests.length, 2)
+      assert.equal(result.status, 'waypoint-map-blocked')
+      assert.equal(result.attempted, false)
+      assert.match(result.error, /map identity.*required/i)
+      assert.equal(requests.length, 1)
       assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
-      assert.equal(requests.at(-1).url, 'http://10.0.4.32:8893/commands')
+    },
+  )
+})
+
+test('sendRobotCommand blocks waypoint dispatch when active map provenance is incomplete', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
+      requests.push({ url: String(url), body: parseRequestBody(options) })
+      return jsonResponse(nav2HealthBody({
+        runtime: {
+          map: {
+            ...nav2HealthBody().runtime.map,
+            fingerprint: '',
+          },
+        },
+      }))
+    },
+    async () => {
+      const result = await sendRobotCommandWithDefaultPose(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'waypoint-map-blocked')
+      assert.equal(result.attempted, false)
+      assert.match(result.error, /active map identity.*required/i)
+      assert.equal(requests.length, 1)
+      assert.equal(requests[0].url, 'http://10.0.4.32:8893/healthz')
+    },
+  )
+})
+
+test('sendRobotCommand preserves complete map provenance in the direct bridge envelope', async () => {
+  const requests = []
+
+  await withMockedFetch(
+    async (url, options = {}) => {
+      const defaultResponse = defaultBridgeResponse(url)
+      if (defaultResponse) {
+        return defaultResponse
+      }
+      if (String(url).endsWith('/healthz')) {
+        return jsonResponse(nav2HealthBody())
+      }
+      requests.push(parseRequestBody(options))
+      return jsonResponse({ accepted: true, result: { delivery: 'accepted' } }, { status: 202 })
+    },
+    async () => {
+      const result = await sendRobotCommandWithDefaultPose(
+        waypointGotoPreview({
+          params: {
+            mapSavedAt: '2026-07-15T19:00:00Z',
+            mapYaml: '/maps/active.yaml',
+            mapPgm: '/maps/active.pgm',
+            mapPbstream: '/maps/active.pbstream',
+          },
+        }),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'accepted')
+      assert.deepEqual(
+        Object.fromEntries(Object.entries(requests[0].envelope.canonicalPlan.params).filter(([key]) => key.startsWith('map'))),
+        {
+          mapId: 'test_map',
+          mapFingerprint: 'test-map-fingerprint',
+          mapSavedAt: '2026-07-15T19:00:00Z',
+          mapYaml: '/maps/active.yaml',
+          mapPgm: '/maps/active.pgm',
+          mapPbstream: '/maps/active.pbstream',
+        },
+      )
     },
   )
 })
@@ -1091,96 +1237,6 @@ test('sendRobotCommand does not preempt manual relative motion updates', async (
       assert.equal(result.preempt, null)
       assert.equal(requests.length, 1)
       assert.equal(requests[0].envelope.canonicalPlan.kind, 'locomotion.relative')
-    },
-  )
-})
-
-test('enterDogzillaNavMode posts mode to bridge and reports ok', async () => {
-  const calls = []
-  await withMockedFetch(
-    async (url, options) => {
-      calls.push({ url: String(url), method: options?.method, body: parseRequestBody(options) })
-      return jsonResponse({ ok: true, mode: 'navigate', previousMode: 'idle' }, { status: 200 })
-    },
-    async () => {
-      const result = await enterDogzillaNavMode(
-        dogzillaDirectRuntime(),
-        dogzillaTransportConfig(),
-        'navigate',
-      )
-
-      assert.equal(result.ok, true)
-      assert.equal(result.status, 'ok')
-      assert.equal(result.mode, 'navigate')
-      assert.equal(result.previousMode, 'idle')
-      assert.equal(calls.length, 1)
-      assert.equal(calls[0].method, 'POST')
-      assert.ok(calls[0].url.endsWith('/mode'))
-      assert.deepEqual(calls[0].body, { mode: 'navigate' })
-    },
-  )
-})
-
-test('enterDogzillaNavMode uses Nav2 transition timeout instead of short transport timeout', async () => {
-  const originalTimeout = AbortSignal.timeout
-  const timeoutCalls = []
-  AbortSignal.timeout = (ms) => {
-    timeoutCalls.push(ms)
-    return new AbortController().signal
-  }
-
-  try {
-    await withMockedFetch(
-      async () => jsonResponse({ ok: true, mode: 'navigate', previousMode: 'idle' }, { status: 200 }),
-      async () => {
-        const result = await enterDogzillaNavMode(
-          dogzillaDirectRuntime(),
-          dogzillaTransportConfig({ timeoutMs: 30000 }),
-          'navigate',
-        )
-
-        assert.equal(result.ok, true)
-        assert.equal(timeoutCalls.at(-1), 120000)
-      },
-    )
-  } finally {
-    AbortSignal.timeout = originalTimeout
-  }
-})
-
-test('enterDogzillaNavMode reports error on bridge failure', async () => {
-  await withMockedFetch(
-    async () => jsonResponse({ ok: false, error: 'invalid_nav_mode:dance' }, { status: 400 }),
-    async () => {
-      const result = await enterDogzillaNavMode(
-        dogzillaDirectRuntime(),
-        dogzillaTransportConfig(),
-        'dance',
-      )
-
-      assert.equal(result.ok, false)
-      assert.equal(result.status, 'error')
-      assert.equal(result.mode, 'dance')
-    },
-  )
-})
-
-test('fetchDogzillaNavMode reads current nav mode', async () => {
-  await withMockedFetch(
-    async (url) => {
-      if (String(url).endsWith('/mode')) {
-        return jsonResponse({ ok: true, navMode: 'localize', mode: 'localize' })
-      }
-      return jsonResponse({ ok: true })
-    },
-    async () => {
-      const result = await fetchDogzillaNavMode(
-        dogzillaDirectRuntime(),
-        dogzillaTransportConfig(),
-      )
-
-      assert.equal(result.ok, true)
-      assert.equal(result.navMode, 'localize')
     },
   )
 })

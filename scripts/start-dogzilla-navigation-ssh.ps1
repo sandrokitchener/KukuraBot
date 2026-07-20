@@ -49,133 +49,13 @@ Require-LocalCommand scp
 
 $repoRoot = Resolve-RoboDogeRoot
 $avoidanceConfigPath = Join-Path $repoRoot "config\robot-obstacle-avoidance.json"
-$avoidanceConfig = $null
-if (Test-Path -LiteralPath $avoidanceConfigPath) {
-  $avoidanceConfig = Get-Content -LiteralPath $avoidanceConfigPath -Raw | ConvertFrom-Json
+if (!(Test-Path -LiteralPath $avoidanceConfigPath)) {
+  throw "Canonical Nav2 tuning config not found at $avoidanceConfigPath"
 }
-
-function Get-ConfigPropertyValue {
-  param(
-    [object]$Config,
-    [string]$PropertyName
-  )
-
-  if ($null -eq $Config) {
-    return $null
-  }
-
-  $property = $Config.PSObject.Properties[$PropertyName]
-  if ($null -eq $property) {
-    return $null
-  }
-
-  return $property.Value
+$mapMetadataSource = Join-Path $repoRoot "sidecars\dogzilla_lib_bridge\map_metadata.py"
+if (!(Test-Path -LiteralPath $mapMetadataSource)) {
+  throw "Shared map metadata validator not found at $mapMetadataSource"
 }
-
-function Use-PositiveConfigDouble {
-  param(
-    [double]$Current,
-    [object]$Config,
-    [string]$PropertyName
-  )
-
-  if ($Current -gt 0) {
-    return $Current
-  }
-
-  $value = Get-ConfigPropertyValue -Config $Config -PropertyName $PropertyName
-  if ($null -eq $value) {
-    return $Current
-  }
-
-  $numeric = 0.0
-  if ([double]::TryParse([string]$value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$numeric) -and $numeric -gt 0) {
-    return $numeric
-  }
-
-  return $Current
-}
-
-function Use-ConfigDoubleWhenUnset {
-  param(
-    [double]$Current,
-    [double]$UnsetValue,
-    [object]$Config,
-    [string]$PropertyName
-  )
-
-  if ($Current -ne $UnsetValue) {
-    return $Current
-  }
-
-  $value = Get-ConfigPropertyValue -Config $Config -PropertyName $PropertyName
-  if ($null -eq $value) {
-    return $Current
-  }
-
-  $numeric = 0.0
-  if ([double]::TryParse([string]$value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$numeric)) {
-    return $numeric
-  }
-
-  return $Current
-}
-
-function Use-ConfigBoolFlag {
-  param(
-    [string]$Current,
-    [object]$Config,
-    [string]$PropertyName
-  )
-
-  if ($Current -ne "") {
-    return $Current
-  }
-
-  $value = Get-ConfigPropertyValue -Config $Config -PropertyName $PropertyName
-  if ($null -eq $value) {
-    return $Current
-  }
-
-  if ($value -is [bool]) {
-    return $(if ($value) { "1" } else { "0" })
-  }
-
-  $text = ([string]$value).Trim().ToLowerInvariant()
-  if ($text -in @("1", "true", "yes", "on")) {
-    return "1"
-  }
-  if ($text -in @("0", "false", "no", "off")) {
-    return "0"
-  }
-
-  return $Current
-}
-
-$Nav2RobotRadius = Use-PositiveConfigDouble -Current $Nav2RobotRadius -Config $avoidanceConfig -PropertyName "nav2RobotRadius"
-$Nav2FootprintPadding = Use-PositiveConfigDouble -Current $Nav2FootprintPadding -Config $avoidanceConfig -PropertyName "nav2FootprintPadding"
-$Nav2InflationRadius = Use-PositiveConfigDouble -Current $Nav2InflationRadius -Config $avoidanceConfig -PropertyName "nav2InflationRadius"
-$Nav2CostScalingFactor = Use-PositiveConfigDouble -Current $Nav2CostScalingFactor -Config $avoidanceConfig -PropertyName "nav2CostScalingFactor"
-$Nav2ObstacleMinRange = Use-PositiveConfigDouble -Current $Nav2ObstacleMinRange -Config $avoidanceConfig -PropertyName "nav2ObstacleMinRange"
-$Nav2ObstacleMaxRange = Use-PositiveConfigDouble -Current $Nav2ObstacleMaxRange -Config $avoidanceConfig -PropertyName "nav2ObstacleMaxRange"
-$Nav2RaytraceMaxRange = Use-PositiveConfigDouble -Current $Nav2RaytraceMaxRange -Config $avoidanceConfig -PropertyName "nav2RaytraceMaxRange"
-$Nav2ControllerFrequency = Use-PositiveConfigDouble -Current $Nav2ControllerFrequency -Config $avoidanceConfig -PropertyName "nav2ControllerFrequency"
-$Nav2BtLoopDurationMs = Use-PositiveConfigDouble -Current $Nav2BtLoopDurationMs -Config $avoidanceConfig -PropertyName "nav2BtLoopDurationMs"
-$Nav2BtServerTimeoutMs = Use-PositiveConfigDouble -Current $Nav2BtServerTimeoutMs -Config $avoidanceConfig -PropertyName "nav2BtServerTimeoutMs"
-$Nav2BtWaitForServiceTimeoutMs = Use-PositiveConfigDouble -Current $Nav2BtWaitForServiceTimeoutMs -Config $avoidanceConfig -PropertyName "nav2BtWaitForServiceTimeoutMs"
-$Nav2PlannerFrequency = Use-PositiveConfigDouble -Current $Nav2PlannerFrequency -Config $avoidanceConfig -PropertyName "nav2PlannerFrequency"
-$Nav2SmootherFrequency = Use-PositiveConfigDouble -Current $Nav2SmootherFrequency -Config $avoidanceConfig -PropertyName "nav2SmootherFrequency"
-$Nav2RequiredMovementRadius = Use-PositiveConfigDouble -Current $Nav2RequiredMovementRadius -Config $avoidanceConfig -PropertyName "nav2RequiredMovementRadius"
-$Nav2MovementTimeAllowance = Use-PositiveConfigDouble -Current $Nav2MovementTimeAllowance -Config $avoidanceConfig -PropertyName "nav2MovementTimeAllowance"
-$Nav2FailureTolerance = Use-PositiveConfigDouble -Current $Nav2FailureTolerance -Config $avoidanceConfig -PropertyName "nav2FailureTolerance"
-$Nav2MinSpeedXy = Use-PositiveConfigDouble -Current $Nav2MinSpeedXy -Config $avoidanceConfig -PropertyName "nav2MinSpeedXy"
-$Nav2TransStoppedVelocity = Use-PositiveConfigDouble -Current $Nav2TransStoppedVelocity -Config $avoidanceConfig -PropertyName "nav2TransStoppedVelocity"
-$Nav2ScanFilterEnabled = Use-ConfigBoolFlag -Current $Nav2ScanFilterEnabled -Config $avoidanceConfig -PropertyName "nav2ScanFilterEnabled"
-$Nav2ScanFilterMaskStartDeg = Use-ConfigDoubleWhenUnset -Current $Nav2ScanFilterMaskStartDeg -UnsetValue -9999 -Config $avoidanceConfig -PropertyName "nav2ScanFilterMaskStartDeg"
-$Nav2ScanFilterMaskEndDeg = Use-ConfigDoubleWhenUnset -Current $Nav2ScanFilterMaskEndDeg -UnsetValue -9999 -Config $avoidanceConfig -PropertyName "nav2ScanFilterMaskEndDeg"
-$Nav2ScanFilterMaskRangeM = Use-PositiveConfigDouble -Current $Nav2ScanFilterMaskRangeM -Config $avoidanceConfig -PropertyName "nav2ScanFilterMaskRangeM"
-$YawGoalTolerance = Use-PositiveConfigDouble -Current $YawGoalTolerance -Config $avoidanceConfig -PropertyName "yawGoalTolerance"
-$Nav2XyGoalTolerance = Use-PositiveConfigDouble -Current $Nav2XyGoalTolerance -Config $avoidanceConfig -PropertyName "nav2XyGoalTolerance"
 $configPath = Ensure-DogzillaSshConfig `
   -Host $PiIp `
   -User $User `
@@ -186,7 +66,7 @@ $configPath = Ensure-DogzillaSshConfig `
 
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
 if (-not $NoSync) {
-  $remoteSetup = "sudo install -d -o $User -g $User $remoteRootQuoted/sidecars $remoteRootQuoted/logs"
+  $remoteSetup = "sudo install -d -o $User -g $User $remoteRootQuoted/sidecars $remoteRootQuoted/sidecars/dogzilla_lib_bridge $remoteRootQuoted/logs $remoteRootQuoted/config"
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteSetup
   if ($LASTEXITCODE -ne 0) { throw "remote navigation setup failed" }
   $navigationSource = Join-Path $repoRoot "sidecars\dogzilla_navigation"
@@ -209,6 +89,25 @@ if (-not $NoSync) {
   if ($LASTEXITCODE -ne 0) {
     throw "scp failed for dogzilla_imu_publisher sidecar"
   }
+
+  Write-Output "Copying config\robot-obstacle-avoidance.json -> ${Alias}:$RemoteRoot/config/"
+  & scp -F $configPath $avoidanceConfigPath "${Alias}:$RemoteRoot/config/robot-obstacle-avoidance.json"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for canonical Nav2 tuning config"
+  }
+
+  $mapMetadataStagePath = "/tmp/robodoge-map-metadata-$([guid]::NewGuid().ToString('N')).py"
+  $mapMetadataRemotePath = "$RemoteRoot/sidecars/dogzilla_lib_bridge/map_metadata.py"
+  Write-Output "Copying sidecars\dogzilla_lib_bridge\map_metadata.py -> ${Alias}:$mapMetadataRemotePath"
+  & scp -q -F $configPath $mapMetadataSource "${Alias}:$mapMetadataStagePath"
+  if ($LASTEXITCODE -ne 0) {
+    throw "scp failed for shared map metadata validator"
+  }
+  $mapMetadataInstall = "sudo install -o $User -g $User -m 0644 $(ConvertTo-RemoteSingleQuote $mapMetadataStagePath) $(ConvertTo-RemoteSingleQuote $mapMetadataRemotePath) && rm -f $(ConvertTo-RemoteSingleQuote $mapMetadataStagePath)"
+  Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $mapMetadataInstall
+  if ($LASTEXITCODE -ne 0) {
+    throw "sudo install failed for shared map metadata validator"
+  }
 }
 
 Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot $RemoteRoot
@@ -216,7 +115,9 @@ Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot
 Write-Output "Starting DOGZILLA Nav2 waypoint navigation in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_navigation/start-navigation-in-container.sh"
 $mapEnv = if ($MapYaml) { " -e DOGZILLA_NAV2_MAP=$MapYaml" } else { "" }
-$mappingModeEnv = if ($MappingMode) { " -e DOGZILLA_NAV2_MAPPING_MODE=1 -e DOGZILLA_LOCALIZATION_BACKEND=cartographer" } else { "" }
+$localizationBackend = "cartographer"
+$mappingModeEnv = " -e DOGZILLA_LOCALIZATION_BACKEND=$localizationBackend"
+if ($MappingMode) { $mappingModeEnv += " -e DOGZILLA_NAV2_MAPPING_MODE=1" }
 $nav2Env = ''
 if ($Nav2RobotRadius -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_ROBOT_RADIUS=$Nav2RobotRadius" }
 if ($Nav2FootprintPadding -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_FOOTPRINT_PADDING=$Nav2FootprintPadding" }
@@ -242,10 +143,13 @@ if ($Nav2ScanFilterMaskEndDeg -gt -9999) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_F
 if ($Nav2ScanFilterMaskRangeM -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M=$Nav2ScanFilterMaskRangeM" }
 if ($YawGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_YAW_GOAL_TOLERANCE=$YawGoalTolerance" }
 if ($Nav2XyGoalTolerance -gt 0) { $nav2Env += " -e DOGZILLA_NAV2_XY_GOAL_TOLERANCE=$Nav2XyGoalTolerance" }
+if (-not $MappingMode -and ($MapYaml -or $nav2Env)) {
+  throw "Normal navigation is systemd-owned and reads canonical tuning from config/robot-obstacle-avoidance.json; per-launch CLI overrides are supported only with -MappingMode."
+}
 function Wait-ContainerRunning {
   param([string]$Name, [int]$TimeoutSec = 20)
   for ($i = 0; $i -lt $TimeoutSec; $i += 2) {
-    $id = & ssh -F $configPath $Alias "docker ps --filter name=$Name --format='{{.ID}}' 2>/dev/null || true" 2>$null
+    $id = & ssh -n -F $configPath $Alias "docker ps --filter name=$Name --format='{{.ID}}' 2>/dev/null || true" 2>$null
     if ($id) {
       Start-Sleep -Seconds 2
       return $true
@@ -255,43 +159,116 @@ function Wait-ContainerRunning {
   return $false
 }
 
-# Launch detached so Nav2, scan filter, gait adapter, and odom publisher survive
-# the SSH session closing.
-$remoteCommand = "docker exec -d -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$mappingModeEnv$nav2Env $ContainerName bash $containerScript"
-$sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
-if ($LASTEXITCODE -ne 0) {
-  Write-Output "Container $ContainerName not available; attempting to start..."
-  & ssh -F $configPath $Alias "docker start $ContainerName 2>/dev/null || docker run -d --name $ContainerName --privileged --network host robodoge/ros-humble-cartographer:1.0 bash -lc 'echo started' 2>/dev/null || true"
-  if (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 20) {
-    Write-Output "Container $ContainerName started; retrying Nav2 launch."
-    $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
-    if ($LASTEXITCODE -ne 0) {
-      $detail = ($sshOutput | Out-String).Trim()
-      $detailLines = $detail -split "`n" | Select-Object -First 30 | ForEach-Object { "    $_" }
-      $suffix = if ($detailLines.Count -gt 0) { "`n`nSSH output:`n$($detailLines -join "`n")" } else { "" }
-      throw "DOGZILLA Nav2 waypoint navigation failed to launch (exit=$LASTEXITCODE).$suffix"
-    }
-  } else {
-    throw "DOGZILLA Nav2 waypoint navigation failed: container '$ContainerName' could not be started. Ensure rosbridge is running (scripts/start-dogzilla-rosbridge-ssh.ps1)."
+$ownerFile = "$RemoteRoot/logs/navigation-runtime.owner"
+$ownerFileQuoted = ConvertTo-RemoteSingleQuote $ownerFile
+function Get-NavigationOwnerRecord {
+  $ownerCommand = "if sudo -n test -f $ownerFileQuoted; then sudo -n sed -n -e 's/^mode=/mode=/p' -e 's/^token=/token=/p' $ownerFileQuoted; fi"
+  $ownerLines = @(& ssh -n -F $configPath $Alias $ownerCommand 2>$null)
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not read the Nav2 owner record at $ownerFile."
   }
+  $mode = ""
+  $token = ""
+  foreach ($line in $ownerLines) {
+    $parts = @("$line" -split "=", 2)
+    if ($parts.Count -ne 2) { continue }
+    if ($parts[0] -eq "mode") { $mode = $parts[1].Trim() }
+    if ($parts[0] -eq "token") { $token = $parts[1].Trim() }
+  }
+  return [pscustomobject]@{ Mode = $mode; Token = $token }
 }
 
-Write-Output "Launched detached navigation container script; polling for Nav2 readiness."
+$expectedOwnerMode = if ($MappingMode) { "mapping" } else { "normal" }
+$expectedOwnerToken = ""
+
+if ($MappingMode) {
+  # Mapping launch owns the explicit detached exception; the runtime flock still
+  # refuses to compete with a systemd-owned localization launch.
+  $ownerBefore = Get-NavigationOwnerRecord
+  $remoteCommand = "docker exec -d -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId$mapEnv$mappingModeEnv$nav2Env $ContainerName bash $containerScript"
+  $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+  if ($LASTEXITCODE -ne 0) {
+    Write-Output "Container $ContainerName not available; attempting to start..."
+    & ssh -n -F $configPath $Alias "docker start $ContainerName 2>/dev/null || docker run -d --name $ContainerName --privileged --network host robodoge/ros-humble-cartographer:1.0 bash -lc 'echo started' 2>/dev/null || true"
+    if (Wait-ContainerRunning -Name $ContainerName -TimeoutSec 20) {
+      Write-Output "Container $ContainerName started; retrying mapping Nav2 launch."
+      $ownerBefore = Get-NavigationOwnerRecord
+      $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+      if ($LASTEXITCODE -ne 0) {
+        $detail = ($sshOutput | Out-String).Trim()
+        $detailLines = $detail -split "`n" | Select-Object -First 30 | ForEach-Object { "    $_" }
+        $suffix = if ($detailLines.Count -gt 0) { "`n`nSSH output:`n$($detailLines -join "`n")" } else { "" }
+        throw "DOGZILLA mapping Nav2 failed to launch (exit=$LASTEXITCODE).$suffix"
+      }
+    } else {
+      throw "DOGZILLA mapping Nav2 failed: container '$ContainerName' could not be started."
+    }
+  }
+  $ownerDeadline = [DateTime]::UtcNow.AddSeconds(20)
+  do {
+    $ownerAfter = Get-NavigationOwnerRecord
+    if (
+      $ownerAfter.Mode -eq "mapping" -and
+      $ownerAfter.Token -match '^[0-9a-fA-F]{32}$' -and
+      $ownerAfter.Token -ne $ownerBefore.Token
+    ) {
+      $expectedOwnerToken = $ownerAfter.Token
+      break
+    }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTime]::UtcNow -lt $ownerDeadline)
+  if (-not $expectedOwnerToken) {
+    throw "DOGZILLA mapping Nav2 did not acquire a fresh mapping owner generation; the detached launch may have refused the runtime lock."
+  }
+  Write-Output "Launched mapping Nav2 under the detached exception; polling readiness."
+} else {
+  $ownerStatusScript = "$RemoteRoot/sidecars/dogzilla_navigation/navigation-owner-status-in-container.sh"
+  $ownerStatusCommand = "if sudo systemctl is-active --quiet robodoge-autonomous-mapping-starting || sudo systemctl is-active --quiet robodoge-autonomous-mapping; then echo mapping; exit 42; fi; docker exec -e REMOTE_ROOT=$RemoteRoot $ContainerName bash $ownerStatusScript"
+  $ownerStatusOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $ownerStatusCommand
+  $ownerStatusExit = $LASTEXITCODE
+  if ($ownerStatusExit -eq 42) {
+    throw "DOGZILLA mapping owns the Nav2 runtime; refusing a normal systemd restart until mapping restores localization."
+  }
+  if ($ownerStatusExit -ne 0) {
+    $ownerStatusDetail = ($ownerStatusOutput | Out-String).Trim()
+    throw "DOGZILLA Nav2 runtime owner is unknown; refusing destructive restart: $ownerStatusDetail"
+  }
+  $remoteCommand = "sudo systemctl reset-failed robodoge-navigation.service; sudo systemctl restart robodoge-navigation.service"
+  $sshOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteCommand
+  if ($LASTEXITCODE -ne 0) {
+    $detail = ($sshOutput | Out-String).Trim()
+    throw "DOGZILLA Nav2 systemd service failed to restart: $detail"
+  }
+  Write-Output "Restarted systemd-owned Nav2; polling readiness."
+}
+
 if ($SkipReadinessWait) {
   Write-Output "Skipped blocking readiness wait; caller owns readiness supervision."
   return
 }
-$scanTopic = if ($Nav2ScanFilterEnabled -eq "1" -or ($null -ne $avoidanceConfig -and $avoidanceConfig.nav2ScanFilterEnabled -eq $true)) { "/scan_nav2" } else { "/scan" }
+$scanTopic = if ($Nav2ScanFilterEnabled -eq "0") { "/scan" } elseif ($Nav2ScanFilterEnabled -eq "1") { "/scan_nav2" } else { "auto" }
 $waitScriptLocal = Join-Path $repoRoot "sidecars/dogzilla_navigation/wait-nav2-ready.sh"
 if (!(Test-Path -LiteralPath $waitScriptLocal)) {
   throw "wait-nav2-ready.sh not found at $waitScriptLocal"
 }
+$readinessLogicLocal = Join-Path $repoRoot "sidecars/dogzilla_navigation/nav2_readiness_logic.py"
+if (!(Test-Path -LiteralPath $readinessLogicLocal)) {
+  throw "nav2_readiness_logic.py not found at $readinessLogicLocal"
+}
 $waitScriptRemote = "/tmp/wait-nav2-ready.sh"
 $waitScriptContainer = "/tmp/wait-nav2-ready.sh"
+$readinessLogicRemote = "/tmp/nav2_readiness_logic.py"
+$readinessLogicContainer = "/tmp/nav2_readiness_logic.py"
+$mappingProbeArg = if ($MappingMode) { "1" } else { "0" }
 & scp -F $configPath $waitScriptLocal "${Alias}:$waitScriptRemote"
 if ($LASTEXITCODE -ne 0) { throw "scp failed for wait-nav2-ready.sh" }
+& scp -F $configPath $readinessLogicLocal "${Alias}:$readinessLogicRemote"
+if ($LASTEXITCODE -ne 0) { throw "scp failed for nav2_readiness_logic.py" }
 Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "docker cp $waitScriptRemote $ContainerName`:$waitScriptContainer"
-$probeCommand = "docker exec -e ROS_DOMAIN_ID=$RosDomainId $ContainerName bash $waitScriptContainer $RosDomainId $RemoteRoot $scanTopic"
+if ($LASTEXITCODE -ne 0) { throw "docker cp failed for wait-nav2-ready.sh" }
+Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "docker cp $readinessLogicRemote $ContainerName`:$readinessLogicContainer"
+if ($LASTEXITCODE -ne 0) { throw "docker cp failed for nav2_readiness_logic.py" }
+$probeCommand = "docker exec -e ROS_DOMAIN_ID=$RosDomainId $ContainerName bash $waitScriptContainer $RosDomainId $RemoteRoot $scanTopic 120 $mappingProbeArg $localizationBackend once http://127.0.0.1:8893/nav2/cmd_vel/health 20 $expectedOwnerMode"
 $probeOutput = Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $probeCommand
 $navExit = $LASTEXITCODE
 if ($navExit -ne 0) {

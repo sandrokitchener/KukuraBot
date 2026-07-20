@@ -8,6 +8,8 @@ import {
   runDogzillaConnectionAction,
   saveDogzillaRobotName,
 } from '../lib/dogzilla-connection-center.mjs'
+import { loadDogzillaObstacleAvoidanceConfig } from '../lib/robot-obstacle-avoidance-config.mjs'
+import { getSyncSources } from '../lib/sync-stamp-store.mjs'
 
 test('normalizeDogzillaConnectionConfig fills stock DOGZILLA SSH defaults', () => {
   const config = normalizeDogzillaConnectionConfig({
@@ -189,7 +191,7 @@ test('buildDogzillaActionPlan starts map pose localization through the lidar con
   assert.ok(plan.args.includes('-PosePort'))
   assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '9090')
   assert.ok(plan.args.includes('-Mode'))
-  assert.equal(plan.args[plan.args.indexOf('-Mode') + 1], 'auto')
+  assert.equal(plan.args[plan.args.indexOf('-Mode') + 1], 'localization')
 })
 
 test('buildDogzillaActionPlan starts waypoint navigation through the lidar container', () => {
@@ -216,7 +218,7 @@ test('buildDogzillaActionPlan starts waypoint navigation through the lidar conta
   assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '9090')
 })
 
-test('buildDogzillaActionPlan passes Nav2 yaw goal tolerance to navigation startup', () => {
+test('buildDogzillaActionPlan leaves canonical Nav2 tuning out of normal startup CLI', () => {
   const config = normalizeDogzillaConnectionConfig({
     ssh: {
       host: '192.168.8.88',
@@ -257,20 +259,16 @@ test('buildDogzillaActionPlan passes Nav2 yaw goal tolerance to navigation start
     },
   })
 
-  assert.ok(plan.args.includes('-YawGoalTolerance'))
-  assert.equal(plan.args[plan.args.indexOf('-YawGoalTolerance') + 1], '6.283185307179586')
-  assert.ok(plan.args.includes('-Nav2ObstacleMinRange'))
-  assert.equal(plan.args[plan.args.indexOf('-Nav2ObstacleMinRange') + 1], '0.24')
-  assert.ok(plan.args.includes('-Nav2ScanFilterEnabled'))
-  assert.equal(plan.args[plan.args.indexOf('-Nav2ScanFilterEnabled') + 1], '1')
-  assert.ok(plan.args.includes('-Nav2ScanFilterMaskRangeM'))
-  assert.equal(plan.args[plan.args.indexOf('-Nav2ScanFilterMaskRangeM') + 1], '0.45')
-  assert.ok(plan.args.includes('-Nav2BtServerTimeoutMs'))
-  assert.equal(plan.args[plan.args.indexOf('-Nav2BtServerTimeoutMs') + 1], '10000')
-  assert.ok(plan.args.includes('-Nav2RequiredMovementRadius'))
-  assert.equal(plan.args[plan.args.indexOf('-Nav2RequiredMovementRadius') + 1], '0.08')
-  assert.ok(plan.args.includes('-Nav2TransStoppedVelocity'))
-  assert.equal(plan.args[plan.args.indexOf('-Nav2TransStoppedVelocity') + 1], '0.05')
+  assert.equal(plan.args.some((arg) => arg.startsWith('-Nav2')), false)
+  assert.equal(plan.args.includes('-YawGoalTolerance'), false)
+})
+
+test('obstacle avoidance loader returns the canonical checked-in config', async () => {
+  const config = await loadDogzillaObstacleAvoidanceConfig()
+
+  assert.equal(config.nav2ScanFilterMaskRangeM, 0.2)
+  assert.deepEqual(config.nav2CollisionStopPolygonPoints, [0.35, 0.2, 0.35, -0.2, -0.25, -0.2, -0.25, 0.2])
+  assert.ok(getSyncSources().includes('config/robot-obstacle-avoidance.json'))
 })
 
 test('buildDogzillaActionPlan exposes explicit map mapping and save actions', () => {
@@ -318,7 +316,7 @@ test('buildDogzillaActionPlan keeps autonomous mapping and candidate promotion e
   assert.equal(finishPlan.timeoutMs, 240_000)
 })
 
-test('connection actions do not gate the requested script on a second identity SSH command', async () => {
+test('autonomous mapping starts in the background and returns started immediately', async () => {
   const config = normalizeDogzillaConnectionConfig({
     ssh: { host: '192.168.8.88', user: 'pi', alias: 'dogzilla' },
     remoteRoot: '/home/pi/robodoge',
@@ -330,13 +328,13 @@ test('connection actions do not gate the requested script on a second identity S
     config,
     noSync: true,
     obstacleAvoidance: {},
-    execFilePromiseImpl: async (command, args) => {
+    spawnImpl: (command, args) => {
       calls.push({ command, args })
-      return { exitCode: 0, stdout: 'started', stderr: '' }
+      return { pid: 123, unref() {} }
     },
   })
 
-  assert.equal(result.status, 'ok')
+  assert.equal(result.status, 'started')
   assert.equal(calls.length, 1)
   assert.ok(calls[0].args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
   assert.ok(!calls[0].args.some((arg) => arg.endsWith('dogzilla-ssh.ps1')))

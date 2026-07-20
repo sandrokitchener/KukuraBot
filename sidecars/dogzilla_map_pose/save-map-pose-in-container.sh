@@ -142,7 +142,7 @@ if command -v cartographer_pbstream_to_ros_map >/dev/null 2>&1; then
     >> "$REMOTE_ROOT/logs/map-pose-save.log" 2>&1 \
     && conversion_status="ok" \
     || conversion_status="error"
-elif ros2 pkg executables cartographer_ros 2>/dev/null | grep -q "cartographer_pbstream_to_ros_map"; then
+elif ros2 pkg executables cartographer_ros 2>/dev/null | grep -F "cartographer_ros cartographer_pbstream_to_ros_map" >/dev/null; then
   ros2 run cartographer_ros cartographer_pbstream_to_ros_map \
     -pbstream_filename "$target_pbstream" \
     -map_filestem "$map_stem" \

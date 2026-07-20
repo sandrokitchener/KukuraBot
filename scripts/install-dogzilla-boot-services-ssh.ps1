@@ -37,7 +37,7 @@ $configPath = Ensure-DogzillaSshConfig `
   -NoHostKeyScan:$NoHostKeyScan
 
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
-Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "mkdir -p $remoteRootQuoted/sidecars $remoteRootQuoted/public/sounds $remoteRootQuoted/models/dogzilla_yolo $remoteRootQuoted/logs $remoteRootQuoted/maps"
+Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand "mkdir -p $remoteRootQuoted/sidecars $remoteRootQuoted/public/sounds $remoteRootQuoted/models/dogzilla_yolo $remoteRootQuoted/logs $remoteRootQuoted/maps $remoteRootQuoted/config"
 if ($LASTEXITCODE -ne 0) {
   throw "remote boot-service directory setup failed"
 }
@@ -58,6 +58,13 @@ foreach ($sidecar in $sidecars) {
   if ($LASTEXITCODE -ne 0) {
     throw "scp failed for $sidecar"
   }
+}
+
+$avoidanceConfigSource = Join-Path $repoRoot "config\robot-obstacle-avoidance.json"
+Write-Host "Copying config\robot-obstacle-avoidance.json -> ${Alias}:$RemoteRoot/config/"
+& scp -F $configPath $avoidanceConfigSource "${Alias}:$RemoteRoot/config/robot-obstacle-avoidance.json"
+if ($LASTEXITCODE -ne 0) {
+  throw "scp failed for canonical Nav2 tuning config"
 }
 
 Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot $RemoteRoot
@@ -100,8 +107,8 @@ ROS_DOMAIN_ID_VALUE='__ROS_DOMAIN_ID__'
 DOCKER_IMAGE='__DOCKER_IMAGE__'
 APLAY_DEVICE='__APLAY_DEVICE__'
 
-sudo mkdir -p /etc/robodoge /etc/systemd/system "$REMOTE_ROOT/logs"
-sudo chown -R "$USER_NAME:$USER_NAME" "$REMOTE_ROOT/logs" "$REMOTE_ROOT/maps" "$REMOTE_ROOT/public" "$REMOTE_ROOT/sidecars" "$REMOTE_ROOT/models" 2>/dev/null || true
+sudo mkdir -p /etc/robodoge /etc/systemd/system "$REMOTE_ROOT/logs" "$REMOTE_ROOT/config"
+sudo chown -R "$USER_NAME:$USER_NAME" "$REMOTE_ROOT/logs" "$REMOTE_ROOT/maps" "$REMOTE_ROOT/public" "$REMOTE_ROOT/sidecars" "$REMOTE_ROOT/models" "$REMOTE_ROOT/config" 2>/dev/null || true
 
 if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${DOCKER_IMAGE}$"; then
   echo "Building DOGZILLA Cartographer/Nav2 image ${DOCKER_IMAGE} ..."
@@ -137,7 +144,6 @@ Type=simple
 User=$USER_NAME
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
-Environment=DOGZILLA_NAV2_STANDBY_ENABLED=1
 ExecStartPre=+/bin/bash -lc 'systemctl stop yahboom_oled.service 2>/dev/null || true; pkill -TERM -f "[a]pp_dogzilla.py" 2>/dev/null || true; pkill -TERM -f "[o]led_dogzilla.py" 2>/dev/null || true; sleep 0.8; pkill -KILL -f "[a]pp_dogzilla.py" 2>/dev/null || true; pkill -KILL -f "[o]led_dogzilla.py" 2>/dev/null || true; sleep 0.3; if fuser -s "/dev/ttyAMA0"; then echo "/dev/ttyAMA0 still owned after vendor stop" >&2; fuser -v "/dev/ttyAMA0" >&2 || true; exit 1; fi'
 ExecStartPre=/bin/bash -lc 'pkill -f "[s]idecars/dogzilla_lib_bridge/server.py" 2>/dev/null || true'
 ExecStart=/usr/bin/python3 $REMOTE_ROOT/sidecars/dogzilla_lib_bridge/server.py --host 0.0.0.0 --port $DIRECT_PORT --live
@@ -218,12 +224,16 @@ StandardError=append:$REMOTE_ROOT/logs/rosbridge-systemd.log
 WantedBy=multi-user.target
 SERVICE
 
+# Retire the unlimited-restart drop-in from older installs before applying the
+# bounded base-unit policy below.
+sudo rm -f /etc/systemd/system/robodoge-map-pose.service.d/restart.conf
 sudo tee /etc/systemd/system/robodoge-map-pose.service >/dev/null <<SERVICE
 [Unit]
 Description=Robo-Doge DOGZILLA Cartographer Map Pose
 After=robodoge-rosbridge.service
 Wants=robodoge-rosbridge.service
-StartLimitIntervalSec=0
+StartLimitIntervalSec=900
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -233,7 +243,7 @@ ExecStartPre=-/usr/bin/docker rm -f robodoge-map-pose
 ExecStart=/usr/bin/docker run --rm --name robodoge-map-pose --privileged --network host -e REMOTE_ROOT=$REMOTE_ROOT -e POSE_PORT=$LIDAR_PORT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_MAP_POSE_MODE=auto -v /dev:/dev -v $REMOTE_ROOT:$REMOTE_ROOT -w $REMOTE_ROOT $DOCKER_IMAGE bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_map_pose/start-map-pose-in-container.sh'
 ExecStop=-/usr/bin/docker rm -f robodoge-map-pose
 Restart=on-failure
-RestartSec=10
+RestartSec=30
 TimeoutStartSec=180
 StandardOutput=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/map-pose-systemd.log
@@ -242,25 +252,30 @@ StandardError=append:$REMOTE_ROOT/logs/map-pose-systemd.log
 WantedBy=multi-user.target
 SERVICE
 
+# These repository-created drop-ins predate the single-owner unit below and
+# override its ExecStart/restart policy if left installed on an upgraded Pi.
+sudo rm -f /etc/systemd/system/robodoge-navigation.service.d/cartographer-backend.conf
+sudo rm -f /etc/systemd/system/robodoge-navigation.service.d/restart.conf
 sudo tee /etc/systemd/system/robodoge-navigation.service >/dev/null <<SERVICE
 [Unit]
 Description=Robo-Doge DOGZILLA Nav2 Navigation
-After=robodoge-rosbridge.service robodoge-map-pose.service
-Wants=robodoge-rosbridge.service robodoge-map-pose.service
+After=robodoge-direct-bridge.service robodoge-rosbridge.service robodoge-map-pose.service
+Wants=robodoge-direct-bridge.service robodoge-rosbridge.service robodoge-map-pose.service
 PartOf=robodoge-rosbridge.service robodoge-map-pose.service
-StartLimitIntervalSec=0
+StartLimitIntervalSec=900
+StartLimitBurst=3
 
 [Service]
 Type=simple
 WorkingDirectory=$REMOTE_ROOT
 EnvironmentFile=/etc/robodoge/dogzilla.env
 ExecStartPre=/bin/bash -lc 'for i in \$(seq 1 60); do /usr/bin/docker inspect -f "{{.State.Running}}" robodoge-rosbridge 2>/dev/null | grep -qx true && exit 0; sleep 1; done; echo "robodoge-rosbridge container not running" >&2; exit 1'
-ExecStartPre=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "[s]tart-navigation-in-container.sh" 2>/dev/null || true'
-ExecStart=/usr/bin/docker exec -e DOGZILLA_LOCALIZATION_BACKEND=cartographer robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
-ExecStop=/usr/bin/docker exec robodoge-rosbridge bash -lc 'pkill -TERM -f "/opt/ros/humble/lib/nav2_|[n]av2|[c]md_vel_gait_adapter|[r]obodoge_nav2" 2>/dev/null || true'
+ExecStart=/usr/bin/docker exec -e REMOTE_ROOT=$REMOTE_ROOT -e ROS_DOMAIN_ID=$ROS_DOMAIN_ID_VALUE -e DOGZILLA_LOCALIZATION_BACKEND=cartographer robodoge-rosbridge bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; cd "$REMOTE_ROOT" && bash sidecars/dogzilla_navigation/start-navigation-in-container.sh'
+ExecStop=/usr/bin/docker exec -e REMOTE_ROOT=$REMOTE_ROOT robodoge-rosbridge bash $REMOTE_ROOT/sidecars/dogzilla_navigation/stop-navigation-owner-in-container.sh normal
 Restart=on-failure
-RestartSec=10
+RestartSec=30
 TimeoutStartSec=240
+TimeoutStopSec=30
 StandardOutput=append:$REMOTE_ROOT/logs/navigation-systemd.log
 StandardError=append:$REMOTE_ROOT/logs/navigation-systemd.log
 

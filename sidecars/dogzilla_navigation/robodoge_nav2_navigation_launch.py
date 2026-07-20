@@ -1,5 +1,7 @@
+import os
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
@@ -37,6 +39,11 @@ def generate_launch_description():
     def build_nodes(context):
         backend = localization_backend.perform(context).strip().lower() or "amcl"
         is_mapping_mode = mapping_mode.perform(context).strip().lower() in {"1", "true", "yes", "on"}
+        remote_root = os.environ.get("REMOTE_ROOT", "/home/pi/robodoge")
+        helper_root = os.path.join(remote_root, "sidecars", "dogzilla_navigation")
+        scan_filter_enabled = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_ENABLED", "1") == "1"
+        gait_adapter_enabled = os.environ.get("DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED", "1") == "1"
+        gait_input_topic = os.environ.get("DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC", "/cmd_vel")
         lifecycle_nodes = [
             "controller_server",
             "planner_server",
@@ -46,6 +53,73 @@ def generate_launch_description():
             "collision_monitor",
         ]
         nodes = []
+        if scan_filter_enabled:
+            nodes.append(
+                ExecuteProcess(
+                    cmd=[
+                        "python3",
+                        os.path.join(helper_root, "scan_self_filter.py"),
+                        "--input-topic", "/scan",
+                        "--output-topic", os.environ["DOGZILLA_NAV2_SCAN_FILTER_TOPIC"],
+                        "--mask-start-deg", os.environ["DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG"],
+                        "--mask-end-deg", os.environ["DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG"],
+                        "--mask-range-m", os.environ["DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M"],
+                    ],
+                    output="screen",
+                    respawn=True,
+                    respawn_delay=2.0,
+                )
+            )
+
+        if backend == "cartographer":
+            odom_cmd = [
+                "python3",
+                os.path.join(helper_root, "tf_odom_publisher.py"),
+                "--odom-frame", "odom",
+                "--base-frame", "base_link",
+                "--topic", "/odom",
+                "--rate", "10",
+                "--fallback-source-frame", "map",
+                "--synthetic-fallback-after-sec", "1.0",
+                "--real-authority-node", "cartographer_node",
+            ]
+        else:
+            odom_cmd = [
+                "python3",
+                os.path.join(helper_root, "cmd_vel_odom_publisher.py"),
+                "--input-topic", gait_input_topic,
+                "--topic", "/odom",
+                "--odom-frame", "odom",
+                "--base-frame", "base_link",
+                "--rate", "15",
+                "--stale-stop-sec", os.environ["DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC"],
+            ]
+        nodes.append(
+            ExecuteProcess(
+                cmd=odom_cmd,
+                output="screen",
+                respawn=True,
+                respawn_delay=2.0,
+            )
+        )
+
+        if gait_adapter_enabled:
+            nodes.append(
+                ExecuteProcess(
+                    cmd=[
+                        "python3",
+                        os.path.join(helper_root, "cmd_vel_gait_adapter.py"),
+                        "--input-topic", gait_input_topic,
+                        "--bridge-url", os.environ["DOGZILLA_NAV2_GAIT_ADAPTER_URL"],
+                        "--max-rate-hz", os.environ["DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ"],
+                        "--stale-stop-sec", os.environ["DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC"],
+                        "--http-timeout-sec", os.environ["DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC"],
+                    ],
+                    output="screen",
+                    respawn=True,
+                    respawn_delay=2.0,
+                )
+            )
         if not is_mapping_mode:
             lifecycle_nodes.insert(0, "map_server")
         if backend == "amcl" and not is_mapping_mode:

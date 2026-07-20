@@ -1,0 +1,164 @@
+- generic [active] [ref=f1e1]:
+  - link "Skip to command console" [ref=f1e2] [cursor=pointer]:
+    - /url: "#chat-form"
+  - main [ref=f1e3]:
+    - generic "Questing Beast actions" [ref=f1e4]:
+      - generic [ref=f1e5]: Questing Beast
+      - generic [ref=f1e7]:
+        - button "Toggle DOGZILLA diagnostics" [ref=f1e8] [cursor=pointer]:
+          - generic [ref=f1e14]: Diagnostics
+        - button "Toggle help" [ref=f1e15] [cursor=pointer]:
+          - generic [ref=f1e16]: "?"
+          - generic [ref=f1e17]: Help
+        - button "Toggle settings" [ref=f1e18] [cursor=pointer]:
+          - generic [ref=f1e20]: Settings
+    - generic [ref=f1e21]:
+      - complementary "Questing Beast navigation" [ref=f1e22]:
+        - generic "Questing Beast" [ref=f1e23]:
+          - img "Questing Beast icon" [ref=f1e24]
+        - navigation "Operator views" [ref=f1e25]:
+          - button "Open command console" [ref=f1e26] [cursor=pointer]:
+            - generic [ref=f1e27]: ⌁
+          - button "Show map" [ref=f1e28] [cursor=pointer]:
+            - generic [ref=f1e29]: ⊞
+          - button "Show camera" [ref=f1e30] [cursor=pointer]
+          - button "Show waypoints" [ref=f1e33] [cursor=pointer]:
+            - generic [ref=f1e34]: ◇
+          - button "Open saved snapshots" [ref=f1e35] [cursor=pointer]:
+            - generic [ref=f1e36]: ▣
+          - button "Show conversation history" [ref=f1e37] [cursor=pointer]:
+            - generic [ref=f1e38]: ≡
+          - button "Open CPU status" [ref=f1e39] [cursor=pointer]:
+            - generic [ref=f1e40]: ●
+        - img "DTX"
+      - generic [ref=f1e42]:
+        - generic [ref=f1e44]:
+          - paragraph [ref=f1e45]: Quadruped inspection console
+          - heading "Questing Beast" [level=1] [ref=f1e46]:
+            - img "Questing Beast" [ref=f1e47]
+        - generic [ref=f1e51]:
+          - generic [ref=f1e52]: Command
+          - textbox "Command" [ref=f1e53]:
+            - /placeholder: "Try: go to the living room"
+          - generic [ref=f1e54]:
+            - button "Send request" [ref=f1e55]
+            - button "Emergency stop state unavailable" [disabled] [ref=f1e56]: Unknown
+        - region [ref=f1e57]:
+          - generic [ref=f1e58]:
+            - heading "Execution" [level=2] [ref=f1e59]
+            - generic [ref=f1e60]: Ready.
+          - list [ref=f1e61]:
+            - listitem [ref=f1e62]:
+              - generic [ref=f1e64]:
+                - strong [ref=f1e65]: Intent parsing
+                - generic [ref=f1e66]: Waiting for a command.
+            - listitem [ref=f1e67]:
+              - generic [ref=f1e69]:
+                - strong [ref=f1e70]: Planning
+                - generic [ref=f1e71]: Not started.
+            - listitem [ref=f1e72]:
+              - generic [ref=f1e74]:
+                - strong [ref=f1e75]: Navigation
+                - generic [ref=f1e76]: Not applicable.
+            - listitem [ref=f1e77]:
+              - generic [ref=f1e79]:
+                - strong [ref=f1e80]: Completion
+                - generic [ref=f1e81]: Waiting for a command.
+        - generic [ref=f1e82]:
+          - generic [ref=f1e83]:
+            - heading "Manual Control" [level=2] [ref=f1e84]
+            - generic [ref=f1e85]: "Off"
+          - generic [ref=f1e86]:
+            - button "Enable gamepad" [ref=f1e87]
+            - button "Neutral" [ref=f1e88]
+          - generic [ref=f1e89]:
+            - generic [ref=f1e90]: Forward gait
+            - slider "Forward gait" [ref=f1e91]: "45"
+            - status [ref=f1e92]: 45%
+          - generic "Manual control input" [ref=f1e93]:
+            - generic [ref=f1e94]:
+              - generic [ref=f1e95]: Forward
+              - strong [ref=f1e96]: "0.00"
+            - generic [ref=f1e98]:
+              - generic [ref=f1e99]: Strafe
+              - strong [ref=f1e100]: "0.00"
+            - generic [ref=f1e102]:
+              - generic [ref=f1e103]: Turn
+              - strong [ref=f1e104]: "0.00"
+          - generic [ref=f1e106]:
+            - generic [ref=f1e107]: No gamepad
+            - generic [ref=f1e108]: Real robot target required.
+        - generic [ref=f1e109]:
+          - heading "Conversation History" [level=2] [ref=f1e111]
+          - article [ref=f1e114]:
+            - generic [ref=f1e115]: Assistant
+            - generic [ref=f1e116]: Waiting for first message.
+            - generic [ref=f1e117]: Prompt ready.
+        - generic [ref=f1e118]: "Config load failed: Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+        - generic [ref=f1e121]:
+          - generic [ref=f1e122]:
+            - heading "Voice readiness" [level=2] [ref=f1e123]
+            - generic [ref=f1e124]: Loading...
+          - paragraph [ref=f1e125]: "Speech setup failed: Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"
+          - generic [ref=f1e126]: Waiting for microphone.
+      - generic [ref=f1e127]:
+        - navigation "Robot tabs" [ref=f1e128]:
+          - generic [ref=f1e129]:
+            - button "Questing Beast" [ref=f1e130]
+            - button "Edit robot name" [ref=f1e132]: ✎
+          - button "Camera" [ref=f1e133]
+        - generic [ref=f1e134]:
+          - generic [ref=f1e135]:
+            - heading "Robot Info" [level=2] [ref=f1e136]
+            - generic [ref=f1e137]: Waiting
+          - generic [ref=f1e138]:
+            - generic [ref=f1e139]:
+              - generic [ref=f1e140]: Robot
+              - strong [ref=f1e141]: No robot
+            - generic [ref=f1e142]:
+              - generic [ref=f1e143]: Task
+              - strong [ref=f1e144]: Waiting
+            - generic [ref=f1e145]:
+              - generic [ref=f1e146]: Battery
+              - img "Battery unavailable" [ref=f1e147]:
+                - strong [ref=f1e148]: "-"
+            - generic [ref=f1e149]:
+              - generic [ref=f1e150]: Navigation
+              - strong [ref=f1e151]: "-"
+        - generic [ref=f1e152]:
+          - generic [ref=f1e153]:
+            - heading "Mini Map" [level=2] [ref=f1e154]
+            - generic [ref=f1e155]:
+              - generic [ref=f1e156]:
+                - button "Follow robot" [ref=f1e157] [cursor=pointer]
+                - generic [ref=f1e158]: Map
+              - generic [ref=f1e159]: Loading...
+            - generic "Map layer status" [ref=f1e160]:
+              - generic [ref=f1e161]: Occupancy grid
+              - generic [ref=f1e162]: Live LiDAR
+              - generic [ref=f1e163]: Waypoints
+          - img "Robot mini map" [ref=f1e164]:
+            - generic [ref=f1e166]: pose -
+            - generic [ref=f1e167]:
+              - button "Zoom in" [ref=f1e168] [cursor=pointer]: +
+              - button "Zoom level â€” click to reset" [ref=f1e169] [cursor=pointer]: 100%
+              - button "Zoom out" [ref=f1e170] [cursor=pointer]: âˆ’
+          - generic [ref=f1e171]: Waiting for robot.state.
+        - group [ref=f1e172]:
+          - generic "Map Controls Ready. ▸" [ref=f1e173] [cursor=pointer]:
+            - generic [ref=f1e174]: Map Controls
+            - generic [ref=f1e175]: Ready.
+            - text: ▸
+          - tablist "Map controls" [ref=f1e176]:
+            - tab "Mapping" [selected] [ref=f1e177]
+            - tab "Navigation" [ref=f1e178]
+            - tab "Waypoints" [ref=f1e179]
+          - tabpanel [ref=f1e181]:
+            - generic [ref=f1e182]:
+              - generic [ref=f1e183]: "1"
+              - generic [ref=f1e184]: Build Map
+              - generic [ref=f1e185]:
+                - button "Map This Floor" [ref=f1e186]
+                - button "Continue Current Map" [ref=f1e187]
+                - button "Finish Mapping" [disabled] [ref=f1e188]
+                - button "Use Candidate Map" [disabled] [ref=f1e189]

@@ -207,7 +207,6 @@ def prepare_playback_file(state: AudioState, sound_file: Path, volume: float) ->
     temp_handle = tempfile.NamedTemporaryFile(
         prefix="robodoge-audio-",
         suffix=".wav",
-        dir=str(state.sounds_dir),
         delete=False,
     )
     temp_path = Path(temp_handle.name)

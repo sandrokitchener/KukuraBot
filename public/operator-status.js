@@ -81,6 +81,22 @@ export function buildNavChainComponents(readinessPayload) {
     && localizedPose?.frame === 'map'
     && !localizationBlocker
   const localizationStatus = localization ? (localizationReady ? 'ok' : 'fail') : 'unknown'
+  const odomBlocker = findNavigationBlocker(nav, /odom|odometry/i)
+  const odomReady = nav.odomReady === true
+    && isTrueWhenReported(nav, 'odomFresh')
+    && isTrueWhenReported(nav, 'odomTfFresh')
+    && !/stale|not ready|unavailable/i.test(odomBlocker)
+  const odomDetail = !nav.odomReady
+    ? 'Odom not ready'
+    : nav.odomFresh === false
+      ? 'Odom samples are stale'
+      : nav.odomTfAvailable === false
+        ? 'TF unavailable'
+        : nav.odomTfFresh === false
+          ? 'Odom TF is stale'
+          : odomBlocker
+            ? odomBlocker
+            : 'OK'
 
   const components = [
     {
@@ -101,8 +117,8 @@ export function buildNavChainComponents(readinessPayload) {
     },
     {
       ...NAV_CHAIN_COMPONENTS[2],
-      status: nav.odomReady === true && nav.odomTfAvailable === true ? 'ok' : 'fail',
-      detail: nav.odomReady ? (nav.odomTfAvailable ? 'OK' : 'TF unavailable') : 'Odom not ready',
+      status: odomReady && nav.odomTfAvailable === true ? 'ok' : 'fail',
+      detail: odomDetail,
     },
     {
       ...NAV_CHAIN_COMPONENTS[3],
@@ -138,6 +154,16 @@ export function buildNavChainComponents(readinessPayload) {
   }
 
   return components
+}
+
+function isTrueWhenReported(value, property) {
+  return !Object.hasOwn(value, property) || value[property] === true
+}
+
+function findNavigationBlocker(navigation, pattern) {
+  return Array.isArray(navigation?.blockers)
+    ? navigation.blockers.find((blocker) => pattern.test(String(blocker || '')))
+    : ''
 }
 
 export function summarizeNavChain(components) {

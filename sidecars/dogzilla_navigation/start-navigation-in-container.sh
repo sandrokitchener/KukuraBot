@@ -9,52 +9,95 @@ DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-}"
 DOGZILLA_NAV2_BASE_PARAMS="${DOGZILLA_NAV2_BASE_PARAMS:-/opt/ros/humble/share/nav2_bringup/params/nav2_params.yaml}"
 DOGZILLA_NAV2_PARAMS="${DOGZILLA_NAV2_PARAMS:-$REMOTE_ROOT/logs/robodoge_nav2_params.yaml}"
 DOGZILLA_NAV2_LAUNCH="$REMOTE_ROOT/sidecars/dogzilla_navigation/robodoge_nav2_navigation_launch.py"
-DOGZILLA_NAV2_ROBOT_RADIUS="${DOGZILLA_NAV2_ROBOT_RADIUS:-0.16}"
-DOGZILLA_NAV2_FOOTPRINT_PADDING="${DOGZILLA_NAV2_FOOTPRINT_PADDING:-0.02}"
-DOGZILLA_NAV2_INFLATION_RADIUS="${DOGZILLA_NAV2_INFLATION_RADIUS:-0.28}"
-DOGZILLA_NAV2_COST_SCALING_FACTOR="${DOGZILLA_NAV2_COST_SCALING_FACTOR:-8.0}"
-DOGZILLA_NAV2_OBSTACLE_MIN_RANGE="${DOGZILLA_NAV2_OBSTACLE_MIN_RANGE:-0.24}"
-DOGZILLA_NAV2_OBSTACLE_MAX_RANGE="${DOGZILLA_NAV2_OBSTACLE_MAX_RANGE:-2.5}"
-DOGZILLA_NAV2_RAYTRACE_MAX_RANGE="${DOGZILLA_NAV2_RAYTRACE_MAX_RANGE:-3.5}"
-DOGZILLA_NAV2_YAW_GOAL_TOLERANCE="${DOGZILLA_NAV2_YAW_GOAL_TOLERANCE:-6.283185307179586}"
-DOGZILLA_NAV2_XY_GOAL_TOLERANCE="${DOGZILLA_NAV2_XY_GOAL_TOLERANCE:-0.25}"
-DOGZILLA_NAV2_CONTROLLER_FREQUENCY="${DOGZILLA_NAV2_CONTROLLER_FREQUENCY:-5.0}"
-DOGZILLA_NAV2_BT_LOOP_DURATION_MS="${DOGZILLA_NAV2_BT_LOOP_DURATION_MS:-200}"
-DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS="${DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS:-10000}"
-DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS="${DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS:-5000}"
-DOGZILLA_NAV2_PLANNER_FREQUENCY="${DOGZILLA_NAV2_PLANNER_FREQUENCY:-1.0}"
-DOGZILLA_NAV2_SMOOTHER_FREQUENCY="${DOGZILLA_NAV2_SMOOTHER_FREQUENCY:-5.0}"
-DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS="${DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS:-0.08}"
-DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE="${DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE:-45.0}"
-DOGZILLA_NAV2_FAILURE_TOLERANCE="${DOGZILLA_NAV2_FAILURE_TOLERANCE:-5.0}"
-DOGZILLA_NAV2_MIN_SPEED_XY="${DOGZILLA_NAV2_MIN_SPEED_XY:-0.03}"
-DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY="${DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY:-0.05}"
-DOGZILLA_NAV2_SCAN_FILTER_ENABLED="${DOGZILLA_NAV2_SCAN_FILTER_ENABLED:-1}"
+DOGZILLA_NAV2_CONFIG="${DOGZILLA_NAV2_CONFIG:-$REMOTE_ROOT/config/robot-obstacle-avoidance.json}"
+DOGZILLA_NAV2_BT_XML="${DOGZILLA_NAV2_BT_XML:-$REMOTE_ROOT/sidecars/dogzilla_navigation/robodoge_navigate_to_pose_corner_recovery.xml}"
+
+if [ ! -s "$DOGZILLA_NAV2_CONFIG" ]; then
+  echo "Canonical Nav2 tuning config missing: $DOGZILLA_NAV2_CONFIG" >&2
+  exit 2
+fi
+
+if [ ! -s "$DOGZILLA_NAV2_BT_XML" ]; then
+  echo "NavigateToPose behavior tree missing: $DOGZILLA_NAV2_BT_XML" >&2
+  exit 2
+fi
+
+if ! nav2_config_env="$(python3 - "$DOGZILLA_NAV2_CONFIG" <<'PY'
+import json
+import shlex
+import sys
+
+config_path = sys.argv[1]
+with open(config_path, encoding="utf-8") as config_file:
+    config = json.load(config_file)
+
+config_to_env = {
+    "nav2RobotRadius": "DOGZILLA_NAV2_ROBOT_RADIUS",
+    "nav2FootprintPadding": "DOGZILLA_NAV2_FOOTPRINT_PADDING",
+    "nav2InflationRadius": "DOGZILLA_NAV2_INFLATION_RADIUS",
+    "nav2CostScalingFactor": "DOGZILLA_NAV2_COST_SCALING_FACTOR",
+    "nav2ObstacleMinRange": "DOGZILLA_NAV2_OBSTACLE_MIN_RANGE",
+    "nav2ObstacleMaxRange": "DOGZILLA_NAV2_OBSTACLE_MAX_RANGE",
+    "nav2RaytraceMaxRange": "DOGZILLA_NAV2_RAYTRACE_MAX_RANGE",
+    "yawGoalTolerance": "DOGZILLA_NAV2_YAW_GOAL_TOLERANCE",
+    "nav2XyGoalTolerance": "DOGZILLA_NAV2_XY_GOAL_TOLERANCE",
+    "nav2ControllerFrequency": "DOGZILLA_NAV2_CONTROLLER_FREQUENCY",
+    "nav2BtLoopDurationMs": "DOGZILLA_NAV2_BT_LOOP_DURATION_MS",
+    "nav2BtServerTimeoutMs": "DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS",
+    "nav2BtWaitForServiceTimeoutMs": "DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS",
+    "nav2PlannerFrequency": "DOGZILLA_NAV2_PLANNER_FREQUENCY",
+    "nav2SmootherFrequency": "DOGZILLA_NAV2_SMOOTHER_FREQUENCY",
+    "nav2RequiredMovementRadius": "DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS",
+    "nav2MovementTimeAllowance": "DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE",
+    "nav2FailureTolerance": "DOGZILLA_NAV2_FAILURE_TOLERANCE",
+    "nav2MinSpeedXy": "DOGZILLA_NAV2_MIN_SPEED_XY",
+    "nav2TransStoppedVelocity": "DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY",
+    "nav2ScanFilterEnabled": "DOGZILLA_NAV2_SCAN_FILTER_ENABLED",
+    "nav2ScanFilterMaskStartDeg": "DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG",
+    "nav2ScanFilterMaskEndDeg": "DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG",
+    "nav2ScanFilterMaskRangeM": "DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M",
+    "nav2CollisionSourceTimeout": "DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT",
+    "nav2CollisionStopPolygonPoints": "DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS",
+}
+
+missing = [name for name in config_to_env if name not in config]
+if missing:
+    raise SystemExit(f"Canonical Nav2 tuning config missing keys: {', '.join(missing)}")
+
+for config_name, env_name in config_to_env.items():
+    value = config[config_name]
+    if isinstance(value, bool):
+        value = "1" if value else "0"
+    elif isinstance(value, (list, dict)):
+        value = json.dumps(value, separators=(",", ":"))
+    else:
+        value = str(value)
+    print(f"{env_name}={shlex.quote(value)}")
+PY
+)"; then
+  exit 2
+fi
+eval "$nav2_config_env"
+
 DOGZILLA_NAV2_SCAN_FILTER_TOPIC="${DOGZILLA_NAV2_SCAN_FILTER_TOPIC:-/scan_nav2}"
-DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG="${DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG:-120}"
-DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG="${DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG:-260}"
-DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M="${DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M:-0.45}"
-DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT="${DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT:-0.75}"
 DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED="${DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED:-1}"
 DOGZILLA_NAV2_GAIT_ADAPTER_URL="${DOGZILLA_NAV2_GAIT_ADAPTER_URL:-http://127.0.0.1:8893/nav2/cmd_vel}"
 DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC="${DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC:-/cmd_vel}"
 DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ="${DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ:-8.0}"
 DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC:-0.45}"
 DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC:-0.8}"
-DOGZILLA_NAV2_SPEED_RAMP_INTERVAL="${DOGZILLA_NAV2_SPEED_RAMP_INTERVAL:-0.5}"
-DOGZILLA_NAV2_SPEED_RAMP_BUFFER="${DOGZILLA_NAV2_SPEED_RAMP_BUFFER:-10}"
 DOGZILLA_LOCALIZATION_BACKEND="${DOGZILLA_LOCALIZATION_BACKEND:-amcl}"
 DOGZILLA_NAV2_MAPPING_MODE="${DOGZILLA_NAV2_MAPPING_MODE:-0}"
+DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC="${DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC:-120}"
+DOGZILLA_NAV2_READINESS_GRACE_SEC="${DOGZILLA_NAV2_READINESS_GRACE_SEC:-20}"
+DOGZILLA_NAV2_BRIDGE_HEALTH_URL="${DOGZILLA_NAV2_BRIDGE_HEALTH_URL:-http://127.0.0.1:8893/nav2/cmd_vel/health}"
 DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-}"
 DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-}"
 DOGZILLA_INITIAL_POSE_YAW="${DOGZILLA_INITIAL_POSE_YAW:-}"
 
-if [ "${DOGZILLA_NAV2_GAIT_SMOOTHER_BYPASS:-0}" = "1" ]; then
-  DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC="/cmd_vel_nav"
-fi
-
 export ROS_DOMAIN_ID
 export DOGZILLA_NAV2_MAP_METADATA DOGZILLA_NAV2_MAP DOGZILLA_NAV2_BASE_PARAMS DOGZILLA_NAV2_PARAMS
+export DOGZILLA_NAV2_BT_XML
 export DOGZILLA_NAV2_ROBOT_RADIUS DOGZILLA_NAV2_FOOTPRINT_PADDING DOGZILLA_NAV2_INFLATION_RADIUS
 export DOGZILLA_NAV2_COST_SCALING_FACTOR DOGZILLA_NAV2_OBSTACLE_MIN_RANGE DOGZILLA_NAV2_OBSTACLE_MAX_RANGE
 export DOGZILLA_NAV2_RAYTRACE_MAX_RANGE DOGZILLA_NAV2_YAW_GOAL_TOLERANCE DOGZILLA_NAV2_XY_GOAL_TOLERANCE
@@ -64,46 +107,107 @@ export DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWA
 export DOGZILLA_NAV2_MIN_SPEED_XY DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY
 export DOGZILLA_NAV2_SCAN_FILTER_ENABLED DOGZILLA_NAV2_SCAN_FILTER_TOPIC
 export DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M
-export DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT
+export DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
-export DOGZILLA_NAV2_SPEED_RAMP_INTERVAL DOGZILLA_NAV2_SPEED_RAMP_BUFFER
 export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_NAV2_MAPPING_MODE DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
 export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/logs"
 
+DOGZILLA_NAV2_LOCK_FILE="${DOGZILLA_NAV2_LOCK_FILE:-$REMOTE_ROOT/logs/navigation-runtime.lock}"
+DOGZILLA_NAV2_OWNER_FILE="${DOGZILLA_NAV2_OWNER_FILE:-$REMOTE_ROOT/logs/navigation-runtime.owner}"
+exec 9>"$DOGZILLA_NAV2_LOCK_FILE"
+if ! flock -n 9; then
+  echo "Another Nav2 launch owns $DOGZILLA_NAV2_LOCK_FILE; refusing competing startup." >&2
+  exit 3
+fi
+
+read_proc_start_ticks() {
+  local process_id="$1"
+  local stat_line=""
+  local stat_rest=""
+  stat_line="$(cat "/proc/$process_id/stat" 2>/dev/null)" || return 1
+  stat_rest="${stat_line##*) }"
+  set -- $stat_rest
+  [ "$#" -ge 20 ] || return 1
+  printf '%s' "${20}"
+}
+
+OWNER_RECORD_VERSION=2
+OWNER_BOOT_ID="$(tr -d '[:space:]' < /proc/sys/kernel/random/boot_id)"
+OWNER_TOKEN="$(tr -d '-' < /proc/sys/kernel/random/uuid | tr -d '[:space:]')"
+OWNER_PID_START_TICKS="$(read_proc_start_ticks "$$")"
+if ! [[ "$OWNER_BOOT_ID" =~ ^[0-9a-fA-F-]{36}$ ]] \
+  || ! [[ "$OWNER_TOKEN" =~ ^[0-9a-fA-F]{32}$ ]] \
+  || ! [[ "$OWNER_PID_START_TICKS" =~ ^[0-9]+$ ]]; then
+  echo "Could not create a validated Nav2 owner generation." >&2
+  exit 4
+fi
+export DOGZILLA_NAV2_OWNER_TOKEN="$OWNER_TOKEN"
+
+write_navigation_owner() {
+  local owner_mode="$1"
+  local owner_pgid="${2:-}"
+  local owner_pgid_start_ticks="${3:-}"
+  local temporary_owner="$DOGZILLA_NAV2_OWNER_FILE.$$"
+  umask 077
+  printf 'version=%s\nmode=%s\ntoken=%s\nboot_id=%s\npid=%s\npid_start_ticks=%s\npgid=%s\npgid_start_ticks=%s\n' \
+    "$OWNER_RECORD_VERSION" "$owner_mode" "$OWNER_TOKEN" "$OWNER_BOOT_ID" "$$" \
+    "$OWNER_PID_START_TICKS" "$owner_pgid" "$owner_pgid_start_ticks" > "$temporary_owner"
+  chmod 600 "$temporary_owner"
+  mv -f "$temporary_owner" "$DOGZILLA_NAV2_OWNER_FILE"
+}
+
+clear_navigation_owner() {
+  local recorded_pid=""
+  if [ -s "$DOGZILLA_NAV2_OWNER_FILE" ]; then
+    recorded_pid="$(sed -n 's/^pid=//p' "$DOGZILLA_NAV2_OWNER_FILE" | head -1)"
+  fi
+  if [ "$recorded_pid" = "$$" ]; then
+    rm -f "$DOGZILLA_NAV2_OWNER_FILE"
+  fi
+}
+
+NAV2_OWNER_MODE="normal"
+if [ "$DOGZILLA_NAV2_MAPPING_MODE" = "1" ]; then
+  NAV2_OWNER_MODE="mapping"
+fi
+write_navigation_owner "$NAV2_OWNER_MODE"
+
 pkill -9 -f "ros2.*daemon" 2>/dev/null || true
 
-if [ -s "$DOGZILLA_MAP_METADATA" ]; then
-  requested_nav2_map="$DOGZILLA_NAV2_MAP"
-  DOGZILLA_NAV2_MAP="$(python3 - "$DOGZILLA_MAP_METADATA" <<'PY'
-import hashlib
-import json
-import pathlib
-import sys
-
-md = pathlib.Path(sys.argv[1])
-try:
-    m = json.loads(md.read_text(encoding="utf-8"))
-    artifact = (m.get("artifacts") or {}).get("yaml") or {}
-    y = (artifact.get("path") or m.get("yaml") or "").strip()
-    expected_hash = (artifact.get("sha256") or "").strip()
-    if y and len(expected_hash) == 64:
-        p = pathlib.Path(y)
-        p = p if p.is_absolute() else md.parent / p
-        if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == expected_hash:
-            print(p)
-except Exception:
-    pass
-PY
-)"
-fi
 if [ "$DOGZILLA_NAV2_MAPPING_MODE" != "1" ]; then
-  if [ -z "$DOGZILLA_NAV2_MAP" ] || { [ -n "${requested_nav2_map:-}" ] && [ "$requested_nav2_map" != "$DOGZILLA_NAV2_MAP" ]; }; then
+  requested_nav2_map="$DOGZILLA_NAV2_MAP"
+  if ! manifest_nav2_map="$(python3 - "$DOGZILLA_MAP_METADATA" "$REMOTE_ROOT/sidecars/dogzilla_lib_bridge" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[2])
+from map_metadata import read_active_map_metadata
+
+metadata = read_active_map_metadata(Path(sys.argv[1]))
+if metadata.get("available") is not True:
+    print(
+        f"Active map validation failed: {metadata.get('error') or 'unknown_error'}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+yaml_path = str(metadata.get("yaml") or "").strip()
+if not yaml_path:
+    print("Active map validation failed: yaml path missing", file=sys.stderr)
+    raise SystemExit(1)
+print(yaml_path)
+PY
+)"; then
     echo "Active map manifest missing, invalid, or overridden: $DOGZILLA_MAP_METADATA" >&2
     exit 2
   fi
+  if [ -n "$requested_nav2_map" ] && [ "$requested_nav2_map" != "$manifest_nav2_map" ]; then
+    echo "Active map manifest missing, invalid, or overridden: $DOGZILLA_MAP_METADATA" >&2
+    exit 2
+  fi
+  DOGZILLA_NAV2_MAP="$manifest_nav2_map"
 else
   DOGZILLA_NAV2_MAP="${DOGZILLA_NAV2_MAP:-/dev/null}"
 fi
@@ -155,6 +259,7 @@ if [ ! -s "$DOGZILLA_NAV2_BASE_PARAMS" ]; then
 fi
 
 python3 - "$DOGZILLA_NAV2_BASE_PARAMS" "$DOGZILLA_NAV2_PARAMS" <<'PY'
+import json
 import os
 import sys
 import yaml
@@ -167,34 +272,48 @@ def env_f(name, default):
     except Exception:
         return default
 
+def env_f_required(name):
+    try:
+        return float(os.environ[name])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"Required Nav2 tuning value is invalid: {name}") from exc
+
 with open(src, encoding="utf-8") as f:
     p = yaml.safe_load(f) or {}
 
-rr = env_f("DOGZILLA_NAV2_ROBOT_RADIUS", 0.16)
-fp = env_f("DOGZILLA_NAV2_FOOTPRINT_PADDING", 0.02)
-ir = env_f("DOGZILLA_NAV2_INFLATION_RADIUS", 0.28)
-csf = env_f("DOGZILLA_NAV2_COST_SCALING_FACTOR", 8.0)
-omin = env_f("DOGZILLA_NAV2_OBSTACLE_MIN_RANGE", 0.24)
-omax = env_f("DOGZILLA_NAV2_OBSTACLE_MAX_RANGE", 2.5)
-rtmax = env_f("DOGZILLA_NAV2_RAYTRACE_MAX_RANGE", 3.5)
-yaw = env_f("DOGZILLA_NAV2_YAW_GOAL_TOLERANCE", 6.283185307179586)
-xy = env_f("DOGZILLA_NAV2_XY_GOAL_TOLERANCE", 0.25)
-cf = env_f("DOGZILLA_NAV2_CONTROLLER_FREQUENCY", 3.0)
-bld = int(env_f("DOGZILLA_NAV2_BT_LOOP_DURATION_MS", 500.0))
-bst = int(env_f("DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS", 10000.0))
-bws = int(env_f("DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS", 5000.0))
-pf = env_f("DOGZILLA_NAV2_PLANNER_FREQUENCY", 1.0)
-sf = env_f("DOGZILLA_NAV2_SMOOTHER_FREQUENCY", 2.0)
-rmr = env_f("DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS", 0.08)
-mta = env_f("DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE", 45.0)
-ft = env_f("DOGZILLA_NAV2_FAILURE_TOLERANCE", 5.0)
-msx = env_f("DOGZILLA_NAV2_MIN_SPEED_XY", 0.03)
-tsv = env_f("DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY", 0.05)
+rr = env_f_required("DOGZILLA_NAV2_ROBOT_RADIUS")
+fp = env_f_required("DOGZILLA_NAV2_FOOTPRINT_PADDING")
+ir = env_f_required("DOGZILLA_NAV2_INFLATION_RADIUS")
+csf = env_f_required("DOGZILLA_NAV2_COST_SCALING_FACTOR")
+omin = env_f_required("DOGZILLA_NAV2_OBSTACLE_MIN_RANGE")
+omax = env_f_required("DOGZILLA_NAV2_OBSTACLE_MAX_RANGE")
+rtmax = env_f_required("DOGZILLA_NAV2_RAYTRACE_MAX_RANGE")
+yaw = env_f_required("DOGZILLA_NAV2_YAW_GOAL_TOLERANCE")
+xy = env_f_required("DOGZILLA_NAV2_XY_GOAL_TOLERANCE")
+cf = env_f_required("DOGZILLA_NAV2_CONTROLLER_FREQUENCY")
+bld = int(env_f_required("DOGZILLA_NAV2_BT_LOOP_DURATION_MS"))
+bst = int(env_f_required("DOGZILLA_NAV2_BT_SERVER_TIMEOUT_MS"))
+bws = int(env_f_required("DOGZILLA_NAV2_BT_WAIT_FOR_SERVICE_TIMEOUT_MS"))
+pf = env_f_required("DOGZILLA_NAV2_PLANNER_FREQUENCY")
+sf = env_f_required("DOGZILLA_NAV2_SMOOTHER_FREQUENCY")
+rmr = env_f_required("DOGZILLA_NAV2_REQUIRED_MOVEMENT_RADIUS")
+mta = env_f_required("DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE")
+ft = env_f_required("DOGZILLA_NAV2_FAILURE_TOLERANCE")
+msx = env_f_required("DOGZILLA_NAV2_MIN_SPEED_XY")
+tsv = env_f_required("DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY")
+try:
+    collision_stop_points = json.loads(os.environ["DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS"])
+    if len(collision_stop_points) < 6 or len(collision_stop_points) % 2:
+        raise ValueError("polygon requires at least three x/y pairs")
+    collision_stop_points = [float(value) for value in collision_stop_points]
+except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    raise SystemExit("Required Nav2 collision stop polygon is invalid") from exc
 mvy = 0.0
 lay = 0.0
 vys = 1
 st = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2")
-sfe = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_ENABLED", "1") == "1"
+sfe = os.environ["DOGZILLA_NAV2_SCAN_FILTER_ENABLED"] == "1"
+scan_source_topic = st if sfe else "/scan"
 mapping_mode = os.environ.get("DOGZILLA_NAV2_MAPPING_MODE", "0") == "1"
 
 def costmap_ros(name):
@@ -267,6 +386,9 @@ btn = p.setdefault("bt_navigator", {}).setdefault("ros__parameters", {})
 btn["bt_loop_duration"] = bld
 btn["default_server_timeout"] = bst
 btn["wait_for_service_timeout"] = bws
+bt_xml = os.environ.get("DOGZILLA_NAV2_BT_XML")
+if bt_xml:
+    btn["default_nav_to_pose_bt_xml"] = bt_xml
 
 pln = p.setdefault("planner_server", {}).setdefault("ros__parameters", {})
 pln["expected_planner_frequency"] = pf
@@ -290,13 +412,13 @@ collision.update({
     "cmd_vel_in_topic": "cmd_vel_raw",
     "cmd_vel_out_topic": "cmd_vel",
     "transform_tolerance": 0.5,
-    "source_timeout": env_f("DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT", 0.75),
+    "source_timeout": env_f_required("DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT"),
     "base_shift_correction": True,
     "stop_pub_timeout": 1.0,
     "polygons": ["PolygonStop"],
     "PolygonStop": {
         "type": "polygon",
-        "points": [0.35, 0.20, 0.35, -0.20, -0.25, -0.20, -0.25, 0.20],
+        "points": collision_stop_points,
         "action_type": "stop",
         "max_points": 3,
         "visualize": True,
@@ -306,7 +428,7 @@ collision.update({
     "observation_sources": ["scan"],
     "scan": {
         "type": "scan",
-        "topic": "/scan_nav2",
+        "topic": scan_source_topic,
         "enabled": True,
     },
 })
@@ -316,7 +438,7 @@ amcl["use_sim_time"] = False
 amcl["base_frame_id"] = "base_link"
 amcl["global_frame_id"] = "map"
 amcl["odom_frame_id"] = "odom"
-amcl["scan_topic"] = st
+amcl["scan_topic"] = scan_source_topic
 amcl["tf_broadcast"] = True
 amcl["set_initial_pose"] = True
 amcl["robot_model_type"] = "nav2_amcl::DifferentialMotionModel"
@@ -332,7 +454,7 @@ os.makedirs(os.path.dirname(tgt), exist_ok=True)
 with open(tgt, "w", encoding="utf-8") as f:
     yaml.safe_dump(p, f, sort_keys=False)
 
-print(f"Generated params: robot_radius={rr} inflation_radius={ir} scan_topic={st if sfe else '/scan'}")
+print(f"Generated params: robot_radius={rr} inflation_radius={ir} scan_topic={scan_source_topic}")
 PY
 
 if [ "$DOGZILLA_NAV2_MAPPING_MODE" != "1" ] && [ ! -s "$DOGZILLA_NAV2_MAP" ]; then
@@ -380,15 +502,17 @@ pkill -KILL -f "[r]os2 launch .*robodoge_nav2_navigation_launch.py" 2>/dev/null 
 pkill -KILL -f "/opt/ros/.*/lib/nav2_" 2>/dev/null || true
 pkill -KILL -f "/opt/ros/.*/lib/nav2_amcl/amcl" 2>/dev/null || true
 
-if [ "$DOGZILLA_NAV2_SCAN_FILTER_ENABLED" = "1" ]; then
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/scan_self_filter.py" \
-    --input-topic /scan \
-    --output-topic "$DOGZILLA_NAV2_SCAN_FILTER_TOPIC" \
-    --mask-start-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG" \
-    --mask-end-deg "$DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG" \
-    --mask-range-m "$DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M" \
-    > "$REMOTE_ROOT/logs/scan-self-filter.log" 2>&1 &
-fi
+# SIGKILL is asynchronous from the ROS graph's point of view. Do not launch a
+# replacement lifecycle manager while the previous Nav2 graph is still
+# unwinding, or it can observe already-active nodes and fail activation.
+for _ in $(seq 1 20); do
+  if ! pgrep -f "[r]os2 launch .*robodoge_nav2_navigation_launch.py" >/dev/null 2>&1 \
+    && ! pgrep -f "/opt/ros/.*/lib/nav2_" >/dev/null 2>&1 \
+    && ! pgrep -f "[l]ifecycle_manager_navigation" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
 
 if [ "$DOGZILLA_LOCALIZATION_BACKEND" = "cartographer" ]; then
   echo "Waiting Pi-owned Cartographer map->base_link TF..." >&2
@@ -432,40 +556,12 @@ if not found:
     )
     raise SystemExit(2)
 PY
-
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/tf_odom_publisher.py" \
-    --odom-frame odom \
-    --base-frame base_link \
-    --fallback-source-frame map \
-    --topic /odom \
-    --rate 10 \
-    > "$REMOTE_ROOT/logs/tf-odom-publisher.log" 2>&1 &
-else
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/cmd_vel_odom_publisher.py" \
-    --input-topic "$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC" \
-    --topic /odom \
-    --odom-frame odom \
-    --base-frame base_link \
-    --rate 15 \
-    --stale-stop-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC" \
-    > "$REMOTE_ROOT/logs/cmd-vel-odom-publisher.log" 2>&1 &
-fi
-
-if [ "$DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED" = "1" ]; then
-  nohup python3 "$REMOTE_ROOT/sidecars/dogzilla_navigation/cmd_vel_gait_adapter.py" \
-    --input-topic "$DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC" \
-    --bridge-url "$DOGZILLA_NAV2_GAIT_ADAPTER_URL" \
-    --max-rate-hz "$DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ" \
-    --stale-stop-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC" \
-    --http-timeout-sec "$DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC" \
-    --speed-ramp-interval "$DOGZILLA_NAV2_SPEED_RAMP_INTERVAL" \
-    --speed-ramp-buffer "$DOGZILLA_NAV2_SPEED_RAMP_BUFFER" \
-    > "$REMOTE_ROOT/logs/cmd-vel-gait-adapter.log" 2>&1 &
 fi
 
 echo "Starting Pi-owned Nav2." >&2
 : > "$REMOTE_ROOT/logs/nav2-navigation.log"
-exec ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
+
+setsid ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
   map:="$DOGZILLA_NAV2_MAP" \
   params_file:="$DOGZILLA_NAV2_PARAMS" \
   use_sim_time:=false \
@@ -473,4 +569,70 @@ exec ros2 launch "$DOGZILLA_NAV2_LAUNCH" \
   use_respawn:=true \
   localization_backend:="$DOGZILLA_LOCALIZATION_BACKEND" \
   mapping_mode:="$DOGZILLA_NAV2_MAPPING_MODE" \
-  >> "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1
+  >> "$REMOTE_ROOT/logs/nav2-navigation.log" 2>&1 &
+nav2_launch_pid=$!
+nav2_launch_pgid=""
+nav2_launch_pgid_start_ticks=""
+for _ in $(seq 1 20); do
+  nav2_launch_pgid="$(ps -o pgid= -p "$nav2_launch_pid" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$nav2_launch_pgid" ] && break
+  sleep 0.1
+done
+if ! [[ "$nav2_launch_pgid" =~ ^[0-9]+$ ]] || [ "$nav2_launch_pgid" != "$nav2_launch_pid" ]; then
+  echo "Nav2 launch did not acquire an isolated process group." >&2
+  kill -TERM "$nav2_launch_pid" 2>/dev/null || true
+  wait "$nav2_launch_pid" 2>/dev/null || true
+  clear_navigation_owner
+  exit 4
+fi
+nav2_launch_pgid_start_ticks="$(read_proc_start_ticks "$nav2_launch_pgid")"
+if ! [[ "$nav2_launch_pgid_start_ticks" =~ ^[0-9]+$ ]]; then
+  echo "Nav2 launch process group identity could not be recorded." >&2
+  kill -TERM -- "-$nav2_launch_pgid" 2>/dev/null || true
+  wait "$nav2_launch_pid" 2>/dev/null || true
+  clear_navigation_owner
+  exit 4
+fi
+write_navigation_owner "$NAV2_OWNER_MODE" "$nav2_launch_pgid" "$nav2_launch_pgid_start_ticks"
+
+stop_nav2_launch() {
+  if kill -0 -- "-$nav2_launch_pgid" 2>/dev/null; then
+    kill -TERM -- "-$nav2_launch_pgid" 2>/dev/null || true
+  fi
+  for _ in $(seq 1 10); do
+    kill -0 -- "-$nav2_launch_pgid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 -- "-$nav2_launch_pgid" 2>/dev/null; then
+    kill -KILL -- "-$nav2_launch_pgid" 2>/dev/null || true
+  fi
+  wait "$nav2_launch_pid" 2>/dev/null || true
+}
+
+handle_navigation_stop() {
+  stop_nav2_launch
+  clear_navigation_owner
+  exit 0
+}
+trap handle_navigation_stop TERM INT
+
+set +e
+bash "$REMOTE_ROOT/sidecars/dogzilla_navigation/wait-nav2-ready.sh" \
+  "$ROS_DOMAIN_ID" \
+  "$REMOTE_ROOT" \
+  auto \
+  "$DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC" \
+  "$DOGZILLA_NAV2_MAPPING_MODE" \
+  "$DOGZILLA_LOCALIZATION_BACKEND" \
+  watch \
+  "$DOGZILLA_NAV2_BRIDGE_HEALTH_URL" \
+  "$DOGZILLA_NAV2_READINESS_GRACE_SEC" \
+  "$NAV2_OWNER_MODE"
+readiness_status=$?
+set -e
+
+trap - TERM INT
+stop_nav2_launch
+clear_navigation_owner
+echo "Nav2 readiness supervisor exited with status $readiness_status; failing the launch for systemd recovery." >&2
+exit "$readiness_status"

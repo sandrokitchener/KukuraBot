@@ -96,6 +96,42 @@ describe('deriveNavigationStatus', () => {
     assert.equal(result.text, 'Nav2 ready')
   })
 
+  it('reports a stopped backend before a stale action-server warning', () => {
+    const result = deriveNavigationStatus({
+      bridgeRuntime: {
+        navigation: {
+          waypointReady: false,
+          blockers: [
+            'Nav2 Docker goal backend unavailable: No such container: robodoge-rosbridge',
+            'Nav2 NavigateToPose action server is not running',
+          ],
+          nav2: { serverAvailable: false },
+        },
+      },
+    })
+
+    assert.equal(result.code, 'nav2_blocked')
+    assert.match(result.text, /No such container/)
+  })
+
+  it('reports an inactive lifecycle before a missing action server', () => {
+    const result = deriveNavigationStatus({
+      bridgeRuntime: {
+        navigation: {
+          waypointReady: false,
+          blockers: [
+            'Nav2 lifecycle nodes are inactive',
+            'Nav2 NavigateToPose action server is not running',
+          ],
+          nav2: { serverAvailable: false },
+        },
+      },
+    })
+
+    assert.equal(result.code, 'nav2_blocked')
+    assert.match(result.text, /lifecycle nodes are inactive/)
+  })
+
   it('keeps Nav2 ready when app waypoint readiness overrides stale runtime action blocker', () => {
     const result = deriveNavigationStatus({
       dogzillaWaypointReadiness: {

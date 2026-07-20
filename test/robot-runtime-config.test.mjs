@@ -54,35 +54,21 @@ test('normalizeRobotRos2Config fills transport and launch defaults', () => {
   assert.equal(config.windows.preferredDistro, 'humble')
 })
 
-test('normalizeRobotRuntimeConfig exposes reversible safety-preserving performance profiles', () => {
+test('normalizeRobotRuntimeConfig ignores legacy performance profiles and keeps normal polling', () => {
   const config = normalizeRobotRuntimeConfig({
     activePerformanceProfile: 'endurance',
     performanceProfiles: {
       balanced: { label: 'Balanced', feedbackPollMs: 2500, statePollMs: 1000, lidarPollMs: 750, cameraStream: 'raw' },
       endurance: { label: 'Endurance', feedbackPollMs: 5000, statePollMs: 2500, lidarPollMs: 1500, cameraStream: 'off', visionEnabled: false },
     },
-  })
-
-  assert.equal(config.activePerformanceProfile.id, 'endurance')
-  assert.equal(config.activePerformanceProfile.cameraStream, 'off')
-  assert.equal(config.activePerformanceProfile.visionEnabled, false)
-  assert.equal(config.activePerformanceProfile.localizationMode, 'continuous')
-  assert.equal(config.activePerformanceProfile.safetyTelemetry, true)
-  assert.equal(config.feedback.pollMs, 5000)
-  assert.equal(config.feedback.statePollMs, 2500)
-  assert.equal(config.availablePerformanceProfiles.length, 2)
-})
-
-test('ROBOT_PERFORMANCE_PROFILE locks profile selection without changing safety mode', () => {
-  const config = normalizeRobotRuntimeConfig({
-    activePerformanceProfile: 'balanced',
-    performanceProfiles: { balanced: {}, endurance: {} },
   }, { ROBOT_PERFORMANCE_PROFILE: 'endurance' })
 
-  assert.equal(config.activePerformanceProfile.id, 'endurance')
-  assert.equal(config.performanceSelectionLocked, true)
-  assert.equal(config.activePerformanceProfile.localizationMode, 'continuous')
-  assert.equal(config.activePerformanceProfile.safetyTelemetry, true)
+  assert.equal(config.feedback.pollMs, 2500)
+  assert.equal(config.feedback.statePollMs, 1000)
+  assert.equal(config.feedback.lidarPollMs, 750)
+  assert.equal('activePerformanceProfile' in config, false)
+  assert.equal('availablePerformanceProfiles' in config, false)
+  assert.equal('performanceSelectionLocked' in config, false)
 })
 
 test('normalizeRobotRos2Config accepts env overrides for remote robot bringup', () => {

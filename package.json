@@ -30,7 +30,8 @@
     "tauri:android:run": "tauri android run",
     "desktop": "electron .",
     "desktop:build": "node scripts/build-electron-desktop.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "verify": "npm test && py -3 -m unittest discover -s test -p \"test_*.py\""
   },
   "dependencies": {
     "@huggingface/transformers": "^4.1.0",

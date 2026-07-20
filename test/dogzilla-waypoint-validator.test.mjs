@@ -87,8 +87,9 @@ test('validateDogzillaWaypoints reports operator blocker when Nav2 readiness is 
   assert.equal(report.mapOrigin.status, 'missing')
 })
 
-test('validateDogzillaWaypoints trusts navigation nav2 sample when bridge health has stale top-level nav2', () => {
+test('validateDogzillaWaypoints trusts complete navigation nav2 sample when bridge health has stale top-level nav2', () => {
   const health = nav2HealthBody()
+  const readyNav2 = health.runtime.nav2
   health.runtime.nav2 = {
     available: false,
     waypointReady: false,
@@ -109,28 +110,7 @@ test('validateDogzillaWaypoints trusts navigation nav2 sample when bridge health
     actionServerAvailable: true,
     waypointReady: true,
     blockers: [],
-    nav2: {
-      available: true,
-      waypointReady: true,
-      blockers: [],
-      odom: {
-        topic: '/odom',
-        publisherCount: 1,
-        available: true,
-        messageAvailable: true,
-        tfAvailable: true,
-      },
-      lifecycle: {
-        active: true,
-        nodes: [{ name: 'controller_server', active: true, state: 'active' }],
-      },
-      scan: {
-        topic: '/scan_nav2',
-        publisherCount: 1,
-        subscriptionCount: 2,
-        available: true,
-      },
-    },
+    nav2: readyNav2,
   }
 
   const report = validateDogzillaWaypoints({
@@ -222,7 +202,7 @@ test('validateDogzillaWaypoints treats off-map trusted config as advisory only',
   assert.match(pantry.advisoryProblems.join('\n'), /outside active map bounds/)
 })
 
-test('validateDogzillaWaypoints accepts verified config regardless of map identity (identity checks removed)', () => {
+test('validateDogzillaWaypoints rejects missing and stale map identity', () => {
   const report = validateDogzillaWaypoints({
     waypointConfig: waypointConfig({
       kitchen: mapWaypoint({
@@ -240,10 +220,11 @@ test('validateDogzillaWaypoints accepts verified config regardless of map identi
   const kitchen = report.results.find((result) => result.name === 'kitchen')
   const pantry = report.results.find((result) => result.name === 'pantry')
 
-  assert.equal(kitchen.status, 'ready')
-  assert.equal(kitchen.enabled, true)
-  assert.equal(pantry.status, 'ready')
-  assert.equal(pantry.enabled, true)
+  assert.equal(report.ok, false)
+  assert.equal(kitchen.status, 'map-identity-missing')
+  assert.equal(kitchen.enabled, false)
+  assert.equal(pantry.status, 'map-id-mismatch')
+  assert.equal(pantry.enabled, false)
 })
 
 test('validateDogzillaWaypoints separates ready verified waypoints from config-disabled waypoints', () => {
@@ -253,8 +234,6 @@ test('validateDogzillaWaypoints separates ready verified waypoints from config-d
         x: 0,
         y: 0,
         yaw: 0,
-        mapId: '',
-        mapFingerprint: '',
         verified: true,
       }),
       draft: mapWaypoint({
@@ -306,7 +285,7 @@ test('validateDogzillaWaypointsFromFiles does not modify robot-waypoints source'
   assert.equal(await readFile(waypointFile, 'utf-8'), originalConfig)
 })
 
-test('validateDogzillaWaypointsFromFiles trusts healthz-lite waypoint readiness over stale full lifecycle probes', async () => {
+test('validateDogzillaWaypointsFromFiles does not let healthz-lite override stale full lifecycle probes', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'robodoge-validate-'))
   const waypointFile = path.join(tempDir, 'robot-waypoints.json')
   const originFile = path.join(tempDir, 'origin.json')
@@ -350,8 +329,8 @@ test('validateDogzillaWaypointsFromFiles trusts healthz-lite waypoint readiness 
     }),
   })
 
-  assert.equal(report.readyForMapWaypoints, true)
-  assert.equal(report.navigation.ready, true)
+  assert.equal(report.readyForMapWaypoints, false)
+  assert.equal(report.navigation.ready, false)
   assert.equal(report.navigation.lifecycleActive, false)
-  assert.deepEqual(report.blockers, [])
+  assert.match(report.blockers.join('\n'), /lifecycle state was not reported/i)
 })

@@ -276,6 +276,21 @@
   min-width: 0;
 }
 
+.map-workflow-secondary-action {
+  flex-basis: 100%;
+  color: #6f675f;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.map-workflow-secondary-action summary {
+  cursor: pointer;
+}
+
+.map-workflow-secondary-action .map-workflow-button {
+  margin-top: 6px;
+}
+
 .map-workflow-step > .map-workflow-actions {
   grid-column: 2 / -1;
 }
@@ -430,53 +445,6 @@
     flex: 1 1 120px;
     min-width: 0;
   }
-}
-
-.robot-map-layer-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.robot-map-layer {
-  min-width: 0;
-  max-width: 100%;
-  padding: 2px 7px;
-  border: 1px solid rgba(63, 53, 43, 0.18);
-  border-radius: 999px;
-  background: rgba(255, 250, 244, 0.72);
-  color: #7a736b;
-  font-size: 0.68rem;
-  font-weight: 800;
-  line-height: 1.15;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.robot-map-layer[data-state='live'] {
-  border-color: rgba(0, 123, 132, 0.32);
-  background: #dcefee;
-  color: #075f66;
-}
-
-.robot-map-layer[data-state='ready'] {
-  border-color: rgba(63, 53, 43, 0.22);
-  background: #f4eee6;
-  color: #665b50;
-}
-
-.robot-map-layer[data-state='stale'] {
-  border-color: rgba(184, 111, 26, 0.38);
-  background: #fff1d8;
-  color: #7e4d10;
-}
-
-.robot-map-layer[data-state='missing'] {
-  border-style: dashed;
-  color: #938a80;
 }
 
 .robot-map-head h2 { font-size: 0.9rem; letter-spacing: 0.07em; text-transform: uppercase; }
@@ -1127,44 +1095,4 @@
   border-radius: 50%;
   background: #28a745;
   animation: slam-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes slam-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-
-.map-view-toggle-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.map-view-toggle {
-  min-height: 28px;
-  padding: 3px 10px;
-  border: 1px solid rgba(63, 53, 43, 0.28);
-  border-radius: 6px;
-  background: #fffaf4;
-  color: var(--ink);
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.map-view-toggle:hover:not(:disabled),
-.map-view-toggle:focus-visible {
-  border-color: rgba(255, 123, 86, 0.72);
-  background: #fff0e5;
-}
-
-.map-view-toggle[data-view-mode='map'] {
-  border-color: rgba(0, 123, 132, 0.72);
-  background: #e0f4f0;
-}
-
-.map-view-mode-label {
-  font-size: 0.7rem;
-  color: var(--ink-faint);
-  min-width: 42px;
 }

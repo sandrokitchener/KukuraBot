@@ -212,6 +212,19 @@ test('captureWaypoint writes proposal without overwriting robot-waypoints source
       captureDir,
       originFile: path.join(tempDir, 'missing-origin.json'),
       allowMissingMapIdentity: true,
+      startDogzillaLidarClientImpl: async () => {},
+      getDogzillaRobotPoseImpl: async () => ({
+        ok: true,
+        waypointSafe: true,
+        pose: {
+          frame: 'map',
+          x: 1.2,
+          y: -0.4,
+          theta: 0.75,
+          source: 'tf:map->base_link',
+        },
+      }),
+      getRobotSidecarHealthImpl: async () => ({ body: { runtime: { map: nav2HealthBody().runtime.map } } }),
     })
 
     assert.equal(await readFile(waypointFile, 'utf-8'), originalConfig)

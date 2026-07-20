@@ -69,14 +69,24 @@ test('startup banner is interactive by default and supports env overrides', () =
 
 test('green wraps text in ANSI green when TTY', () => {
   const savedIsTTY = process.stdout.isTTY
-  process.stdout.isTTY = true
-  delete process.env.NO_COLOR
-  assert.equal(green('hello'), `${GREEN}hello${RESET}`)
-  assert.equal(greenBright('hello'), `\x1b[1m${GREEN}hello${RESET}`)
-  process.stdout.isTTY = false
-  assert.equal(green('hello'), 'hello')
-  assert.equal(greenBright('hello'), 'hello')
-  process.stdout.isTTY = savedIsTTY
+  const savedNoColor = process.env.NO_COLOR
+  const savedTerm = process.env.TERM
+  try {
+    process.stdout.isTTY = true
+    delete process.env.NO_COLOR
+    process.env.TERM = 'xterm-256color'
+    assert.equal(green('hello'), `${GREEN}hello${RESET}`)
+    assert.equal(greenBright('hello'), `\x1b[1m${GREEN}hello${RESET}`)
+    process.stdout.isTTY = false
+    assert.equal(green('hello'), 'hello')
+    assert.equal(greenBright('hello'), 'hello')
+  } finally {
+    process.stdout.isTTY = savedIsTTY
+    if (savedNoColor === undefined) delete process.env.NO_COLOR
+    else process.env.NO_COLOR = savedNoColor
+    if (savedTerm === undefined) delete process.env.TERM
+    else process.env.TERM = savedTerm
+  }
 })
 
 test('printStartupBanner writes once through the provided logger', () => {

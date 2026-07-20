@@ -255,17 +255,6 @@
           <section class="robot-map-panel">
             <div class="robot-map-head">
               <h2>Mini Map</h2>
-              <div class="robot-map-actions">
-                <div class="map-view-toggle-row">
-                  <button type="button" id="map-view-toggle" class="map-view-toggle" data-view-mode="map">Follow robot</button>
-                  <span class="map-view-mode-label">Map</span>
-                </div>
-                <span id="runtime-target-chip" class="runtime-chip">Loading...</span>
-              </div>
-            <div class="robot-map-layer-row" aria-label="Map layer status">
-              <span id="robot-map-layer-grid" class="robot-map-layer" data-state="missing">Occupancy grid</span>
-              <span id="robot-map-layer-scan" class="robot-map-layer" data-state="missing">Live LiDAR</span>
-              <span id="robot-map-layer-waypoints" class="robot-map-layer" data-state="missing">Waypoints</span>
             </div>
           </div>
 <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
@@ -301,9 +290,12 @@
                   <span class="map-step-label">Build Map</span>
                   <div class="map-workflow-actions">
                     <button type="button" id="autonomous-map-start-button" class="map-workflow-button map-workflow-button-primary" data-connection-action="start-autonomous-mapping">Map This Floor</button>
-                    <button type="button" id="autonomous-map-continue-button" class="map-workflow-button" data-connection-action="continue-autonomous-mapping">Continue Current Map</button>
-                    <button type="button" id="autonomous-map-finish-button" class="map-workflow-button" data-connection-action="finish-autonomous-mapping" disabled>Finish Mapping</button>
-                    <button type="button" id="autonomous-map-promote-button" class="map-workflow-button" data-connection-action="promote-map-candidate" disabled>Use Candidate Map</button>
+                    <details class="map-workflow-secondary-action">
+                      <summary>Resume an existing map</summary>
+                      <button type="button" id="autonomous-map-continue-button" class="map-workflow-button" data-connection-action="continue-autonomous-mapping">Continue Current Map</button>
+                    </details>
+                    <button type="button" id="autonomous-map-finish-button" class="map-workflow-button" data-connection-action="finish-autonomous-mapping" disabled>Stop Early</button>
+                    <button type="button" id="autonomous-map-promote-button" class="map-workflow-button" data-connection-action="promote-map-candidate" disabled>Use New Map</button>
                   </div>
                 </div>
                 </div>
@@ -323,7 +315,7 @@
                   <span class="map-step-label">Save Waypoint</span>
                   <div class="waypoint-capture-row">
                     <input type="text" id="waypoint-capture-name" class="waypoint-capture-input" placeholder="Waypoint name" maxlength="40" />
-                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button">Save Spot</button>
+                    <button type="button" id="waypoint-capture-button" class="waypoint-capture-button">Save Current Location</button>
                     <span id="waypoint-capture-status" class="waypoint-capture-status"></span>
                   </div>
                   <div id="stale-waypoints-panel" class="stale-waypoints-panel" hidden>
@@ -489,13 +481,6 @@
           </div>
           <div id="robot-target-status" class="settings-status">Loading robot targets...</div>
 
-          <div class="settings-row">
-            <label for="performance-profile-select">Robot performance</label>
-            <select id="performance-profile-select"></select>
-            <button id="save-performance-profile-button" type="button">Use performance</button>
-          </div>
-          <div id="performance-profile-status" class="settings-status">Loading performance profiles...</div>
-
           <div class="dogzilla-audio-volume settings-audio-volume">
             <label for="dogzilla-audio-volume-input">Dog sound volume</label>
             <input id="dogzilla-audio-volume-input" type="range" min="0" max="100" step="5" value="75" />
@@ -523,9 +508,9 @@
             <pre class="mermaid">
 flowchart TD
     A[Map This Floor] --> B[Robot explores LiDAR frontiers]
-    B --> C[Finish Mapping]
+    B --> C[Map ready to review]
     C --> D[Review candidate]
-    D --> E[Use Candidate Map]
+    D --> E[Use New Map]
     E --> F[Capture verified waypoints]
 </pre>
           </div>
@@ -535,7 +520,7 @@ flowchart TD
     <li>Put the robot in a bounded, stair-free area</li>
     <li>Click Map This Floor</li>
     <li>Robot explores reachable LiDAR frontiers autonomously</li>
-    <li>Finish Mapping, then review and use the candidate map</li>
+    <li>Review the completed map, then click Use New Map</li>
     <li>Capture verified waypoints after promoting the map</li>
   </ol>
 </div>
@@ -550,7 +535,7 @@ flowchart TD
             </li>
             <li>
   <strong>Map This Floor</strong>
-  <p>Put the robot in a clear, bounded, stair-free area and click "Map This Floor". It uses LiDAR and Nav2 frontier goals to explore reachable unknown space, then saves a reviewable candidate when you finish.</p>
+  <p>Put the robot in a clear, bounded, stair-free area and click "Map This Floor". It explores reachable unknown space and saves a reviewable map automatically when coverage is complete. Use Stop Early only when you want to end the run before that.</p>
 </li>
             <li>
               <strong>Drive robot to waypoint spot</strong>
@@ -562,7 +547,7 @@ flowchart TD
             </li>
             <li>
               <strong>Save waypoint here</strong>
-              <p>Enter a waypoint name (e.g., "kitchen") and click "Save Spot". The current pose is saved with the map identity.</p>
+              <p>Enter a waypoint name (e.g., "kitchen") and click "Save Current Location". The current pose is saved with the map identity.</p>
             </li>
             <li>
               <strong>Repeat for more waypoints</strong>
@@ -574,7 +559,7 @@ flowchart TD
             </li>
             <li>
               <strong>Restart Nav if needed</strong>
-              <p>The app auto-starts Nav2 on launch. If the nav-chain health shows Nav2 is down, click "Restart Nav" in the Navigation Setup panel.</p>
+              <p>Nav2 runs continuously under the Pi service. If nav-chain health shows it is down, use "Restart Nav" in the Navigation Setup panel.</p>
             </li>
             <li>
               <strong>Say "go to kitchen"</strong>

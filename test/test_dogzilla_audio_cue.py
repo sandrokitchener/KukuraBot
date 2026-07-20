@@ -114,7 +114,7 @@ class DogzillaAudioCueTests(unittest.TestCase):
     def test_bark_cue_uses_scaled_temp_file_when_volume_is_lowered(self):
         state = server.AudioState(Path("public/sounds"), "aplay", "")
         bark_process = FakeProcess()
-        scaled_file = Path("public/sounds/robodoge-audio-scaled.wav")
+        scaled_file = Path(server.tempfile.gettempdir()) / "robodoge-audio-scaled.wav"
 
         with (
             patch.object(server, "resolve_player", return_value="/usr/bin/aplay"),
@@ -149,7 +149,7 @@ class DogzillaAudioCueTests(unittest.TestCase):
     def test_cue_without_volume_uses_stored_volume(self):
         state = server.AudioState(Path("public/sounds"), "aplay", "", volume=0.2)
         bark_process = FakeProcess()
-        scaled_file = Path("public/sounds/robodoge-audio-scaled.wav")
+        scaled_file = Path(server.tempfile.gettempdir()) / "robodoge-audio-scaled.wav"
 
         with (
             patch.object(server, "resolve_player", return_value="/usr/bin/aplay"),

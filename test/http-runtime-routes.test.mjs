@@ -45,44 +45,16 @@ test('recordWaypointDispatchFromResult ignores unsent robot dispatches', () => {
   assert.equal(called, false)
 })
 
-test('performance profile route switches reversible profile and returns public config', async () => {
-  const sent = []
-  let selected = ''
+test('legacy performance profile route is not exposed', async () => {
+  let bodyRead = false
   const handled = await tryHandleRuntimeRoute({
     request: { method: 'POST' },
     requestUrl: new URL('http://localhost/api/settings/performance-profile'),
     response: {},
-    readJsonBody: async () => ({ profileId: 'endurance' }),
-    sendJson: async (_response, statusCode, payload) => {
-      sent.push({ statusCode, payload })
-      return true
-    },
-    loadRobotRuntimeConfigImpl: async () => ({ performanceSelectionLocked: false }),
-    setActiveRobotPerformanceProfileImpl: async (profileId) => { selected = profileId },
-    loadPublicConfigImpl: async () => ({ robotRuntime: { performanceProfile: { id: selected } } }),
+    readJsonBody: async () => { bodyRead = true },
+    sendJson: async () => true,
   })
 
-  assert.equal(handled, true)
-  assert.equal(selected, 'endurance')
-  assert.equal(sent[0].statusCode, 200)
-  assert.equal(sent[0].payload.robotRuntime.performanceProfile.id, 'endurance')
-})
-
-test('performance profile route refuses environment-locked selection', async () => {
-  const sent = []
-  await tryHandleRuntimeRoute({
-    request: { method: 'POST' },
-    requestUrl: new URL('http://localhost/api/settings/performance-profile'),
-    response: {},
-    readJsonBody: async () => ({ profileId: 'balanced' }),
-    sendJson: async (_response, statusCode, payload) => {
-      sent.push({ statusCode, payload })
-      return true
-    },
-    loadRobotRuntimeConfigImpl: async () => ({ performanceSelectionLocked: true }),
-    setActiveRobotPerformanceProfileImpl: async () => { throw new Error('must not write') },
-  })
-
-  assert.equal(sent[0].statusCode, 409)
-  assert.match(sent[0].payload.error, /locked/)
+  assert.equal(handled, false)
+  assert.equal(bodyRead, false)
 })

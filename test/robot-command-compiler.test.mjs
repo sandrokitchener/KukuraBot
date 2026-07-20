@@ -45,6 +45,73 @@ test('compileRobotRuntimePreview maps move command to named waypoint goto plan',
   assert.equal(preview.payload.planTopic, '/dogzilla/command_plan')
 })
 
+test('compileRobotRuntimePreview preserves waypoint map provenance in both plans without mutating config', () => {
+  const waypoint = mapWaypoint({
+    mapId: undefined,
+    mapFingerprint: undefined,
+    capturedAt: '2026-07-15T20:00:00Z',
+    map: {
+      id: 'active-map',
+      fingerprint: 'active-fingerprint',
+      savedAt: '2026-07-15T19:00:00Z',
+      yaml: '/maps/active.yaml',
+      pgm: '/maps/active.pgm',
+      pbstream: '/maps/active.pbstream',
+    },
+  })
+  const originalWaypoint = structuredClone(waypoint)
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'living_room',
+      },
+    },
+    waypoints: { living_room: waypoint },
+  }))
+
+  const expectedProvenance = {
+    mapId: 'active-map',
+    mapFingerprint: 'active-fingerprint',
+    mapSavedAt: '2026-07-15T19:00:00Z',
+    mapYaml: '/maps/active.yaml',
+    mapPgm: '/maps/active.pgm',
+    mapPbstream: '/maps/active.pbstream',
+  }
+  for (const [key, value] of Object.entries(expectedProvenance)) {
+    assert.equal(preview.canonicalPlan.params[key], value)
+    assert.equal(preview.payload.canonicalPlan.params[key], value)
+  }
+  assert.deepEqual(waypoint, originalWaypoint)
+})
+
+test('compileRobotRuntimePreview does not confuse a waypoint id with its nested map id', () => {
+  const preview = compileRobotRuntimePreview(runtimePreviewInput({
+    source: {
+      parsed: {
+        command: 'move',
+        waypoint: 'living_room',
+      },
+    },
+    waypoints: {
+      living_room: mapWaypoint({
+        id: 'living-room-waypoint',
+        name: 'Living Room',
+        mapId: undefined,
+        mapFingerprint: undefined,
+        map: {
+          id: 'active-map',
+          fingerprint: 'active-fingerprint',
+        },
+      }),
+    },
+  }))
+
+  assert.equal(preview.canonicalPlan.params.waypoint, 'living_room')
+  assert.equal(preview.canonicalPlan.params.mapId, 'active-map')
+  assert.equal(preview.canonicalPlan.params.mapFingerprint, 'active-fingerprint')
+})
+
 test('compileRobotRuntimePreview blocks operator follow until a dispatchable waypoint exists', () => {
   const preview = compileRobotRuntimePreview(runtimePreviewInput({
     source: {

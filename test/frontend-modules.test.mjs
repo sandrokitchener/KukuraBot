@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
 import { createDogzillaAudioController, normalizeDogzillaAudioVolume } from '../public/dogzilla-audio.js'
+import { createMobileNavigationController } from '../public/mobile-navigation.js'
 import {
   applyForwardRamp,
   createNeutralManualVector,
@@ -42,6 +44,64 @@ import {
   summarizeNavChain,
 } from '../public/operator-status.js'
 
+test('mobile navigation initializes Android shell and swipes between views', () => {
+  const listeners = new Map()
+  const classes = new Set()
+  const documentRef = {
+    documentElement: {
+      dataset: {},
+      classList: {
+        add: (name) => classes.add(name),
+        contains: (name) => classes.has(name),
+      },
+    },
+    addEventListener: (name, handler) => listeners.set(name, handler),
+  }
+  const manualControl = {
+    enableTouch() {},
+    handleTouchPointerDown() {},
+    handleTouchPointerMove() {},
+    handleTouchPointerUp() {},
+    handleTouchPointerCancel() {},
+  }
+  const stick = { addEventListener() {} }
+  const controller = createMobileNavigationController({
+    documentRef,
+    navigatorRef: { userAgent: 'Android wv' },
+    windowRef: {},
+    manualControl,
+    manualTouchLeftStick: stick,
+    manualTouchRightStick: stick,
+  })
+
+  assert.equal(controller.init(), true)
+  assert.equal(documentRef.documentElement.dataset.mobileView, 'chat')
+
+  listeners.get('touchstart')({
+    target: { closest: () => null },
+    touches: [{ identifier: 1, clientX: 100, clientY: 100 }],
+    changedTouches: [],
+  })
+  listeners.get('touchend')({
+    changedTouches: [{ identifier: 1, clientX: 150, clientY: 100 }],
+  })
+  assert.equal(documentRef.documentElement.dataset.mobileView, 'robot')
+
+  controller.setMobileView('invalid')
+  assert.equal(controller.getMobileView(), 'chat')
+})
+
+test('camera viewer is gated by the visible Camera tab', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf-8')
+  const applyPayload = source.slice(source.indexOf('function applyPayload'), source.indexOf('function applyModelConfig'))
+  const applyRobotView = source.slice(source.indexOf('function applyRobotView'), source.indexOf('function startDogzillaCameraViewer'))
+  const startViewer = source.slice(source.indexOf('function startDogzillaCameraViewer'), source.indexOf('function stopDogzillaCameraViewer'))
+
+  assert.doesNotMatch(applyPayload, /startDogzillaCameraViewer\(/)
+  assert.match(applyRobotView, /stopDogzillaCameraViewer\(\)/)
+  assert.match(startViewer, /robotCameraPanel\.hidden/)
+})
+
 test('normalizeDogzillaAudioVolume clamps persisted UI values', () => {
   assert.equal(normalizeDogzillaAudioVolume(0.4), 0.4)
   assert.equal(normalizeDogzillaAudioVolume(2), 1)
@@ -78,11 +138,30 @@ test('manual control normalizes gamepad axes into DOGZILLA vector shape', () => 
   assert.equal(normalizeManualAxis(0.4567), 0.457)
 
   assert.deepEqual(readManualGamepadVector({
-    axes: [0.25, -0.5, 0.75],
+    mapping: 'standard',
+    axes: [0.75, -0.5, 0.75],
   }), {
     forward: 0.5,
-    strafe: -0.25,
+    strafe: -0.75,
     turn: -0.75,
+  })
+
+  assert.deepEqual(readManualGamepadVector({
+    mapping: 'standard',
+    axes: [0.6, -0.9, 0],
+  }), {
+    forward: 0.9,
+    strafe: 0,
+    turn: 0,
+  })
+
+  assert.deepEqual(readManualGamepadVector({
+    mapping: '',
+    axes: [0, -1, -1, 0],
+  }), {
+    forward: 1,
+    strafe: 0,
+    turn: 0,
   })
 })
 
@@ -950,6 +1029,28 @@ test('buildNavChainComponents reports ok/fail/unknown for every chain step', () 
     ],
   )
   assert.match(summarizeNavChain(components), /4\/6 ready \(Odom \+ TF, Nav2 lifecycle\)/)
+})
+
+test('buildNavChainComponents does not count stale odom as ready', () => {
+  const components = buildNavChainComponents({
+    sensors: {
+      lidar: { ok: true },
+      localization: { ok: true, waypointSafe: true, mapPose: { frame: 'map' } },
+    },
+    navigation: {
+      odomReady: true,
+      odomTfAvailable: true,
+      odomFresh: false,
+      odomTfFresh: true,
+      actionAvailable: true,
+      lifecycleActive: true,
+      scanReady: true,
+    },
+  })
+
+  assert.equal(components.find((component) => component.id === 'odom')?.status, 'fail')
+  assert.equal(components.find((component) => component.id === 'odom')?.detail, 'Odom samples are stale')
+  assert.match(summarizeNavChain(components), /5\/6 ready \(Odom \+ TF\)/)
 })
 
 test('buildNavChainComponents keeps raw LiDAR separate from localization and filtered scan', () => {
