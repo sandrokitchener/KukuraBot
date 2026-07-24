@@ -44,14 +44,14 @@ def generate_launch_description():
         scan_filter_enabled = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_ENABLED", "1") == "1"
         gait_adapter_enabled = os.environ.get("DOGZILLA_NAV2_GAIT_ADAPTER_ENABLED", "1") == "1"
         gait_input_topic = os.environ.get("DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC", "/cmd_vel")
-        lifecycle_nodes = [
-            "controller_server",
-            "planner_server",
-            "behavior_server",
-            "bt_navigator",
-            "velocity_smoother",
-            "collision_monitor",
-        ]
+        lifecycle_nodes = ["velocity_smoother", "collision_monitor"]
+        if not is_mapping_mode:
+            lifecycle_nodes[:0] = [
+                "controller_server",
+                "planner_server",
+                "behavior_server",
+                "bt_navigator",
+            ]
         nodes = []
         if scan_filter_enabled:
             nodes.append(
@@ -152,7 +152,7 @@ def generate_launch_description():
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings,
                 )]),
-                Node(
+                *([] if is_mapping_mode else [Node(
                     package="nav2_controller",
                     executable="controller_server",
                     output="screen",
@@ -161,8 +161,8 @@ def generate_launch_description():
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings + [("cmd_vel", "cmd_vel_nav")],
-                ),
-                Node(
+                )]),
+                *([] if is_mapping_mode else [Node(
                     package="nav2_planner",
                     executable="planner_server",
                     name="planner_server",
@@ -172,8 +172,8 @@ def generate_launch_description():
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings,
-                ),
-                Node(
+                )]),
+                *([] if is_mapping_mode else [Node(
                     package="nav2_behaviors",
                     executable="behavior_server",
                     name="behavior_server",
@@ -183,8 +183,8 @@ def generate_launch_description():
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings + [("cmd_vel", "cmd_vel_nav")],
-                ),
-                Node(
+                )]),
+                *([] if is_mapping_mode else [Node(
                     package="nav2_bt_navigator",
                     executable="bt_navigator",
                     name="bt_navigator",
@@ -194,7 +194,7 @@ def generate_launch_description():
                     parameters=[configured_params],
                     arguments=["--ros-args", "--log-level", log_level],
                     remappings=remappings,
-                ),
+                )]),
                 Node(
                     package="nav2_velocity_smoother",
                     executable="velocity_smoother",

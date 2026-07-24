@@ -76,8 +76,6 @@ class Nav2ConfigAuthorityTests(unittest.TestCase):
                 "DOGZILLA_NAV2_SCAN_FILTER_ENABLED": "0",
                 "DOGZILLA_NAV2_SCAN_FILTER_TOPIC": "/scan_nav2",
                 "DOGZILLA_NAV2_MAPPING_MODE": "0",
-                "DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY": "0.13",
-                "DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE": "20.0",
             }
         )
 

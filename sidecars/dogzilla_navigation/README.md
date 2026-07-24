@@ -39,7 +39,7 @@ cmd_vel_gait_adapter.py -> DOGZILLALib bridge /nav2/cmd_vel
 DOGZILLALib -> pace/gait_type/move/turn
 ```
 
-This keeps the planner intact while translating smooth wheeled-robot velocity commands into DOGZILLA-native gait commands. The default is stability-first: Nav2 stays in `walk`/`slow` with conservative forward motion and damped turning. Controller-requested in-place turns are limited to half the normal turn ceiling so the robot can face a new path; the recovery tree still contains no `Spin`. During frontier exploration, 20 seconds without meaningful approach cancels only that goal and moves on. Trot can be enabled only as an explicit tuning choice.
+Normal waypoint navigation keeps Nav2 intact while translating wheeled-robot velocity commands into DOGZILLA-native gait commands. Autonomous mapping does not run Nav2 planning or actions: `frontier_explorer.py` publishes LiDAR-reactive commands through the same smoother, collision monitor, and gait adapter.
 
 Disable the adapter and return to Yahboom's raw `/cmd_vel` base subscriber with:
 
@@ -57,8 +57,8 @@ Useful adapter knobs:
 - `DOGZILLA_NAV2_GAIT_MAX_X_STEP` - max DOGZILLA forward step from Nav2. Default `8`.
 - `DOGZILLA_NAV2_GAIT_MAX_Y_STEP` - max DOGZILLA lateral step from Nav2. Default `3`.
 - `DOGZILLA_NAV2_GAIT_MAX_TURN_RATE` - max DOGZILLA turn rate from Nav2. Default `24`.
-- Autonomous mapping uses Yahboom's standard `trot` gait at Nav2's existing
-  `0.26 m/s` ceiling. Normal waypoint navigation remains walk-only.
+- Autonomous mapping uses Yahboom's standard `trot` gait while translating
+  and `walk` for in-place turns. Normal waypoint navigation remains walk-only.
 
 ## Final heading
 

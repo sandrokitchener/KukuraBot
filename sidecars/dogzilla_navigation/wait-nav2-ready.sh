@@ -72,6 +72,7 @@ from nav2_readiness_logic import (
     PERMITTED_CMD_VEL_PUBLISHERS,
     PERMITTED_CMD_VEL_RAW_PUBLISHERS,
     PERMITTED_MAPPING_CMD_VEL_CONSUMERS,
+    PERMITTED_MAPPING_CMD_VEL_NAV_PUBLISHERS,
     REQUIRED_CMD_VEL_CONSUMERS,
     REQUIRED_CMD_VEL_NAV_CONSUMERS,
     REQUIRED_CMD_VEL_NAV_PUBLISHERS,
@@ -111,16 +112,16 @@ odom_subscription = node.create_subscription(Odometry, "/odom", on_odom, qos_pro
 scan_subscription = node.create_subscription(LaserScan, scan_topic, on_scan, qos_profile_sensor_data)
 tf_buffer = Buffer()
 tf_listener = TransformListener(tf_buffer, node, spin_thread=False)
-lifecycle_nodes = (
-    "controller_server",
-    "planner_server",
-    "behavior_server",
-    "bt_navigator",
-    "velocity_smoother",
-    "collision_monitor",
-)
+lifecycle_nodes = ("velocity_smoother", "collision_monitor")
 if not mapping_mode:
-    lifecycle_nodes += ("map_server",)
+    lifecycle_nodes = (
+        "controller_server",
+        "planner_server",
+        "behavior_server",
+        "bt_navigator",
+        *lifecycle_nodes,
+        "map_server",
+    )
 if backend == "amcl" and not mapping_mode:
     lifecycle_nodes += ("amcl",)
 lifecycle_clients = {
@@ -262,12 +263,22 @@ def has_exclusive_collision_monitor_publisher():
 
 
 def velocity_input_chain_is_ready():
+    nav_publishers = node.get_publishers_info_by_topic("/cmd_vel_nav")
+    nav_publishers_ready = node_identities_exactly(
+        nav_publishers,
+        REQUIRED_CMD_VEL_NAV_PUBLISHERS,
+    )
+    if mapping_mode:
+        nav_publishers_ready = (
+            not nav_publishers
+            or node_identities_exactly(
+                nav_publishers,
+                PERMITTED_MAPPING_CMD_VEL_NAV_PUBLISHERS,
+            )
+        )
     return all(
         (
-            node_identities_exactly(
-                node.get_publishers_info_by_topic("/cmd_vel_nav"),
-                REQUIRED_CMD_VEL_NAV_PUBLISHERS,
-            ),
+            nav_publishers_ready,
             node_identities_exactly(
                 node.get_subscriptions_info_by_topic("/cmd_vel_nav"),
                 REQUIRED_CMD_VEL_NAV_CONSUMERS,
@@ -353,7 +364,7 @@ try:
     while True:
         rclpy.spin_once(node, timeout_sec=0.2)
         now = time.monotonic()
-        action_ready = action_client.wait_for_server(timeout_sec=0.0)
+        action_ready = mapping_mode or action_client.wait_for_server(timeout_sec=0.0)
         odom_ready = sample_is_fresh("odom", now)
         scan_ready = sample_is_fresh("scan", now)
         odom_tf_ready = odom_tf_is_fresh()

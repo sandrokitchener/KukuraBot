@@ -1188,9 +1188,9 @@ class DogzillaRuntime:
         payload = payload if isinstance(payload, dict) else {}
         params = nav2_cmd_vel_to_locomotion(payload)
         if get_autonomous_mapping_status().get("active") is True:
-            params["gait"] = "trot"
+            params["gait"] = "trot" if params["x_step"] else "walk"
             params["pace"] = "normal"
-            params.setdefault("mapping", {})["allowTrot"] = True
+            params.setdefault("mapping", {})["allowTrot"] = bool(params["x_step"])
         self.nav2_gait_adapter_count = int(getattr(self, "nav2_gait_adapter_count", 0) or 0) + 1
         has_motion = locomotion_params_have_motion(params)
 

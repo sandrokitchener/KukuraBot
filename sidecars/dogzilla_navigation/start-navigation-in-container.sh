@@ -88,8 +88,6 @@ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_STALE_ST
 DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC:-0.8}"
 DOGZILLA_LOCALIZATION_BACKEND="${DOGZILLA_LOCALIZATION_BACKEND:-amcl}"
 DOGZILLA_NAV2_MAPPING_MODE="${DOGZILLA_NAV2_MAPPING_MODE:-0}"
-DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY="${DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY:-0.13}"
-DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE="${DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE:-20.0}"
 DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC="${DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC:-120}"
 DOGZILLA_NAV2_READINESS_RECHECK_TIMEOUT_SEC="${DOGZILLA_NAV2_READINESS_RECHECK_TIMEOUT_SEC:-10}"
 if [ "$DOGZILLA_NAV2_MAPPING_MODE" = "1" ]; then
@@ -117,8 +115,7 @@ export DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_E
 export DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
-export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_NAV2_MAPPING_MODE DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY
-export DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE
+export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_NAV2_MAPPING_MODE
 export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
 export REMOTE_ROOT
 
@@ -310,11 +307,6 @@ mta = env_f_required("DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE")
 ft = env_f_required("DOGZILLA_NAV2_FAILURE_TOLERANCE")
 msx = env_f_required("DOGZILLA_NAV2_MIN_SPEED_XY")
 tsv = env_f_required("DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY")
-mapping_msx = max(env_f_required("DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY"), 0.0)
-mapping_prefer_forward_scale = max(
-    env_f_required("DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE"),
-    0.0,
-)
 try:
     collision_stop_points = json.loads(os.environ["DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS"])
     if len(collision_stop_points) < 6 or len(collision_stop_points) % 2:
@@ -328,7 +320,6 @@ vys = 1
 st = os.environ.get("DOGZILLA_NAV2_SCAN_FILTER_TOPIC", "/scan_nav2")
 sfe = os.environ["DOGZILLA_NAV2_SCAN_FILTER_ENABLED"] == "1"
 scan_source_topic = st if sfe else "/scan"
-mapping_mode = os.environ.get("DOGZILLA_NAV2_MAPPING_MODE", "0") == "1"
 
 def costmap_ros(name):
     return p.setdefault(name, {}).setdefault(name, {}).setdefault("ros__parameters", {})
@@ -360,22 +351,6 @@ for cname in ("local_costmap", "global_costmap"):
                         if str(src_cfg.get("data_type", "")).lower() == "laserscan":
                             src_cfg["inf_is_valid"] = True
 
-if mapping_mode:
-    global_costmap = costmap_ros("global_costmap")
-    plugins = list(global_costmap.get("plugins", []))
-    if "static_layer" not in plugins:
-        plugins.insert(0, "static_layer")
-    global_costmap["plugins"] = plugins
-    static_layer = global_costmap.setdefault("static_layer", {})
-    static_layer.update({
-        "plugin": "nav2_costmap_2d::StaticLayer",
-        "map_topic": "/map_cartographer",
-        "map_subscribe_transient_local": False,
-        "subscribe_to_updates": True,
-        "track_unknown_space": True,
-        "transform_tolerance": 0.5,
-    })
-
 ctrl = p.setdefault("controller_server", {}).setdefault("ros__parameters", {})
 ctrl["controller_frequency"] = cf
 ctrl["failure_tolerance"] = max(ft, 0.0)
@@ -385,19 +360,13 @@ for name in ctrl.get("controller_plugins", []):
         fp2["xy_goal_tolerance"] = xy
         fp2["yaw_goal_tolerance"] = yaw
         fp2["min_vel_x"] = 0.0
-        fp2["min_speed_xy"] = max(msx, mapping_msx) if mapping_mode else msx
+        fp2["min_speed_xy"] = msx
         fp2["trans_stopped_velocity"] = tsv
         fp2["min_vel_y"] = -mvy
         fp2["max_vel_y"] = mvy
         fp2["acc_lim_y"] = lay
         fp2["decel_lim_y"] = -lay
         fp2["vy_samples"] = vys
-        if mapping_mode and mapping_prefer_forward_scale > 0.0:
-            critics = fp2.get("critics")
-            if isinstance(critics, list) and "PreferForward" not in critics:
-                insert_at = critics.index("BaseObstacle") + 1 if "BaseObstacle" in critics else 0
-                critics.insert(insert_at, "PreferForward")
-            fp2["PreferForward.scale"] = mapping_prefer_forward_scale
 for name in ctrl.get("goal_checker_plugins", []):
     goal_checker = ctrl.get(name)
     if isinstance(goal_checker, dict):

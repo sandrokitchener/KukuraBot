@@ -1943,6 +1943,33 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(runtime.nav2_gait_adapter_count, 1)
         self.assertEqual(runtime.nav2_gait_nonzero_command_count, 1)
 
+    def test_autonomous_mapping_in_place_turn_uses_walk(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(
+            dogzilla_lib_bridge.DogzillaRuntime
+        )
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+
+        with patch.object(
+            dogzilla_lib_bridge,
+            "get_autonomous_mapping_status",
+            return_value={"active": True},
+        ):
+            result = runtime.execute_nav2_cmd_vel({
+                "receivedAt": time.time(),
+                "linear": {"x": 0.0, "y": 0.0},
+                "angular": {"z": 0.75},
+            })
+
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["params"]["gait"], "walk")
+        self.assertEqual(result["params"]["pace"], "normal")
+        self.assertFalse(result["params"]["mapping"]["allowTrot"])
+        self.assertIn(("gait_type", "walk"), runtime.robot.calls)
+
     def test_nav2_gait_adapter_rejects_stale_nonzero_command(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
         runtime.import_error = None

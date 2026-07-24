@@ -12,6 +12,9 @@ PERMITTED_CMD_VEL_PUBLISHERS = frozenset({"/collision_monitor"})
 REQUIRED_CMD_VEL_NAV_PUBLISHERS = frozenset(
     {"/controller_server", "/behavior_server"}
 )
+PERMITTED_MAPPING_CMD_VEL_NAV_PUBLISHERS = frozenset(
+    {"/robodoge_frontier_explorer"}
+)
 REQUIRED_CMD_VEL_NAV_CONSUMERS = frozenset({"/velocity_smoother"})
 PERMITTED_CMD_VEL_RAW_PUBLISHERS = frozenset({"/velocity_smoother"})
 REQUIRED_CMD_VEL_RAW_CONSUMERS = frozenset({"/collision_monitor"})

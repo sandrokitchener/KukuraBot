@@ -13,10 +13,18 @@ ACTIVE_FILE="$REMOTE_ROOT/maps/autonomous-mapping.active"
 EXPLORER="$REMOTE_ROOT/sidecars/dogzilla_navigation/frontier_explorer.py"
 MAPPING_NAV2_READY_TIMEOUT_SEC="${DOGZILLA_MAPPING_NAV2_READY_TIMEOUT_SEC:-120}"
 MAPPING_ROTATION_TIMEOUT_SEC="${DOGZILLA_MAPPING_ROTATION_TIMEOUT_SEC:-8}"
-MAPPING_CANCEL_TIMEOUT_SEC="${DOGZILLA_MAPPING_CANCEL_TIMEOUT_SEC:-2}"
 MAPPING_SCAN_PAUSE_SEC="${DOGZILLA_MAPPING_SCAN_PAUSE_SEC:-2}"
 MAPPING_SCAN_TIMEOUT_SEC="${DOGZILLA_MAPPING_SCAN_TIMEOUT_SEC:-120}"
 MAPPING_MIN_TRANSLATION_COMMAND_SEC="${DOGZILLA_MAPPING_MIN_TRANSLATION_COMMAND_SEC:-1.0}"
+MAPPING_FORWARD_SPEED="${DOGZILLA_MAPPING_FORWARD_SPEED:-0.18}"
+MAPPING_TURN_SPEED="${DOGZILLA_MAPPING_TURN_SPEED:-0.75}"
+MAPPING_BACKUP_SPEED="${DOGZILLA_MAPPING_BACKUP_SPEED:-0.08}"
+MAPPING_BACKUP_DURATION="${DOGZILLA_MAPPING_BACKUP_DURATION:-1.5}"
+MAPPING_STOP_DISTANCE="${DOGZILLA_MAPPING_STOP_DISTANCE:-0.55}"
+MAPPING_CLEAR_DISTANCE="${DOGZILLA_MAPPING_CLEAR_DISTANCE:-0.75}"
+MAPPING_NO_GROWTH_TIMEOUT="${DOGZILLA_MAPPING_NO_GROWTH_TIMEOUT:-60}"
+MAPPING_MAX_SESSION_DURATION="${DOGZILLA_MAPPING_MAX_SESSION_DURATION:-600}"
+MAPPING_MAP_GROWTH_CELLS="${DOGZILLA_MAPPING_MAP_GROWTH_CELLS:-20}"
 
 write_result() {
   python3 - "$1" "${2:-}" "${3:-}" <<'PY'
@@ -86,7 +94,7 @@ while not stop_file.exists():
 PY
 }
 
-wait_for_mapping_nav2() {
+wait_for_mapping_motion_stack() {
   docker exec \
     -e REMOTE_ROOT="$REMOTE_ROOT" \
     -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
@@ -163,12 +171,12 @@ if [ ! -f "$READY_FILE" ]; then
   exit 1
 fi
 
-if ! wait_for_mapping_nav2; then
+if ! wait_for_mapping_motion_stack; then
   if restore_localization; then
-    write_result "$RESULT_FILE" failed "mapping_nav2_not_ready; no_frontier_goal_sent"
+    write_result "$RESULT_FILE" failed "mapping_motion_stack_not_ready; no_motion_sent"
   else
     stop_mapping_nav2
-    write_result "$RESULT_FILE" failed "mapping_nav2_not_ready_restore_failed; no_frontier_goal_sent"
+    write_result "$RESULT_FILE" failed "mapping_motion_stack_not_ready_restore_failed; no_motion_sent"
   fi
   exit 1
 fi
@@ -180,7 +188,7 @@ docker exec \
   -e REMOTE_ROOT="$REMOTE_ROOT" \
   -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
   "$ROS_CONTAINER" bash -lc \
-  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 15 --scan-pause-after '$MAPPING_SCAN_PAUSE_SEC' --scan-timeout '$MAPPING_SCAN_TIMEOUT_SEC' --pose-timeout 20 --goal-max-duration 90 --failed-goal-radius 0.5 --rotation-timeout '$MAPPING_ROTATION_TIMEOUT_SEC' --cancel-timeout '$MAPPING_CANCEL_TIMEOUT_SEC' --max-goals 80 --complete-after-no-frontier 30" \
+  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 15 --scan-pause-after '$MAPPING_SCAN_PAUSE_SEC' --scan-timeout '$MAPPING_SCAN_TIMEOUT_SEC' --pose-timeout 20 --rotation-timeout '$MAPPING_ROTATION_TIMEOUT_SEC' --forward-speed '$MAPPING_FORWARD_SPEED' --turn-speed '$MAPPING_TURN_SPEED' --backup-speed '$MAPPING_BACKUP_SPEED' --backup-duration '$MAPPING_BACKUP_DURATION' --stop-distance '$MAPPING_STOP_DISTANCE' --clear-distance '$MAPPING_CLEAR_DISTANCE' --map-growth-cells '$MAPPING_MAP_GROWTH_CELLS' --no-growth-timeout '$MAPPING_NO_GROWTH_TIMEOUT' --max-session-duration '$MAPPING_MAX_SESSION_DURATION'" \
   >"$REMOTE_ROOT/logs/frontier-explorer.log" 2>&1
 explorer_exit=$?
 kill "$battery_watchdog_pid" >/dev/null 2>&1 || true
