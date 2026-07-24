@@ -16,11 +16,6 @@ source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1091
 source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true
 
-if ! ros2 service list | grep -qx "/write_state"; then
-  echo "Cartographer /write_state service is not available. Start map-pose mapping/localization first." >&2
-  exit 2
-fi
-
 MODE_FILE="$REMOTE_ROOT/maps/robodoge_map_pose_mode.json"
 current_mode="$(python3 - "$MODE_FILE" <<'PY'
 import json
@@ -121,9 +116,13 @@ target_pbstream="$map_stem.pbstream"
 tmp_pbstream="$target_pbstream.tmp"
 rm -f "$tmp_pbstream"
 
-ros2 service call /write_state cartographer_ros_msgs/srv/WriteState \
+if ! timeout 20s ros2 service call /write_state cartographer_ros_msgs/srv/WriteState \
   "{filename: '$tmp_pbstream', include_unfinished_submaps: true}" \
-  > "$REMOTE_ROOT/logs/map-pose-save.log" 2>&1
+  > "$REMOTE_ROOT/logs/map-pose-save.log" 2>&1; then
+  echo "Cartographer /write_state call failed or timed out." >&2
+  cat "$REMOTE_ROOT/logs/map-pose-save.log" >&2 || true
+  exit 2
+fi
 
 if [ ! -s "$tmp_pbstream" ]; then
   echo "Cartographer did not write $tmp_pbstream" >&2

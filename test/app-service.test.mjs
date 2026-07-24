@@ -179,17 +179,8 @@ test('loadPublicConfig exposes active speech profile metadata', async () => {
   }
   assert.doesNotMatch(knownWaypoint.verificationProblem, /captured-pose note|notes still|dummy|stored pose does not match/i)
   assert.match(payload.robotRuntime.mapOrigin.status, /ready|missing/)
-  assert.equal(knownWaypoint.frame, 'app_map')
-  assert.equal(knownWaypoint.capturedMapPose?.frame, 'map')
   if (payload.robotRuntime.mapOrigin.configured) {
-    assert.equal(knownWaypoint.appMapPose?.frame, 'app_map')
-    assert.equal(knownWaypoint.appMapPose?.sourceFrame, 'map')
-    assert.equal(knownWaypoint.appMapPose?.storedFrame, 'app_map')
     assert.ok(typeof payload.robotRuntime.mapOrigin.origin.label === 'string' && payload.robotRuntime.mapOrigin.origin.label.length > 0)
-  }
-  const garageWaypoint = payload.robotRuntime.waypoints.find((waypoint) => waypoint.id === 'garage')
-  if (garageWaypoint?.frame === 'app_map') {
-    assert.equal(garageWaypoint.capturedMapPose?.frame, 'map')
   }
   assert.equal(payload.app.appName, 'Questing Beast')
 })

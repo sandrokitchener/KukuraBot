@@ -131,7 +131,6 @@ html.android-app .persistent-emergency-stop {
   box-shadow: none;
 }
 
-html.android-app[data-mobile-view='chat'] .persistent-emergency-stop,
-html.android-app[data-mobile-view='audio'] .persistent-emergency-stop {
+html.android-app[data-mobile-view='chat'] .persistent-emergency-stop {
   display: block;
 }

@@ -17,6 +17,30 @@ spec.loader.exec_module(nav2_readiness_logic)
 
 
 class Nav2ReadinessLogicTests(unittest.TestCase):
+    def test_humble_anonymous_endpoint_requires_one_endpoint_and_live_named_node(self):
+        anonymous = SimpleNamespace(
+            node_name="_NODE_NAME_UNKNOWN_",
+            node_namespace="_NODE_NAMESPACE_UNKNOWN_",
+        )
+        required = "/dogzilla_cmd_vel_gait_adapter"
+        live_nodes = (("dogzilla_cmd_vel_gait_adapter", "/"),)
+
+        self.assertTrue(
+            nav2_readiness_logic.single_anonymous_endpoint_matches_live_node(
+                (anonymous,), live_nodes, required
+            )
+        )
+        self.assertFalse(
+            nav2_readiness_logic.single_anonymous_endpoint_matches_live_node(
+                (anonymous,), (), required
+            )
+        )
+        self.assertFalse(
+            nav2_readiness_logic.single_anonymous_endpoint_matches_live_node(
+                (anonymous, anonymous), live_nodes, required
+            )
+        )
+
     @staticmethod
     def _write_process(
         proc_root: Path,
@@ -168,6 +192,27 @@ class Nav2ReadinessLogicTests(unittest.TestCase):
             nav2_readiness_logic.node_identities_exactly(
                 collision_monitor + collision_monitor,
                 nav2_readiness_logic.PERMITTED_CMD_VEL_PUBLISHERS,
+            )
+        )
+
+    def test_mapping_cmd_vel_consumers_allow_only_adapter_and_frontier_observer(self):
+        mapping_consumers = [
+            SimpleNamespace(
+                node_name="dogzilla_cmd_vel_gait_adapter", node_namespace="/"
+            ),
+            SimpleNamespace(node_name="robodoge_frontier_explorer", node_namespace="/"),
+        ]
+        self.assertTrue(
+            nav2_readiness_logic.node_identities_exactly(
+                mapping_consumers,
+                nav2_readiness_logic.PERMITTED_MAPPING_CMD_VEL_CONSUMERS,
+            )
+        )
+        self.assertFalse(
+            nav2_readiness_logic.node_identities_exactly(
+                mapping_consumers
+                + [SimpleNamespace(node_name="rogue_cmd_vel_listener", node_namespace="/")],
+                nav2_readiness_logic.PERMITTED_MAPPING_CMD_VEL_CONSUMERS,
             )
         )
 

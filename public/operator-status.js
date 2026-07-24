@@ -12,8 +12,12 @@ export const DANGEROUS_CONNECTION_ACTIONS = Object.freeze({
     message: 'Robot will autonomously navigate to conservative LiDAR frontiers. Keep stairs, people, pets, and fragile objects out of its reachable area. Finish Mapping saves a candidate only; it does not replace the active map.',
   },
   'continue-autonomous-mapping': {
-    title: 'Continue Current Map',
-    message: 'Robot will walk to the last saved mapping pose, then extend the active Cartographer map from its saved PBSTREAM. Keep its route clear.',
+    title: 'Extend Active Map',
+    message: 'Robot will relocalize against the map currently used for navigation, explore its unknown edges, and save the result as a draft. The active map and waypoints stay unchanged until Use New Map.',
+  },
+  'resume-draft-mapping': {
+    title: 'Resume Draft Map',
+    message: 'Robot will relocalize against the newest unpromoted draft map and continue exploring its unknown edges. The draft remains separate from the active navigation map.',
   },
   'finish-autonomous-mapping': {
     title: 'Finish Autonomous Mapping',
@@ -59,6 +63,15 @@ export const NAV_CHAIN_COMPONENTS = Object.freeze([
   { id: 'scan', label: 'Filtered scan' },
 ])
 
+export function formatLocalizationRecoveryMessage(message) {
+  const text = String(message || '').trim()
+  if (!/Global localization timed out without \d+ distinct frozen-map constraint matches/i.test(text)) {
+    return text
+  }
+
+  return 'Robot location could not be verified, so autonomous navigation remains blocked. Use Manual Control to move the robot to a distinctive spot already shown on the saved map, keep the LiDAR unobstructed, face roughly the mapped direction, then retry Relocalize on Map. If it fails from two different known spots, use Map This Floor and then Use New Map.'
+}
+
 export function buildNavChainComponents(readinessPayload) {
   if (!readinessPayload || !readinessPayload.navigation) {
     return NAV_CHAIN_COMPONENTS.map((component) => ({
@@ -80,6 +93,9 @@ export function buildNavChainComponents(readinessPayload) {
     && localization?.waypointSafe === true
     && localizedPose?.frame === 'map'
     && !localizationBlocker
+  const localizationDetail = formatLocalizationRecoveryMessage(
+    localizationBlocker || localization?.error || 'Verified map-frame location unavailable',
+  )
   const localizationStatus = localization ? (localizationReady ? 'ok' : 'fail') : 'unknown'
   const odomBlocker = findNavigationBlocker(nav, /odom|odometry/i)
   const odomReady = nav.odomReady === true
@@ -112,7 +128,7 @@ export function buildNavChainComponents(readinessPayload) {
       ...NAV_CHAIN_COMPONENTS[1],
       status: localizationStatus,
       detail: localization
-        ? (localizationReady ? 'Map location verified by global match' : localizationBlocker || localization.error || 'Verified map-frame location unavailable')
+        ? (localizationReady ? 'Map location verified by global match' : localizationDetail)
         : 'Localization status not reported',
     },
     {

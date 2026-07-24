@@ -144,6 +144,7 @@ from nav2_gait_adapter import (
     DEFAULT_NAV2_GAIT_MAX_TURN_RATE,
     get_speed_config,
     nav2_cmd_vel_to_locomotion,
+    pulse_vendor_turn_rate,
 )
 import nav2_client as nav2_client_module
 from nav2_client import (
@@ -197,16 +198,16 @@ DEFAULT_INCLUDE_SLOW_STATE = os.environ.get("DOGZILLA_INCLUDE_SLOW_STATE", "0") 
 DEFAULT_ASYNC_HTTP_GOTO = os.environ.get("DOGZILLA_ASYNC_HTTP_GOTO", "1") == "1"
 DEFAULT_BATTERY_CUTOFF_PCT = _env_number(
     "DOGZILLA_BATTERY_CUTOFF_PERCENT",
-    _env_number("DOGZILLA_NAV2_MIN_BATTERY_PCT", 10.0),
+    _env_number("DOGZILLA_NAV2_MIN_BATTERY_PCT", 30.0),
     minimum=1.0,
 )
 DEFAULT_BATTERY_WARNING_PCT = max(
     DEFAULT_BATTERY_CUTOFF_PCT,
-    _env_number("DOGZILLA_BATTERY_WARNING_PERCENT", 20.0, minimum=1.0),
+    _env_number("DOGZILLA_BATTERY_WARNING_PERCENT", 35.0, minimum=1.0),
 )
 DEFAULT_BATTERY_RECOVERY_PCT = max(
     DEFAULT_BATTERY_CUTOFF_PCT,
-    _env_number("DOGZILLA_BATTERY_RECOVERY_PERCENT", 15.0, minimum=1.0),
+    _env_number("DOGZILLA_BATTERY_RECOVERY_PERCENT", 35.0, minimum=1.0),
 )
 DEFAULT_BATTERY_MAX_AGE_SEC = _env_number(
     "DOGZILLA_BATTERY_MAX_AGE_SEC", 15.0, minimum=1.0, maximum=300.0
@@ -1186,6 +1187,10 @@ class DogzillaRuntime:
     def execute_nav2_cmd_vel(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         payload = payload if isinstance(payload, dict) else {}
         params = nav2_cmd_vel_to_locomotion(payload)
+        if get_autonomous_mapping_status().get("active") is True:
+            params["gait"] = "trot"
+            params["pace"] = "normal"
+            params.setdefault("mapping", {})["allowTrot"] = True
         self.nav2_gait_adapter_count = int(getattr(self, "nav2_gait_adapter_count", 0) or 0) + 1
         has_motion = locomotion_params_have_motion(params)
 
@@ -1241,6 +1246,13 @@ class DogzillaRuntime:
                 "result": result,
             }
             return result
+
+        if (
+            has_motion
+            and self._nav2_cmd_vel_block_reason() == "command_preempt"
+            and get_autonomous_mapping_status().get("active") is True
+        ):
+            self._clear_command_preempt_nav2_cmd_vel_block()
 
         if self._nav2_cmd_vel_is_blocked() and locomotion_params_have_motion(params):
             result = self._nav2_cmd_vel_blocked_result(params)
@@ -1300,6 +1312,24 @@ class DogzillaRuntime:
                 return result
 
             try:
+                requested_turn_rate = float(params.get("turn_rate") or 0.0)
+                pulsed_turn_rate, turn_phase, turn_sign = pulse_vendor_turn_rate(
+                    requested_turn_rate,
+                    getattr(self, "nav2_turn_pulse_accumulator", 0.0),
+                    getattr(self, "nav2_turn_pulse_sign", 0),
+                )
+                self.nav2_turn_pulse_accumulator = turn_phase
+                self.nav2_turn_pulse_sign = turn_sign
+                params["turn_rate"] = pulsed_turn_rate
+                params.setdefault("mapping", {}).update(
+                    {
+                        "requestedTurnRate": requested_turn_rate,
+                        "vendorTurnPulseActive": (
+                            requested_turn_rate != 0.0
+                            and pulsed_turn_rate != requested_turn_rate
+                        ),
+                    }
+                )
                 locomotion = self._execute_locomotion(robot, params)
                 if locomotion.get("executed") is True:
                     if has_motion:
@@ -1939,6 +1969,7 @@ def get_autonomous_mapping_status(
     active = (maps_dir / "autonomous-mapping.ready").is_file() and autonomous_mapping_marker_is_live(
         maps_dir / "autonomous-mapping.active", proc_root
     )
+    candidate_exists = bool(map_metadata_module.list_unpromoted_candidate_metadata(maps_dir))
     return {
         "active": active,
         "state": (
@@ -1948,7 +1979,7 @@ def get_autonomous_mapping_status(
         ),
         "startedAt": status.get("startedAt"),
         "updatedAt": status.get("updatedAt"),
-        "candidateAvailable": result.get("state") == "candidate-ready" or "candidate=true" in str(result.get("detail") or ""),
+        "candidateAvailable": candidate_exists or result.get("state") == "candidate-ready" or "candidate=true" in str(result.get("detail") or ""),
         "detail": result.get("detail") or status.get("reason") or "",
         "resumePose": resume_pose,
     }
@@ -1966,6 +1997,10 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "DogzillaLibBridge/0.2"
 
     def do_GET(self):
+        if urlsplit(self.path).path == "/map/candidate":
+            result = map_metadata_module.read_latest_candidate_occupancy_grid(AUTONOMOUS_MAPPING_DIR)
+            self._send_json(200 if result.get("ok") else 404, result)
+            return
         if self.path == "/nav2/cmd_vel/health":
             self._send_json(200, nav2_gait_health_snapshot(self.server.runtime))
             return

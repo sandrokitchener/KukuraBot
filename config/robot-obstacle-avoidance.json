@@ -23,7 +23,7 @@
   "nav2RequiredMovementRadius": 0.05,
   "nav2MovementTimeAllowance": 20.0,
   "nav2FailureTolerance": 5.0,
-  "nav2MinSpeedXy": 0.03,
+  "nav2MinSpeedXy": 0.0,
   "nav2TransStoppedVelocity": 0.05,
   "mapNavigationObstacleDistance": 0.15,
   "mapNavigationObstacleStopCount": 5,

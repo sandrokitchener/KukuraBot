@@ -318,6 +318,10 @@ body {
   white-space: nowrap;
 }
 
+.android-map-tab-label {
+  display: none !important;
+}
+
 .robot-tab {
   width: 100%;
   min-width: 0;

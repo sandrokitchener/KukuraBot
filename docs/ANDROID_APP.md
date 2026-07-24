@@ -14,6 +14,8 @@ Android WebView / Tauri shell
 -> DOGZILLA / Isaac / sidecars from PC
 ```
 
+Android navigation is a three-screen swipe surface: chat/voice/prompt opens by default, swipe right shows the touch controls, and swipe left opens the map/camera surface. Map and Camera remain tap tabs on that surface. Robot status is moved into the Android-only sticky header; desktop keeps the existing two-column layout.
+
 Android does not run Node, PowerShell, SSH, ROS2, or DOGZILLA sidecars locally.
 
 ## Operator-capability parity matrix
@@ -86,6 +88,8 @@ adb shell dumpsys package com.robodoge.console
 
 Manual control safety is shared by Android and desktop: backgrounding or blurring the app, pointer cancellation, gamepad loss, command timeout, lease loss, request failure, and page unload disable control and issue one neutral command. Automated coverage lives in `test/frontend-modules.test.mjs`; physical stop behavior remains hardware verification.
 
+On Android, the controls surface requires `Enable touch control` before either joystick accepts input; joystick gestures are reserved from page swipe navigation and scrolling.
+
 ## Phone-local model experiments
 
 `docs/archive/android-sidequest.md` documents an experimental Android `llama.cpp` path. Current stable default remains PC backend model calls. Phone-local LLM status is Unknown / not confirmed unless tested on device in the active turn.
@@ -93,6 +97,7 @@ Manual control safety is shared by Android and desktop: backgrounding or blurrin
 ## Gotchas
 
 - Build success does not prove phone install success.
+- If a saved backend is unreachable, Android reopens Connection setup so the URL can be replaced; the PC backend must be reachable from the phone's LAN/Tailnet.
 - Windows without Developer Mode may block symlinks; `scripts/build-android-apk.mjs` handles the known fallback.
 - WebView local requests to phone `127.0.0.1` may hit CORS/platform limits for experimental phone-local model servers.
 

@@ -76,6 +76,8 @@ class Nav2ConfigAuthorityTests(unittest.TestCase):
                 "DOGZILLA_NAV2_SCAN_FILTER_ENABLED": "0",
                 "DOGZILLA_NAV2_SCAN_FILTER_TOPIC": "/scan_nav2",
                 "DOGZILLA_NAV2_MAPPING_MODE": "0",
+                "DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY": "0.13",
+                "DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE": "20.0",
             }
         )
 
@@ -93,7 +95,25 @@ class Nav2ConfigAuthorityTests(unittest.TestCase):
             root = Path(tmp)
             source_path = root / "base.yaml"
             target_path = root / "generated.yaml"
-            source_path.write_text("{}\n", encoding="utf-8")
+            source_path.write_text(
+                """
+controller_server:
+  ros__parameters:
+    controller_plugins:
+      - FollowPath
+    goal_checker_plugins:
+      - general_goal_checker
+    FollowPath:
+      plugin: dwb_core::DWBLocalPlanner
+      min_vel_x: 0.03
+      min_speed_xy: 0.03
+    general_goal_checker:
+      plugin: nav2_controller::SimpleGoalChecker
+      xy_goal_tolerance: 0.25
+      yaw_goal_tolerance: 0.25
+""",
+                encoding="utf-8",
+            )
             result = subprocess.run(
                 [sys.executable, "-", str(source_path), str(target_path)],
                 input=generator_snippet,
@@ -105,11 +125,23 @@ class Nav2ConfigAuthorityTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             generated = yaml.safe_load(target_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(generated["amcl"]["ros__parameters"]["scan_topic"], "/scan")
-        self.assertEqual(
-            generated["collision_monitor"]["ros__parameters"]["scan"]["topic"],
-            "/scan",
-        )
+            self.assertEqual(generated["amcl"]["ros__parameters"]["scan_topic"], "/scan")
+            self.assertEqual(
+                generated["collision_monitor"]["ros__parameters"]["scan"]["topic"],
+                "/scan",
+            )
+            goal_checker = generated["controller_server"]["ros__parameters"]["general_goal_checker"]
+            follow_path = generated["controller_server"]["ros__parameters"]["FollowPath"]
+            self.assertEqual(follow_path["min_vel_x"], 0.0)
+            self.assertEqual(follow_path["min_speed_xy"], 0.0)
+            self.assertEqual(
+                goal_checker["xy_goal_tolerance"],
+                float(generated_environment["DOGZILLA_NAV2_XY_GOAL_TOLERANCE"]),
+            )
+            self.assertEqual(
+                goal_checker["yaw_goal_tolerance"],
+                float(generated_environment["DOGZILLA_NAV2_YAW_GOAL_TOLERANCE"]),
+            )
 
 
 if __name__ == "__main__":

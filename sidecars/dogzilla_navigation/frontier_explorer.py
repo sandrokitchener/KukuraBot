@@ -13,9 +13,6 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-STALLED_GOAL_RETRY_SEC = 120.0
-
-
 def _is_free(value: int) -> bool:
     return 0 <= value <= 50
 
@@ -30,6 +27,38 @@ def _index(x: int, y: int, width: int) -> int:
 
 def _in_bounds(x: int, y: int, width: int, height: int) -> bool:
     return 0 <= x < width and 0 <= y < height
+
+
+def classify_cmd_vel(
+    linear_x: float,
+    angular_z: float,
+    *,
+    linear_deadband: float,
+    angular_deadband: float,
+    linear_full_scale: float,
+    angular_full_scale: float,
+    rotation_dominance_ratio: float,
+) -> dict[str, float | bool]:
+    """Classify controller intent using the gait adapter's normalized scales."""
+    linear_magnitude = abs(float(linear_x))
+    angular_magnitude = abs(float(angular_z))
+    linear_active = linear_magnitude >= max(0.0, float(linear_deadband))
+    angular_active = angular_magnitude >= max(0.0, float(angular_deadband))
+    normalized_linear = linear_magnitude / max(float(linear_full_scale), 1e-6)
+    normalized_angular = angular_magnitude / max(float(angular_full_scale), 1e-6)
+    rotation_dominant = angular_active and (
+        not linear_active
+        or normalized_angular
+        >= normalized_linear * max(float(rotation_dominance_ratio), 1.0)
+    )
+    return {
+        # The gait adapter still emits a physical x_step for mixed commands.
+        # Keep translation proof independent from the anti-spin classification.
+        "translating": linear_active,
+        "rotationDominant": rotation_dominant,
+        "normalizedLinear": normalized_linear,
+        "normalizedAngular": normalized_angular,
+    }
 
 
 def _process_is_running(pid: int) -> bool:
@@ -91,6 +120,10 @@ def _cancel_acknowledged(response: Any) -> bool:
     return int(getattr(response, "return_code", -1)) == 0 or bool(getattr(response, "goals_canceling", None))
 
 
+def _angular_distance(first: float, second: float) -> float:
+    return abs((first - second + math.pi) % (2.0 * math.pi) - math.pi)
+
+
 def _nearest_free(cells: list[int], width: int, height: int, start_x: int, start_y: int) -> tuple[int, int] | None:
     if not _in_bounds(start_x, start_y, width, height):
         return None
@@ -129,6 +162,7 @@ def select_frontier_goal(
     origin_y: float,
     robot_x: float,
     robot_y: float,
+    robot_yaw: float | None = None,
     min_distance: float,
     max_distance: float,
     clearance_cells: int,
@@ -148,7 +182,7 @@ def select_frontier_goal(
     queue: deque[tuple[int, int]] = deque([start])
     seen = {start}
     best: dict[str, float | int] | None = None
-    best_score: tuple[int, float] | None = None
+    best_score: tuple[float, ...] | None = None
 
     while queue:
         x, y = queue.popleft()
@@ -176,7 +210,23 @@ def select_frontier_goal(
             for failed in (excluded_goals or [])
         ):
             continue
-        score = (-distance, unknown_neighbors)
+        if robot_yaw is None:
+            score = (-distance, float(unknown_neighbors))
+            heading_error = None
+            heading_alignment = None
+        else:
+            goal_bearing = math.atan2(world_y - robot_y, world_x - robot_x)
+            heading_error = _angular_distance(goal_bearing, robot_yaw)
+            heading_alignment = math.cos(heading_error)
+            # Prefer continuing through the current forward half-plane. For
+            # this slow quadruped, take the nearest incremental frontier
+            # instead of gambling the whole pass on a multi-meter leg.
+            score = (
+                1.0 if heading_alignment >= 0.0 else 0.0,
+                -distance,
+                heading_alignment,
+                float(unknown_neighbors),
+            )
         if best_score is None or score > best_score:
             best_score = score
             best = {
@@ -187,13 +237,16 @@ def select_frontier_goal(
                 "cellX": x,
                 "cellY": y,
             }
+            if heading_error is not None:
+                best["headingError"] = heading_error
+                best["headingAlignment"] = heading_alignment
     return best
 
 
 class FrontierExplorer:
     def __init__(self, args: argparse.Namespace) -> None:
         import rclpy
-        from geometry_msgs.msg import PoseStamped
+        from geometry_msgs.msg import PoseStamped, Twist
         from nav2_msgs.action import NavigateToPose
         from nav_msgs.msg import OccupancyGrid
         from rclpy.action import ActionClient
@@ -216,12 +269,17 @@ class FrontierExplorer:
         self.current_goal: dict[str, float | int] | None = None
         self.cancelled_goal_keys: set[tuple[float, float]] = set()
         self.goal_started_at = 0.0
-        self.goal_progress_at = 0.0
-        self.goal_best_distance = math.inf
         self.goal_last_pose: tuple[float, float] | None = None
         self.goal_displacement = 0.0
         self.session_max_goal_displacement = 0.0
+        self.session_translation_command_sec = 0.0
+        self.cmd_vel_last_at = 0.0
+        self.cmd_vel_translating = False
+        self.cmd_vel_rotation_dominant = False
+        self.last_cmd_vel: dict[str, float | bool] = {}
+        self.goal_rotation_dominant_command_sec = 0.0
         self.goal_count = 0
+        self.successful_goal_count = 0
         self.failures = 0
         self.failed_goals: list[dict[str, float]] = []
         self.stalled_goals: list[dict[str, float]] = []
@@ -229,8 +287,6 @@ class FrontierExplorer:
         self.finished = False
         self.cancel_future: Any | None = None
         self.cancel_deadline = 0.0
-        self.cancel_timeout_reported = False
-        self.cancellation_failed = False
         self.pending_finish: tuple[str, str] | None = None
         self.status: dict[str, Any] = {"state": "starting", "startedAt": time.time(), "pid": os.getpid()}
         self.tf_buffer = Buffer()
@@ -250,6 +306,7 @@ class FrontierExplorer:
         )
         self.node.create_subscription(OccupancyGrid, args.map_topic, self._on_map, map_qos)
         self.node.create_subscription(LaserScan, args.scan_topic, self._on_scan, scan_qos)
+        self.node.create_subscription(Twist, args.cmd_vel_topic, self._on_cmd_vel, 10)
         self.node.create_timer(1.0, self._tick)
         self._write_status()
 
@@ -257,8 +314,43 @@ class FrontierExplorer:
         self.map_message = message
         self.map_received_at = time.monotonic()
 
-    def _on_scan(self, _message: Any) -> None:
+    def _on_scan(self, message: Any) -> None:
         self.scan_received_at = time.monotonic()
+
+    def _on_cmd_vel(self, message: Any) -> None:
+        """Track the guarded command that actually reaches the gait adapter."""
+        now = time.monotonic()
+        command_gap = max(0.0, now - self.cmd_vel_last_at) if self.cmd_vel_last_at > 0.0 else 0.0
+        if self.current_goal is not None and self.cmd_vel_translating and self.cmd_vel_last_at > 0.0:
+            elapsed = min(command_gap, self.args.cmd_vel_max_gap)
+            self.session_translation_command_sec += elapsed
+        if (
+            self.current_goal is not None
+            and self.cmd_vel_rotation_dominant
+            and self.cmd_vel_last_at > 0.0
+        ):
+            elapsed = min(command_gap, self.args.cmd_vel_max_gap)
+            self.goal_rotation_dominant_command_sec += elapsed
+
+        linear_x = float(message.linear.x)
+        angular_z = float(message.angular.z)
+        motion = classify_cmd_vel(
+            linear_x,
+            angular_z,
+            linear_deadband=self.args.linear_deadband,
+            angular_deadband=self.args.angular_deadband,
+            linear_full_scale=self.args.linear_full_scale,
+            angular_full_scale=self.args.angular_full_scale,
+            rotation_dominance_ratio=self.args.rotation_dominance_ratio,
+        )
+        self.cmd_vel_translating = bool(motion["translating"])
+        self.cmd_vel_rotation_dominant = bool(motion["rotationDominant"])
+        self.last_cmd_vel = {
+            "linearX": linear_x,
+            "angularZ": angular_z,
+            **motion,
+        }
+        self.cmd_vel_last_at = now
 
     def _write_status(self) -> None:
         path = Path(self.args.status_file)
@@ -267,10 +359,24 @@ class FrontierExplorer:
             **self.status,
             "mapTopic": self.args.map_topic,
             "scanTopic": self.args.scan_topic,
+            "cmdVelTopic": self.args.cmd_vel_topic,
             "goalCount": self.goal_count,
+            "successfulGoalCount": self.successful_goal_count,
             "failures": self.failures,
             "failedGoals": self.failed_goals,
             "stalledGoals": self.stalled_goals,
+            "goalDisplacement": self.goal_displacement,
+            "sessionMaxGoalDisplacement": self.session_max_goal_displacement,
+            "sessionTranslationCommandSec": self.session_translation_command_sec,
+            "goalRotationDominantCommandSec": self.goal_rotation_dominant_command_sec,
+            "cmdVelTranslating": self.cmd_vel_translating,
+            "cmdVelRotationDominant": self.cmd_vel_rotation_dominant,
+            "lastCmdVel": self.last_cmd_vel,
+            "scanAgeSec": (
+                max(0.0, time.monotonic() - self.scan_received_at)
+                if self.scan_received_at > 0.0
+                else None
+            ),
             "updatedAt": time.time(),
         }
         temporary = path.with_suffix(path.suffix + ".tmp")
@@ -303,6 +409,17 @@ class FrontierExplorer:
         except Exception:
             return None
 
+    def _robot_yaw(self) -> float | None:
+        try:
+            transform = self.tf_buffer.lookup_transform("map", self.args.base_frame, self._rclpy.time.Time())
+            rotation = transform.transform.rotation
+            return math.atan2(
+                2.0 * (float(rotation.w) * float(rotation.z) + float(rotation.x) * float(rotation.y)),
+                1.0 - 2.0 * (float(rotation.y) ** 2 + float(rotation.z) ** 2),
+            )
+        except Exception:
+            return None
+
     def _cancel_goal(self) -> bool:
         if self.cancel_future is not None:
             return True
@@ -310,28 +427,27 @@ class FrontierExplorer:
         if handle is None:
             self.goal_started_at = 0.0
             self.goal_last_pose = None
+            self.goal_rotation_dominant_command_sec = 0.0
             self.current_goal = None
             return False
         goal = self.current_goal
         goal_key = self._goal_key(goal) if goal is not None else None
+        cancel_error: str | None = None
         try:
             self.cancel_future = handle.cancel_goal_async()
         except Exception as error:
-            try:
-                self.cancel_future = handle.cancel_goal_async()
-            except Exception:
-                self.cancellation_failed = True
-                reason = f"Nav2 goal cancellation failed: {error}"
-                self._finish_now("stopped", reason)
-                return False
+            cancel_error = f"Nav2 goal cancellation failed: {error}"
         self.goal_handle = None
         self.goal_started_at = 0.0
         self.goal_last_pose = None
+        self.goal_rotation_dominant_command_sec = 0.0
         if goal_key is not None:
             self.cancelled_goal_keys.add(goal_key)
         self.current_goal = None
+        if cancel_error is not None:
+            self._continue_after_unconfirmed_cancel(cancel_error)
+            return False
         self.cancel_deadline = time.monotonic() + max(0.1, self.args.cancel_timeout)
-        self.cancel_timeout_reported = False
         return True
 
     @staticmethod
@@ -344,7 +460,7 @@ class FrontierExplorer:
             < self.args.failed_goal_radius
             for failed in self.failed_goals
         ):
-            self.failed_goals.append({"x": float(goal["x"]), "y": float(goal["y"])})
+            self.failed_goals.append({"x": float(goal["x"]), "y": float(goal["y"]), "reason": reason})
             self.failures += 1
         self.status.update({"state": "waiting", "lastError": reason})
         self._write_status()
@@ -355,37 +471,40 @@ class FrontierExplorer:
             < self.args.failed_goal_radius
             for stalled in self.stalled_goals
         ):
-            self.stalled_goals.append({"x": float(goal["x"]), "y": float(goal["y"]), "at": time.monotonic()})
+            self.stalled_goals.append({"x": float(goal["x"]), "y": float(goal["y"]), "reason": reason})
         self.status.update({"state": "waiting", "lastError": reason, "goalFailureType": "stall_observed"})
         self._write_status()
 
+    def _continue_after_unconfirmed_cancel(self, reason: str) -> bool:
+        self.cancel_future = None
+        finishing = self.pending_finish is not None
+        self.status.update({
+            "state": "stopping" if finishing else "waiting",
+            "reason": (
+                "finishing after unconfirmed Nav2 cancellation"
+                if finishing
+                else "retargeting after unconfirmed Nav2 cancellation"
+            ),
+            "lastError": reason,
+        })
+        self._write_status()
+        return True
+
     def _wait_for_goal_cancellation(self) -> bool:
-        if self.cancellation_failed:
-            return False
         if self.cancel_future is None:
             return True
         if not self.cancel_future.done():
-            if time.monotonic() >= self.cancel_deadline and not self.cancel_timeout_reported:
-                self.cancel_timeout_reported = True
-                self.cancellation_failed = True
-                reason = "Nav2 did not acknowledge goal cancellation"
-                self.status.update({"state": "stopped", "reason": reason, "lastError": reason})
-                self._finish_now("stopped", reason)
+            if time.monotonic() >= self.cancel_deadline:
+                return self._continue_after_unconfirmed_cancel("Nav2 did not acknowledge goal cancellation")
             return False
         future = self.cancel_future
         self.cancel_future = None
         try:
             response = future.result()
         except Exception as error:
-            self.cancellation_failed = True
-            reason = f"Nav2 goal cancellation failed: {error}"
-            self._finish_now("stopped", reason)
-            return False
+            return self._continue_after_unconfirmed_cancel(f"Nav2 goal cancellation failed: {error}")
         if not _cancel_acknowledged(response):
-            self.cancellation_failed = True
-            reason = "Nav2 did not acknowledge goal cancellation"
-            self._finish_now("stopped", reason)
-            return False
+            return self._continue_after_unconfirmed_cancel("Nav2 did not acknowledge goal cancellation")
         return True
 
     def _on_goal_response(self, future: Any, goal: dict[str, float | int]) -> None:
@@ -428,6 +547,7 @@ class FrontierExplorer:
         self.current_goal = None
         self.goal_started_at = 0.0
         self.goal_last_pose = None
+        self.goal_rotation_dominant_command_sec = 0.0
         failure_reason = "Nav2 frontier goal failed"
         try:
             result = future.result()
@@ -438,9 +558,7 @@ class FrontierExplorer:
             result_status = 0
             failure_reason = str(error)
         if succeeded:
-            self.failures = 0
-            self.failed_goals.clear()
-            self.stalled_goals.clear()
+            self.successful_goal_count += 1
             self.status.update({"state": "waiting", "reason": "frontier goal reached"})
             self.status.pop("lastError", None)
             self.status.pop("goalFailureType", None)
@@ -469,13 +587,12 @@ class FrontierExplorer:
         pose.pose.orientation.w = 1.0
         message.pose = pose
         self.goal_started_at = time.monotonic()
-        self.goal_progress_at = self.goal_started_at
-        self.goal_best_distance = float(goal["distance"])
         self.goal_last_pose = self._robot_pose()
         self.goal_displacement = 0.0
+        self.goal_rotation_dominant_command_sec = 0.0
         self.current_goal = goal
         self.goal_count += 1
-        self.status.update({"state": "navigating", "goal": goal, "goalBestDistance": self.goal_best_distance, "goalDisplacement": 0.0, "sessionMaxGoalDisplacement": self.session_max_goal_displacement})
+        self.status.update({"state": "navigating", "goal": goal, "goalDisplacement": 0.0, "sessionMaxGoalDisplacement": self.session_max_goal_displacement})
         self.status.pop("reason", None)
         self.status.pop("lastError", None)
         self.status.pop("goalFailureType", None)
@@ -484,21 +601,45 @@ class FrontierExplorer:
             lambda response, sent_goal=goal: self._on_goal_response(response, sent_goal)
         )
 
+    def _select_goal(
+        self,
+        pose: tuple[float, float],
+        *,
+        include_failures: bool = True,
+    ) -> dict[str, float | int] | None:
+        info = self.map_message.info
+        return select_frontier_goal(
+            list(self.map_message.data),
+            int(info.width),
+            int(info.height),
+            resolution=float(info.resolution),
+            origin_x=float(info.origin.position.x),
+            origin_y=float(info.origin.position.y),
+            robot_x=pose[0],
+            robot_y=pose[1],
+            robot_yaw=self._robot_yaw(),
+            min_distance=self.args.min_goal_distance,
+            max_distance=self.args.max_goal_distance,
+            clearance_cells=max(0, int(math.ceil(self.args.goal_clearance / float(info.resolution)))),
+            excluded_goals=(
+                self.failed_goals + self.stalled_goals
+                if include_failures
+                else []
+            ),
+            exclusion_radius=self.args.failed_goal_radius,
+        )
+
     def _tick(self) -> None:
         if self.finished:
             return
-        if self.pending_finish is not None or self.cancel_future is not None or self.cancellation_failed:
+        if self.pending_finish is not None or self.cancel_future is not None:
             return
         if Path(self.args.stop_file).exists():
             self._finish("stopped", "stop requested")
             return
         now = time.monotonic()
-        self.stalled_goals = [
-            stalled for stalled in self.stalled_goals
-            if now - float(stalled.get("at", now)) < STALLED_GOAL_RETRY_SEC
-        ]
         if self.map_message is None:
-            if now - self.started_monotonic > self.args.map_timeout:
+            if now - self.started_monotonic > self.args.action_timeout:
                 self._finish("stopped", "live SLAM map is stale")
             return
         if now - self.map_received_at > self.args.map_timeout:
@@ -508,11 +649,19 @@ class FrontierExplorer:
             if now - self.started_monotonic > self.args.scan_timeout:
                 self._finish("stopped", "LiDAR scan is stale")
             return
-        if now - self.scan_received_at > self.args.scan_timeout:
+        scan_age = now - self.scan_received_at
+        if scan_age > self.args.scan_timeout:
             self._finish("stopped", "LiDAR scan is stale")
             return
-        if self.failures >= self.args.max_failures:
-            self._finish("stopped", "too many Nav2 frontier failures")
+        if scan_age > self.args.scan_pause_after:
+            self.status.update({
+                "state": "waiting",
+                "reason": "waiting for LiDAR scan recovery",
+                "lastError": f"LiDAR scan has been stale for {scan_age:.1f} seconds",
+            })
+            self._write_status()
+            if self.current_goal is not None:
+                self._cancel_goal()
             return
         if self.current_goal is not None:
             if self.goal_handle is None:
@@ -535,27 +684,29 @@ class FrontierExplorer:
                     if moved >= 0.05:
                         self.goal_displacement += moved
                         self.session_max_goal_displacement = max(
-                            getattr(self, "session_max_goal_displacement", 0.0),
+                            self.session_max_goal_displacement,
                             self.goal_displacement,
                         )
                         self.goal_last_pose = pose
-                        self.status.update({"goalDisplacement": self.goal_displacement, "sessionMaxGoalDisplacement": self.session_max_goal_displacement})
+                        self.status.update({
+                            "goalDisplacement": self.goal_displacement,
+                            "sessionMaxGoalDisplacement": self.session_max_goal_displacement,
+                        })
                         self._write_status()
                 else:
                     self.goal_last_pose = pose
-                distance = math.hypot(float(goal["x"]) - pose[0], float(goal["y"]) - pose[1])
-                if distance <= self.goal_best_distance - self.args.goal_progress_distance:
-                    self.goal_best_distance = distance
-                    self.goal_progress_at = now
-                    self.status["goalBestDistance"] = distance
-                    self._write_status()
+                rotation_command_sec = self.goal_rotation_dominant_command_sec
+                if rotation_command_sec >= self.args.rotation_timeout:
+                    self._record_goal_stall(
+                        goal,
+                        "frontier goal accumulated rotation-dominant commands without approach "
+                        f"for {rotation_command_sec:.1f} seconds",
+                    )
+                    self._cancel_goal()
+                    return
             if now - self.goal_started_at > self.args.goal_max_duration:
                 if goal is not None:
                     self._record_goal_stall(goal, "frontier goal exceeded maximum duration; Nav2 result not yet failed")
-                self._cancel_goal()
-            elif now - self.goal_progress_at > self.args.goal_timeout:
-                if goal is not None:
-                    self._record_goal_stall(goal, "frontier goal stalled; Nav2 result not yet failed")
                 self._cancel_goal()
             return
         if self.goal_count >= self.args.max_goals:
@@ -572,36 +723,27 @@ class FrontierExplorer:
                 self._write_status()
             return
         self.pose_missing_at = 0.0
-        info = self.map_message.info
-        goal = select_frontier_goal(
-            list(self.map_message.data),
-            int(info.width),
-            int(info.height),
-            resolution=float(info.resolution),
-            origin_x=float(info.origin.position.x),
-            origin_y=float(info.origin.position.y),
-            robot_x=pose[0],
-            robot_y=pose[1],
-            min_distance=self.args.min_goal_distance,
-            max_distance=self.args.max_goal_distance,
-            clearance_cells=max(0, int(math.ceil(self.args.goal_clearance / float(info.resolution)))),
-            excluded_goals=self.failed_goals + self.stalled_goals,
-            exclusion_radius=self.args.failed_goal_radius,
-        )
+        goal = self._select_goal(pose)
         if goal is None:
-            if self.stalled_goals:
-                # A stall is ambiguous: Nav2 did not report failure, so do not
-                # turn its temporary exclusion into map completion. Hold the
-                # run until the quarantine expires, then retry the frontier.
-                self.no_frontier_cycles = 0
-                self.status.update({"state": "waiting", "reason": "waiting for stalled frontier retry"})
-                self._write_status()
-                return
+            reachable_frontier = self._select_goal(pose, include_failures=False)
             self.no_frontier_cycles += 1
-            self.status.update({"state": "waiting", "reason": "no safe reachable frontier"})
+            reason = (
+                "no safe reachable frontier"
+                if reachable_frontier is None
+                else "reachable frontiers remain only at skipped destinations"
+            )
+            self.status.update({"state": "waiting", "reason": reason})
             self._write_status()
             if self.no_frontier_cycles >= self.args.complete_after_no_frontier:
-                self._finish("complete", "no safe reachable frontier")
+                if reachable_frontier is not None:
+                    self._finish("stopped", reason)
+                elif self.successful_goal_count > 0:
+                    self._finish("complete", reason)
+                else:
+                    self._finish(
+                        "stopped",
+                        "no safe reachable frontier before any navigation goal succeeded",
+                    )
             return
         self.no_frontier_cycles = 0
         self._send_goal(goal)
@@ -626,6 +768,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Conservative Nav2 frontier explorer")
     parser.add_argument("--map-topic", default="/map_cartographer")
     parser.add_argument("--scan-topic", default="/scan_nav2")
+    parser.add_argument("--cmd-vel-topic", default="/cmd_vel")
     parser.add_argument("--action", default="navigate_to_pose")
     parser.add_argument("--base-frame", default="base_link")
     parser.add_argument("--status-file", required=True)
@@ -634,17 +777,22 @@ def main() -> int:
     parser.add_argument("--min-goal-distance", type=float, default=0.35)
     parser.add_argument("--max-goal-distance", type=float, default=5.0)
     parser.add_argument("--goal-clearance", type=float, default=0.25)
-    parser.add_argument("--goal-timeout", type=float, default=45.0, help="seconds allowed without meaningful approach")
-    parser.add_argument("--goal-max-duration", type=float, default=300.0)
-    parser.add_argument("--goal-progress-distance", type=float, default=0.1)
-    parser.add_argument("--failed-goal-radius", type=float, default=0.75)
+    parser.add_argument("--failed-goal-radius", type=float, default=0.5)
+    parser.add_argument("--goal-max-duration", type=float, default=90.0)
+    parser.add_argument("--linear-deadband", type=float, default=0.025)
+    parser.add_argument("--angular-deadband", type=float, default=0.12)
+    parser.add_argument("--linear-full-scale", type=float, default=0.26)
+    parser.add_argument("--angular-full-scale", type=float, default=1.0)
+    parser.add_argument("--rotation-dominance-ratio", type=float, default=1.25)
+    parser.add_argument("--rotation-timeout", type=float, default=8.0)
+    parser.add_argument("--cmd-vel-max-gap", type=float, default=0.5)
     parser.add_argument("--action-timeout", type=float, default=120.0)
-    parser.add_argument("--cancel-timeout", type=float, default=10.0)
+    parser.add_argument("--cancel-timeout", type=float, default=2.0)
     parser.add_argument("--map-timeout", type=float, default=8.0)
-    parser.add_argument("--scan-timeout", type=float, default=3.0)
+    parser.add_argument("--scan-pause-after", type=float, default=2.0)
+    parser.add_argument("--scan-timeout", type=float, default=120.0)
     parser.add_argument("--pose-timeout", type=float, default=20.0)
     parser.add_argument("--max-goals", type=int, default=80)
-    parser.add_argument("--max-failures", type=int, default=6)
     parser.add_argument("--complete-after-no-frontier", type=int, default=30)
     args = parser.parse_args()
     try:

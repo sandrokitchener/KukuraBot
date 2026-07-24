@@ -16,13 +16,17 @@ REQUIRED_CMD_VEL_NAV_CONSUMERS = frozenset({"/velocity_smoother"})
 PERMITTED_CMD_VEL_RAW_PUBLISHERS = frozenset({"/velocity_smoother"})
 REQUIRED_CMD_VEL_RAW_CONSUMERS = frozenset({"/collision_monitor"})
 REQUIRED_CMD_VEL_CONSUMERS = frozenset({"/dogzilla_cmd_vel_gait_adapter"})
+PERMITTED_MAPPING_CMD_VEL_CONSUMERS = frozenset(
+    {"/dogzilla_cmd_vel_gait_adapter", "/robodoge_frontier_explorer"}
+)
 
 _OWNER_TOKEN_PATTERN = re.compile(r"^[0-9a-fA-F]{32}$")
+_UNKNOWN_NODE_NAMES = frozenset({"", "_NODE_NAME_UNKNOWN_"})
 
 
 def _endpoint_node_identity(endpoint: object) -> str:
     node_name = str(getattr(endpoint, "node_name", "") or "").strip("/")
-    if not node_name:
+    if node_name in _UNKNOWN_NODE_NAMES:
         return ""
     namespace = str(getattr(endpoint, "node_namespace", "/") or "/").strip("/")
     prefix = f"/{namespace}" if namespace else ""
@@ -60,6 +64,32 @@ def node_identities_exactly(
         and all(identities)
         and frozenset(identities) == permitted_names
     )
+
+
+def single_anonymous_endpoint_matches_live_node(
+    endpoints: Iterable[object],
+    live_nodes: Iterable[tuple[str, str]],
+    required_identity: str,
+) -> bool:
+    """Corroborate Humble's anonymous endpoint bug with a live named node.
+
+    Fast DDS can retain an endpoint GID while replacing its node identity with
+    ``_NODE_*_UNKNOWN_``. Accept that narrow case only when there is exactly one
+    anonymous endpoint and the required named node is independently live.
+    """
+
+    endpoint_list = tuple(endpoints)
+    if len(endpoint_list) != 1 or _endpoint_node_identity(endpoint_list[0]):
+        return False
+    live_identities = set()
+    for node_name, node_namespace in live_nodes:
+        name = str(node_name or "").strip("/")
+        namespace = str(node_namespace or "/").strip("/")
+        if not name or name in _UNKNOWN_NODE_NAMES:
+            continue
+        prefix = f"/{namespace}" if namespace else ""
+        live_identities.add(f"{prefix}/{name}")
+    return required_identity in live_identities
 
 
 def _read_owner_record(owner_file: Path) -> dict[str, str] | None:

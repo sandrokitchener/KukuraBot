@@ -13,7 +13,9 @@ param(
   [ValidateSet("auto", "localization", "mapping", "continue_mapping")]
   [string]$Mode = "auto",
   [string]$MapPath = "",
+  [string]$MapMetadataPath = "",
   [switch]$AllowMapping,
+  [switch]$AllowPoseHintJump,
   [switch]$ForceRestart,
   [switch]$RestoreOnly,
   [switch]$NoSync,
@@ -85,7 +87,9 @@ Repair-RemoteScriptLineEndings -ConfigPath $configPath -Alias $Alias -RemoteRoot
 Write-Output "Starting DOGZILLA Cartographer map pose in $ContainerName."
 $containerScript = "$RemoteRoot/sidecars/dogzilla_map_pose/start-map-pose-in-container.sh"
 $mapEnv = if ($MapPath) { " -e DOGZILLA_MAP_PBSTREAM=$MapPath" } else { "" }
+$mapMetadataEnv = if ($MapMetadataPath) { " -e DOGZILLA_MAP_METADATA=$MapMetadataPath" } else { "" }
 $allowMappingEnv = if ($AllowMapping) { " -e DOGZILLA_MAP_POSE_ALLOW_MAPPING=1" } else { "" }
+$allowPoseHintJumpEnv = if ($AllowPoseHintJump) { " -e DOGZILLA_ALLOW_POSE_HINT_JUMP=1" } else { "" }
 $forceRestartEnv = if ($ForceRestart) { " -e DOGZILLA_FORCE_RESTART=1" } else { "" }
 $navInactiveEnv = if ($Mode -in @('mapping', 'continue_mapping')) { " -e DOGZILLA_NAV2_PROVEN_INACTIVE=1" } else { "" }
 $skipRelocalizationMarker = "$RemoteRoot/maps/robodoge_map_pose_skip_relocalization"
@@ -153,7 +157,9 @@ if ($Mode -in @('mapping', 'continue_mapping')) {
 }
 
 $relocalizeNav2Arg = if ($Mode -eq 'localization') { " --no-pause-nav2" } else { "" }
-$relocalizeCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e ROS_DOMAIN_ID=$RosDomainId $ContainerName bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; python3 $RemoteRoot/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py --remote-root $RemoteRoot$relocalizeNav2Arg'"
+$relocalizeMetadataArg = if ($MapMetadataPath) { " --map-metadata $MapMetadataPath" } else { "" }
+$relocalizePoseHintArg = if ($AllowPoseHintJump) { " --allow-pose-hint-jump" } else { "" }
+$relocalizeCommand = "docker exec -e REMOTE_ROOT=$RemoteRoot -e ROS_DOMAIN_ID=$RosDomainId $ContainerName bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; python3 $RemoteRoot/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py --remote-root $RemoteRoot$relocalizeMetadataArg$relocalizeNav2Arg$relocalizePoseHintArg'"
 $stopNavigationCommand = "sudo systemctl stop robodoge-navigation.service; ! sudo systemctl is-active --quiet robodoge-navigation.service"
 $restartNavigationCommand = "sudo systemctl reset-failed robodoge-navigation.service; sudo systemctl start robodoge-navigation.service"
 $skipMarkerCommand = "printf '%s\\n' '$Mode' > $(ConvertTo-RemoteSingleQuote $skipRelocalizationMarker)"
@@ -163,7 +169,7 @@ $startedBySystemd = $false
 if ($startedInRequestedMode) {
   Write-Output "Starting dedicated $Mode container..."
   $stateReset = if ($Mode -eq 'continue_mapping') { $continueStateReset } else { $readyReset }
-  $startCommand = "sudo systemctl stop robodoge-map-pose.service 2>/dev/null || true; docker rm -f $ContainerName 2>/dev/null || true; $stateReset; docker run -d --rm --name $ContainerName --privileged --network host -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$allowMappingEnv$forceRestartEnv$navInactiveEnv -v /dev:/dev -v ${RemoteRoot}:${RemoteRoot} -w $RemoteRoot robodoge/ros-humble-cartographer:1.0 bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; bash $containerScript'"
+  $startCommand = "sudo systemctl stop robodoge-map-pose.service 2>/dev/null || true; docker rm -f $ContainerName 2>/dev/null || true; $stateReset; docker run -d --rm --name $ContainerName --privileged --network host -e REMOTE_ROOT=$RemoteRoot -e POSE_PORT=$PosePort -e ROS_DOMAIN_ID=$RosDomainId -e DOGZILLA_MAP_POSE_MODE=$Mode$mapEnv$mapMetadataEnv$allowMappingEnv$allowPoseHintJumpEnv$forceRestartEnv$navInactiveEnv -v /dev:/dev -v ${RemoteRoot}:${RemoteRoot} -w $RemoteRoot robodoge/ros-humble-cartographer:1.0 bash -lc 'source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; bash $containerScript'"
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $startCommand
   if ($LASTEXITCODE -ne 0 -or !(Wait-ContainerRunning -Name $ContainerName -TimeoutSec 25)) {
     throw "DOGZILLA Cartographer map pose container '$ContainerName' did not become ready in $Mode mode"
@@ -173,6 +179,8 @@ if ($startedInRequestedMode) {
   } elseif (-not (Wait-ContainerReady -Name $ContainerName)) {
     throw "DOGZILLA Cartographer map pose container '$ContainerName' did not finish startup in $Mode mode"
   }
+  Write-Output "DOGZILLA Cartographer map pose container started in $Mode mode; the dedicated container owns this startup transaction."
+  return
 } else {
   if ($Mode -eq 'localization' -and -not $RestoreOnly) {
     Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $stopNavigationCommand

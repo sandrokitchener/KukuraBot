@@ -13,6 +13,7 @@ import {
 } from './robot-map.js'
 import {
   buildNavChainComponents,
+  formatLocalizationRecoveryMessage,
   getConnectionActionConfirmation,
   isDangerousConnectionAction,
   summarizeNavChain,
@@ -214,6 +215,12 @@ let connectionActionPending = false
 let autonomousMappingActive = false
 let autonomousMappingStarting = false
 let autonomousMapCandidateAvailable = false
+
+function isAutonomousMappingStartAction(action) {
+  return action === 'start-autonomous-mapping'
+    || action === 'continue-autonomous-mapping'
+    || action === 'resume-draft-mapping'
+}
 let emergencyStopActive = false
 let emergencyStopStateKnown = false
 let activeThinkingCue = null
@@ -328,6 +335,8 @@ const mobileNavigation = createMobileNavigationController({
   manualControl,
   manualTouchLeftStick,
   manualTouchRightStick,
+  appHeader: document.querySelector('.app-header'),
+  robotStatePanel,
 })
 const robotMap = createRobotMapRenderer({
   elements: {
@@ -507,8 +516,10 @@ async function boot() {
     void ensureDogzillaRobotLinkReady()
     setStatus(`Ready on ${runtimeConfig.activeProfile.label}. Target: ${runtimeConfig.robotRuntime.activeTarget.label}.`)
   } catch (error) {
-    setStatus(`Config load failed: ${formatError(error)}`, 'error')
-    setSpeechStatus(`Speech setup failed: ${formatError(error)}`, true)
+    const message = formatError(error)
+    setStatus(`Config load failed: ${message}`, 'error')
+    setSpeechStatus(`Speech setup failed: ${message}`, true)
+    showAndroidBackendSetup(`Could not reach the saved backend. ${message}`)
   }
 }
 
@@ -1156,7 +1167,9 @@ function startRobotMapPolling() {
 }
 
 async function refreshDogzillaMap() {
-  const mapPath = slamMappingSessionActive ? '/api/dogzilla/map?stream=slam' : '/api/dogzilla/map'
+  const mapPath = autonomousMapCandidateAvailable
+    ? '/api/dogzilla/map?stream=candidate'
+    : slamMappingSessionActive ? '/api/dogzilla/map?stream=slam' : '/api/dogzilla/map'
   const healthPath = '/api/dogzilla/lidar/health'
 
   try {
@@ -1949,7 +1962,7 @@ async function handleDogzillaConnectionAction(event) {
     setMapWorkflowStatus('Starting SLAM mapping...', '')
   } else if (action === 'save-map-pose') {
     setMapWorkflowStatus('Saving occupancy grid and locking map...', '')
-  } else if (action === 'start-autonomous-mapping' || action === 'continue-autonomous-mapping') {
+  } else if (isAutonomousMappingStartAction(action)) {
     autonomousMappingStarting = true
     autonomousMappingActive = false
     updateAutonomousMappingButtons()
@@ -1972,7 +1985,7 @@ async function handleDogzillaConnectionAction(event) {
 
     if (!response.ok || payload.status === 'error') {
       const actionError = payload.error || payload.stderr || `DOGZILLA action failed: ${action}`
-      if (action === 'start-autonomous-mapping' || action === 'continue-autonomous-mapping') {
+      if (isAutonomousMappingStartAction(action)) {
         autonomousMappingStarting = false
         autonomousMappingActive = false
         slamMappingSessionActive = false
@@ -1988,7 +2001,7 @@ async function handleDogzillaConnectionAction(event) {
       throw new Error(actionError)
     }
 
-    const isAutonomousMappingStart = action === 'start-autonomous-mapping' || action === 'continue-autonomous-mapping'
+    const isAutonomousMappingStart = isAutonomousMappingStartAction(action)
     connectionStatus.textContent = isAutonomousMappingStart
       ? 'Preparing robot for autonomous mapping...'
       : `${formatConnectionAction(action)}: ${payload.status}.`
@@ -2015,18 +2028,20 @@ async function handleDogzillaConnectionAction(event) {
       ensureTopDownMapView()
       setMapWorkflowStatus('SLAM mapping started. Waiting for occupancy grid updates...', 'success')
       void refreshDogzillaMap()
-    } else if (action === 'start-autonomous-mapping' || action === 'continue-autonomous-mapping') {
+    } else if (isAutonomousMappingStartAction(action)) {
       setMapWorkflowStatus('Preparing robot for autonomous mapping...', '')
     } else if (action === 'finish-autonomous-mapping') {
       autonomousMappingActive = false
       autonomousMapCandidateAvailable = true
       slamMappingSessionStartedAt = 0
-      slamMappingSessionActive = true
+      slamMappingSessionActive = false
       const startButton = document.getElementById('autonomous-map-start-button')
+      const resumeDraftButton = document.getElementById('autonomous-map-resume-draft-button')
       const continueButton = document.getElementById('autonomous-map-continue-button')
       const finishButton = document.getElementById('autonomous-map-finish-button')
       const promoteButton = document.getElementById('autonomous-map-promote-button')
       if (startButton) startButton.disabled = false
+      if (resumeDraftButton) resumeDraftButton.disabled = false
       if (continueButton) continueButton.disabled = false
       if (finishButton) finishButton.disabled = true
       if (promoteButton) promoteButton.disabled = false
@@ -2075,15 +2090,18 @@ async function handleDogzillaConnectionAction(event) {
       setMapWorkflowStatus(`${proofSummary} ${localizationMessage}`, payload.localization?.status === 'ok' ? 'success' : 'error')
     }
   } catch (error) {
-    connectionStatus.textContent = formatError(error)
-    connectionOutput.textContent = formatError(error)
+    const message = action === 'start-map-pose'
+      ? formatLocalizationRecoveryMessage(formatError(error))
+      : formatError(error)
+    connectionStatus.textContent = message
+    connectionOutput.textContent = message
     if (event.currentTarget.closest?.('.map-workflow-panel')) {
-      setMapWorkflowStatus(formatError(error), 'error')
+      setMapWorkflowStatus(message, 'error')
     }
     if (action === 'start-map-pose') {
       setRecenterVisualState('error')
     }
-    setStatus(formatError(error), 'error')
+    setStatus(message, 'error')
   } finally {
     setConnectionActionsDisabled(false)
   }
@@ -2495,10 +2513,12 @@ function setConnectionActionsDisabled(disabled) {
 function updateAutonomousMappingButtons() {
   if (connectionActionPending) return
   const startButton = document.getElementById('autonomous-map-start-button')
+  const resumeDraftButton = document.getElementById('autonomous-map-resume-draft-button')
   const continueButton = document.getElementById('autonomous-map-continue-button')
   const finishButton = document.getElementById('autonomous-map-finish-button')
   const promoteButton = document.getElementById('autonomous-map-promote-button')
   if (startButton) startButton.disabled = autonomousMappingStarting || autonomousMappingActive
+  if (resumeDraftButton) resumeDraftButton.disabled = autonomousMappingStarting || autonomousMappingActive
   if (continueButton) continueButton.disabled = autonomousMappingStarting || autonomousMappingActive
   if (finishButton) finishButton.disabled = !autonomousMappingActive
   if (promoteButton) promoteButton.disabled = autonomousMappingStarting || autonomousMappingActive || !autonomousMapCandidateAvailable
@@ -2512,7 +2532,7 @@ function applyAutonomousMappingState(mapping) {
     autonomousMappingStarting = false
   }
   autonomousMapCandidateAvailable = candidateAvailable
-  slamMappingSessionActive = autonomousMappingActive || autonomousMapCandidateAvailable
+  slamMappingSessionActive = autonomousMappingActive
   slamMappingSessionStartedAt = autonomousMappingActive && Number.isFinite(Number(mapping.startedAt))
     ? Number(mapping.startedAt)
     : 0
@@ -2521,13 +2541,13 @@ function applyAutonomousMappingState(mapping) {
     ensureTopDownMapView()
     void refreshDogzillaMap()
     setMapWorkflowStatus('Mapping active. The robot will stop and save automatically when coverage is complete.', 'success')
-  } else if (mapping.state === 'failed') {
-    void stopDogzillaSlamMapStream()
-    setMapWorkflowStatus(mapping.detail || 'Autonomous mapping failed.', 'error')
   } else if (autonomousMapCandidateAvailable) {
     ensureTopDownMapView()
     void refreshDogzillaMap()
     setMapWorkflowStatus('Map ready to review. Use New Map when the completed map looks right.', 'success')
+  } else if (mapping.state === 'failed') {
+    void stopDogzillaSlamMapStream()
+    setMapWorkflowStatus(mapping.detail || 'Autonomous mapping failed.', 'error')
   }
 }
 
@@ -2561,7 +2581,9 @@ function formatConnectionAction(action) {
     case 'start-autonomous-mapping':
       return 'map this floor'
     case 'continue-autonomous-mapping':
-      return 'continue current map'
+      return 'extend active map'
+    case 'resume-draft-mapping':
+      return 'resume draft map'
     case 'finish-autonomous-mapping':
       return 'stop early'
     case 'promote-map-candidate':
@@ -2659,8 +2681,15 @@ function applyBackendControls() {
   const apiBaseUrl = getApiBaseUrl()
   dogzillaBackendUrlInput.value = apiBaseUrl
   connectionBackendStatus.textContent = apiBaseUrl ? `Using ${apiBaseUrl}` : 'Using same-origin backend.'
+  if (!apiBaseUrl) showAndroidBackendSetup('Enter the PC backend URL to connect this phone.')
+}
+
+function showAndroidBackendSetup(message) {
+  if (!isAndroidAppShell()) return
+
   const setup = document.querySelector('#connection-setup')
-  if (isAndroidAppShell() && !apiBaseUrl && setup) setup.open = true
+  if (setup) setup.open = true
+  if (message) connectionBackendStatus.textContent = message
 }
 
 function applyPayload(payload) {

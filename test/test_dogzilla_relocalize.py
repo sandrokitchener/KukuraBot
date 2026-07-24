@@ -1,7 +1,10 @@
 import importlib.util
+import hashlib
 import inspect
+import json
 from pathlib import Path
 import sys
+import tempfile
 from types import ModuleType
 import unittest
 
@@ -37,6 +40,57 @@ def load_relocalizer_module():
 
 
 class RelocalizerTests(unittest.TestCase):
+    def test_rejects_stable_global_match_far_from_saved_pose_hint(self):
+        module = load_relocalizer_module()
+        hint = module.resume_pose_hint(
+            {
+                "resumePose": {
+                    "frame": "map",
+                    "x": 4.63,
+                    "y": -0.16,
+                    "yaw": 0.21,
+                    "capturedAt": "2026-07-12T13:19:51Z",
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(module.RecoveryError, "disagrees with the saved map pose hint"):
+            module.require_pose_near_hint(
+                {"position": {"x": 0.0, "y": 0.02}, "yaw": -0.02},
+                hint,
+                position_tolerance_m=2.0,
+            )
+
+    def test_carried_robot_may_face_a_different_heading_near_saved_pose_hint(self):
+        module = load_relocalizer_module()
+        hint = module.resume_pose_hint(
+            {
+                "resumePose": {
+                    "frame": "map",
+                    "x": 4.63,
+                    "y": -0.16,
+                    "yaw": 0.21,
+                    "capturedAt": "2026-07-12T13:19:51Z",
+                }
+            }
+        )
+
+        module.require_pose_near_hint(
+            {"position": {"x": 3.58, "y": -0.16}, "yaw": 1.77},
+            hint,
+            position_tolerance_m=2.0,
+        )
+
+    def test_operator_confirmed_carried_robot_may_relocalize_far_from_pose_hint(self):
+        module = load_relocalizer_module()
+
+        module.require_pose_near_hint(
+            {"position": {"x": 0.0, "y": 0.02}, "yaw": -0.02},
+            {"position": {"x": 4.63, "y": -0.16}, "yaw": 0.21},
+            position_tolerance_m=2.0,
+            allow_jump=True,
+        )
+
     def test_recovery_handoff_does_not_gate_on_unused_local_odom_pose(self):
         module = load_relocalizer_module()
 
@@ -93,6 +147,42 @@ class RelocalizerTests(unittest.TestCase):
         self.assertFalse(resumed)
         self.assertEqual(error, "resume failed")
         self.assertIs(relocalizer.normal_process, normal_process)
+
+    def test_candidate_metadata_can_supply_the_resume_pbstream_without_promotion(self):
+        module = load_relocalizer_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pbstream = root / "map.pbstream"
+            pbstream.write_bytes(b"verified candidate state")
+            metadata = root / "candidate.json"
+            metadata.write_text(
+                json.dumps(
+                    {
+                        "id": "candidate_test",
+                        "artifacts": {
+                            "pbstream": {
+                                "path": str(pbstream),
+                                "sha256": hashlib.sha256(pbstream.read_bytes()).hexdigest(),
+                            }
+                        },
+                        "resumePose": {
+                            "frame": "map",
+                            "x": 1.25,
+                            "y": -0.5,
+                            "yaw": 0.25,
+                            "capturedAt": "2026-07-21T16:16:37Z",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            relocalizer = module.Relocalizer.__new__(module.Relocalizer)
+            relocalizer.args = type("Args", (), {"map_metadata": str(metadata)})()
+
+            selected = relocalizer._active_pbstream()
+
+            self.assertEqual(selected, pbstream.resolve())
+            self.assertIsNotNone(relocalizer.resume_pose_hint)
 
 
 if __name__ == "__main__":

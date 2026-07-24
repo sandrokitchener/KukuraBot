@@ -273,12 +273,66 @@ html.android-app .app-header {
   position: sticky;
   top: 0;
   z-index: 12;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
   background: var(--shell);
-  justify-content: flex-start;
 }
 
 html.android-app .app-header-actions {
   margin-left: 0;
+}
+
+html.android-app .app-header > .robot-state-panel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 8px 0 10px;
+  border-top: 1px solid var(--line);
+}
+
+html.android-app .app-header > .robot-state-panel .robot-state-head {
+  margin-bottom: 6px;
+}
+
+html.android-app .app-header > .robot-state-panel .robot-state-head h2 {
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+html.android-app .app-header > .robot-state-panel .robot-identity-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+html.android-app .app-header > .robot-state-panel .robot-identity-grid > div {
+  min-width: 0;
+  padding: 3px 8px;
+}
+
+html.android-app .app-header > .robot-state-panel .robot-state-label,
+html.android-app .app-header > .robot-state-panel strong,
+html.android-app .app-header > .robot-state-panel .meta-note {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+html.android-app .app-header > .robot-state-panel strong {
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+html.android-app .app-header > .robot-state-panel #robot-nav-status {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+html.android-app .app-header > .robot-state-panel .meta-note,
+html.android-app .app-header > .robot-state-panel #robot-nav-chain-row,
+html.android-app .app-header > .robot-state-panel #robot-nav-chain-detail {
+  display: none !important;
 }
 
 html.android-app .app-header-brand span,
@@ -356,8 +410,8 @@ html.android-app .command-zone {
   padding: 4px 2px 0;
   background: transparent;
   border-right: 0;
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, auto) auto;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -369,7 +423,7 @@ html.android-app .robot-column {
   min-width: 0;
   max-width: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, auto) minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(360px, 1fr) auto;
   gap: 10px;
   min-height: 0;
 }
@@ -477,6 +531,16 @@ html.android-app .robot-tabs {
 html.android-app .robot-tab {
   background: transparent;
   border-color: var(--line);
+  color: var(--ink-soft);
+}
+
+html.android-app .robot-tab-shell #primary-robot-tab-name,
+html.android-app .robot-name-edit-button {
+  display: none;
+}
+
+html.android-app .robot-tab-shell .android-map-tab-label {
+  display: block !important;
 }
 
 html.android-app .robot-map {
@@ -492,6 +556,26 @@ html.android-app .robot-camera-frame-wrap {
   border-radius: 6px;
 }
 
+html.android-app .robot-camera-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+html.android-app .robot-camera-actions button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+html.android-app .robot-camera-actions .runtime-chip {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 html.android-app .recon-snapshot-empty,
 html.android-app .recon-snapshot-item {
   background: #f3eee6;
@@ -504,27 +588,31 @@ html.android-app .robot-map::after {
   opacity: 1;
 }
 
-html.android-app[data-mobile-view='chat'] .speech-panel,
-html.android-app[data-mobile-view='chat'] .robot-tabs,
 html.android-app[data-mobile-view='chat'] .manual-control-panel,
-html.android-app[data-mobile-view='chat'] .robot-state-panel,
-html.android-app[data-mobile-view='chat'] .robot-map-panel,
-html.android-app[data-mobile-view='chat'] .robot-camera-panel,
-html.android-app[data-mobile-view='audio'] .chat-form,
-html.android-app[data-mobile-view='audio'] .robot-tabs,
-html.android-app[data-mobile-view='audio'] .manual-control-panel,
-html.android-app[data-mobile-view='audio'] .robot-state-panel,
-html.android-app[data-mobile-view='audio'] .robot-map-panel,
-html.android-app[data-mobile-view='audio'] .robot-camera-panel,
-html.android-app[data-mobile-view='robot'] .chat-form,
-html.android-app[data-mobile-view='robot'] .speech-panel,
-html.android-app[data-mobile-view='robot'] .output-panel {
+html.android-app[data-mobile-view='chat'] .robot-column,
+html.android-app[data-mobile-view='controls'] .intro-head,
+html.android-app[data-mobile-view='controls'] .lede,
+html.android-app[data-mobile-view='controls'] .chat-form,
+html.android-app[data-mobile-view='controls'] .execution-timeline,
+html.android-app[data-mobile-view='controls'] .output-panel,
+html.android-app[data-mobile-view='controls'] .status,
+html.android-app[data-mobile-view='controls'] .speech-panel,
+html.android-app[data-mobile-view='controls'] .robot-column,
+html.android-app[data-mobile-view='vision'] .command-zone {
   display: none;
 }
 
-html.android-app[data-mobile-view='chat'] .output-panel,
-html.android-app[data-mobile-view='audio'] .output-panel {
-  min-height: 42vh;
+html.android-app[data-mobile-view='chat'] .output-panel {
+  min-height: 38vh;
+}
+
+html.android-app[data-mobile-view='controls'] .command-zone,
+html.android-app[data-mobile-view='controls'] .manual-control-panel {
+  min-height: 0;
+}
+
+html.android-app[data-mobile-view='vision'] .robot-column {
+  display: grid;
 }
 
 @media (max-width: 980px) {
@@ -558,24 +646,11 @@ html.android-app .control-rail { display: none; }
 html.android-app .shell { width: 100vw; max-width: 100vw; height: auto; min-height: 100vh; margin: 0; padding: 14px; border: 0; border-radius: 0; }
 html.android-app .console-layout { width: 100%; max-width: 100%; height: auto; min-height: calc(100vh - 28px); grid-template-columns: minmax(0, 1fr); }
 html.android-app .robot-map { min-height: 360px; }
-html.android-app[data-mobile-view='robot'] .execution-timeline { display: none; }
-html.android-app[data-mobile-view='chat'] .execution-timeline { display: block; }
-
-html.android-app[data-mobile-view='robot'] .robot-column {
-  grid-template-rows: auto minmax(360px, 1fr) minmax(112px, auto) minmax(96px, auto);
-}
-
-html.android-app[data-mobile-view='chat'] .robot-column,
-html.android-app[data-mobile-view='audio'] .robot-column {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-html.android-app[data-mobile-view='chat'] .output-scroll,
-html.android-app[data-mobile-view='audio'] .output-scroll {
+html.android-app[data-mobile-view='chat'] .output-scroll {
   max-height: 46vh;
 }
 
-html.android-app[data-mobile-view='robot'] .robot-map-panel {
+html.android-app[data-mobile-view='vision'] .robot-map-panel {
   min-height: 360px;
 }
 

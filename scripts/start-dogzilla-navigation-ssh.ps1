@@ -66,7 +66,7 @@ $configPath = Ensure-DogzillaSshConfig `
 
 $remoteRootQuoted = ConvertTo-RemoteSingleQuote $RemoteRoot
 if (-not $NoSync) {
-  $remoteSetup = "sudo install -d -o $User -g $User $remoteRootQuoted/sidecars $remoteRootQuoted/sidecars/dogzilla_lib_bridge $remoteRootQuoted/logs $remoteRootQuoted/config"
+  $remoteSetup = "sudo install -d -o $User -g $User $remoteRootQuoted/sidecars/dogzilla_navigation $remoteRootQuoted/sidecars/dogzilla_map_pose $remoteRootQuoted/sidecars/dogzilla_imu_publisher $remoteRootQuoted/sidecars/dogzilla_lib_bridge $remoteRootQuoted/logs $remoteRootQuoted/config && sudo chown -R ${User}:$User $remoteRootQuoted/sidecars/dogzilla_navigation $remoteRootQuoted/sidecars/dogzilla_map_pose $remoteRootQuoted/sidecars/dogzilla_imu_publisher $remoteRootQuoted/sidecars/dogzilla_lib_bridge $remoteRootQuoted/config"
   Invoke-DogzillaSsh -ConfigPath $configPath -Alias $Alias -RemoteCommand $remoteSetup
   if ($LASTEXITCODE -ne 0) { throw "remote navigation setup failed" }
   $navigationSource = Join-Path $repoRoot "sidecars\dogzilla_navigation"

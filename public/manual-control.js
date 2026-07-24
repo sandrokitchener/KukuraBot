@@ -43,6 +43,7 @@ export function createManualControlController({
     lastBarkAt: 0,
     barkPending: false,
     touchMode: false,
+    touchArmed: false,
     touchPointers: new Map(),
     touchVector: createNeutralManualVector(),
   }
@@ -51,6 +52,27 @@ export function createManualControlController({
   renderForwardSpeedScale()
 
   function handleToggle() {
+    if (state.touchMode) {
+      if (state.touchArmed) {
+        state.touchArmed = false
+        disable({ sendNeutral: true })
+        setManualControlStatus('Touch control off.')
+        applyState()
+        return
+      }
+
+      if (!isRealRobotTargetActive()) {
+        setManualControlStatus('Switch to DOGZILLA Direct or ROS2 Real Robot first.', true)
+        applyState()
+        return
+      }
+
+      state.touchArmed = true
+      setManualControlStatus('Touch controller ready.')
+      applyState()
+      return
+    }
+
     if (state.enabled) {
       disable({ sendNeutral: true })
       return
@@ -108,6 +130,7 @@ export function createManualControlController({
 
   function enableTouch() {
     state.touchMode = true
+    state.touchArmed = false
     state.enabled = false
     state.touchPointers.clear()
     state.touchVector = createNeutralManualVector()
@@ -117,7 +140,7 @@ export function createManualControlController({
   }
 
   function handleTouchPointerDown(event, stick) {
-    if (!state.touchMode || !isRealRobotTargetActive() || !['left', 'right'].includes(stick)) {
+    if (!state.touchMode || !state.touchArmed || !isRealRobotTargetActive() || !['left', 'right'].includes(stick)) {
       return
     }
 
@@ -501,7 +524,9 @@ export function createManualControlController({
     if (state.touchMode) {
       elements.panel.dataset.state = state.enabled ? 'active' : realTarget ? 'ready' : 'disabled'
       elements.chip.textContent = 'Touch'
-      elements.toggleButton.hidden = true
+      elements.toggleButton.hidden = false
+      elements.toggleButton.textContent = state.touchArmed ? 'Disable touch control' : 'Enable touch control'
+      elements.toggleButton.disabled = !realTarget || state.pending
       elements.padName.textContent = 'Android touch'
       elements.neutralButton.disabled = !realTarget || state.pending
       if (elements.speedSlider) {
@@ -509,14 +534,16 @@ export function createManualControlController({
       }
       if (elements.touchControls) {
         elements.touchControls.hidden = false
-        elements.touchControls.setAttribute?.('aria-disabled', String(!realTarget))
+        elements.touchControls.setAttribute?.('aria-disabled', String(!realTarget || !state.touchArmed))
       }
       for (const stick of [elements.touchLeftStick, elements.touchRightStick]) {
-        stick?.setAttribute?.('aria-disabled', String(!realTarget))
+        stick?.setAttribute?.('aria-disabled', String(!realTarget || !state.touchArmed))
       }
       if (!realTarget) {
         elements.status.textContent = 'Real robot target required.'
-      } else if (!state.enabled && !state.pending && ['Gamepad idle.', 'Manual control off.', 'Real robot target required.'].includes(elements.status.textContent)) {
+      } else if (!state.touchArmed) {
+        elements.status.textContent = 'Touch control off.'
+      } else if (!state.enabled && !state.pending && ['Gamepad idle.', 'Manual control off.', 'Touch control off.', 'Real robot target required.'].includes(elements.status.textContent)) {
         elements.status.textContent = 'Touch controller ready.'
       }
       return

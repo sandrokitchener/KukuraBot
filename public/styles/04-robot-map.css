@@ -291,6 +291,12 @@
   margin-top: 6px;
 }
 
+.map-workflow-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .map-workflow-step > .map-workflow-actions {
   grid-column: 2 / -1;
 }

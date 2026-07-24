@@ -71,6 +71,7 @@ sys.path.insert(0, sys.argv[8])
 from nav2_readiness_logic import (
     PERMITTED_CMD_VEL_PUBLISHERS,
     PERMITTED_CMD_VEL_RAW_PUBLISHERS,
+    PERMITTED_MAPPING_CMD_VEL_CONSUMERS,
     REQUIRED_CMD_VEL_CONSUMERS,
     REQUIRED_CMD_VEL_NAV_CONSUMERS,
     REQUIRED_CMD_VEL_NAV_PUBLISHERS,
@@ -79,6 +80,7 @@ from nav2_readiness_logic import (
     ReadinessHysteresis,
     node_identities_exactly,
     node_names_present,
+    single_anonymous_endpoint_matches_live_node,
 )
 
 scan_topic = sys.argv[1]
@@ -239,9 +241,16 @@ def update_lifecycle_states(now):
 
 
 def has_gait_consumer():
-    return node_identities_exactly(
-        node.get_subscriptions_info_by_topic("/cmd_vel"),
-        REQUIRED_CMD_VEL_CONSUMERS,
+    endpoints = node.get_subscriptions_info_by_topic("/cmd_vel")
+    exact_consumers = (REQUIRED_CMD_VEL_CONSUMERS,)
+    if mapping_mode:
+        exact_consumers += (PERMITTED_MAPPING_CMD_VEL_CONSUMERS,)
+    return any(node_identities_exactly(endpoints, consumers) for consumers in exact_consumers) or (
+        single_anonymous_endpoint_matches_live_node(
+            endpoints,
+            node.get_node_names_and_namespaces(),
+            next(iter(REQUIRED_CMD_VEL_CONSUMERS)),
+        )
     )
 
 
@@ -277,11 +286,44 @@ def velocity_input_chain_is_ready():
 
 
 def publish_readiness():
-    payload = {"schemaVersion": 1, "checkedAt": time.time(), "ownerMode": expected_owner_mode,
-               "actionServerAvailable": bool(action_ready),
-               "stackActive": bool(lifecycle_ready), "odomFresh": bool(odom_ready),
-               "tfFresh": bool(tf_ready), "scanFresh": bool(scan_ready),
-               "waypointReady": bool(full_ready and expected_owner_mode == "normal")}
+    blockers = []
+    gates = (
+        ("action_server", action_ready),
+        ("odom", odom_ready),
+        ("scan", scan_ready),
+        ("tf", tf_ready),
+        ("scan_subscribers", scan_subscribers_ready),
+        ("velocity_input", velocity_input_chain_ready),
+        ("gait_adapter", gait_adapter_ready),
+        ("gait_consumer", gait_consumer_ready),
+        ("bridge", bridge_ready),
+        ("lifecycle", lifecycle_ready),
+        ("lifecycle_services", lifecycle_services_ready),
+    )
+    blockers.extend(name for name, ready in gates if not ready)
+    payload = {
+        "schemaVersion": 2,
+        "checkedAt": time.time(),
+        "ownerMode": expected_owner_mode,
+        "readinessState": readiness_state,
+        "blockers": blockers,
+        "actionServerAvailable": bool(action_ready),
+        "stackActive": bool(lifecycle_ready),
+        "lifecycleServicesReady": bool(lifecycle_services_ready),
+        "missingLifecycleNodes": [name for name, active in lifecycle_states.items() if not active],
+        "missingLifecycleServices": [name for name, ready in lifecycle_service_ready.items() if not ready],
+        "odomFresh": bool(odom_ready),
+        "odomTfFresh": bool(odom_tf_ready),
+        "localizationTfFresh": bool(localization_tf_ready),
+        "tfFresh": bool(tf_ready),
+        "scanFresh": bool(scan_ready),
+        "scanSubscribersReady": bool(scan_subscribers_ready),
+        "velocityInputReady": bool(velocity_input_chain_ready),
+        "gaitAdapterReady": bool(gait_adapter_ready),
+        "gaitConsumerReady": bool(gait_consumer_ready),
+        "bridgeReady": bool(bridge_ready),
+        "waypointReady": bool(full_ready and expected_owner_mode == "normal"),
+    }
     os.makedirs(os.path.dirname(readiness_file) or ".", exist_ok=True)
     temporary = f"{readiness_file}.tmp.{os.getpid()}"
     with open(temporary, "w", encoding="utf-8") as handle:

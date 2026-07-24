@@ -321,9 +321,13 @@ if [ "$mode" = "continue_mapping" ]; then
   recovery_args=(
     python3 "$REMOTE_ROOT/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py"
     --remote-root "$REMOTE_ROOT"
+    --map-metadata "$DOGZILLA_MAP_METADATA"
     --normal-config "robodoge_dogzilla_laser_only${IMU_CONFIG}_localization.lua"
     --handoff-config "robodoge_dogzilla_laser_only${IMU_CONFIG}.lua"
   )
+  if [ "${DOGZILLA_ALLOW_POSE_HINT_JUMP:-0}" = "1" ]; then
+    recovery_args+=(--allow-pose-hint-jump)
+  fi
   if [ "${DOGZILLA_NAV2_PROVEN_INACTIVE:-0}" = "1" ]; then
     recovery_args+=(--no-pause-nav2)
   fi
@@ -338,7 +342,11 @@ elif [ "$mode" = "localization" ] && [ "$DOGZILLA_MAP_POSE_SKIP_RELOCALIZATION" 
   recovery_args=(
     python3 "$REMOTE_ROOT/sidecars/dogzilla_map_pose/relocalize_on_frozen_map.py"
     --remote-root "$REMOTE_ROOT"
+    --map-metadata "$DOGZILLA_MAP_METADATA"
   )
+  if [ "${DOGZILLA_ALLOW_POSE_HINT_JUMP:-0}" = "1" ]; then
+    recovery_args+=(--allow-pose-hint-jump)
+  fi
   recovery_args+=(--no-pause-nav2)
   if "${recovery_args[@]}"; then
     echo "Cartographer global relocalization proved against the frozen map." >&2

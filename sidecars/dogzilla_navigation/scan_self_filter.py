@@ -16,6 +16,22 @@ def angle_in_window(angle: float, start: float, end: float) -> bool:
     return angle >= start or angle <= end
 
 
+def should_mask_return(
+    value: float,
+    angle: float,
+    *,
+    self_radius: float,
+    mask_start: float,
+    mask_end: float,
+    mask_range: float,
+) -> bool:
+    if not math.isfinite(value) or value <= 0.0:
+        return False
+    return value < self_radius or (
+        value < mask_range and angle_in_window(angle, mask_start, mask_end)
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mask DOGZILLA self-hit LaserScan returns before Nav2 costmaps.")
     parser.add_argument("--input-topic", default="/scan")
@@ -23,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mask-start-deg", type=float, required=True)
     parser.add_argument("--mask-end-deg", type=float, required=True)
     parser.add_argument("--mask-range-m", type=float, required=True)
+    parser.add_argument("--self-radius-m", type=float, default=0.0)
     args = parser.parse_args(argv)
 
     import rclpy
@@ -36,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
             self.mask_start = math.radians(args.mask_start_deg)
             self.mask_end = math.radians(args.mask_end_deg)
             self.mask_range = max(float(args.mask_range_m), 0.0)
+            self.self_radius = max(float(args.self_radius_m), 0.0)
             self.publisher = self.create_publisher(LaserScan, args.output_topic, qos_profile_sensor_data)
             self.subscription = self.create_subscription(
                 LaserScan,
@@ -45,7 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             self.get_logger().info(
                 f"publishing {args.output_topic} from {args.input_topic}; "
-                f"mask {args.mask_start_deg:.1f}-{args.mask_end_deg:.1f} deg under {self.mask_range:.2f} m"
+                f"mask body radius {self.self_radius:.2f} m plus "
+                f"{args.mask_start_deg:.1f}-{args.mask_end_deg:.1f} deg under {self.mask_range:.2f} m"
             )
 
         def filter_scan(self, message: LaserScan) -> None:
@@ -61,10 +80,15 @@ def main(argv: list[str] | None = None) -> int:
             filtered.intensities = message.intensities
             ranges = list(message.ranges)
             for index, value in enumerate(ranges):
-                if not math.isfinite(value) or value <= 0.0 or value >= self.mask_range:
-                    continue
                 angle = message.angle_min + float(index) * message.angle_increment
-                if angle_in_window(angle, self.mask_start, self.mask_end):
+                if should_mask_return(
+                    value,
+                    angle,
+                    self_radius=self.self_radius,
+                    mask_start=self.mask_start,
+                    mask_end=self.mask_end,
+                    mask_range=self.mask_range,
+                ):
                     ranges[index] = math.inf
             filtered.ranges = ranges
             self.publisher.publish(filtered)

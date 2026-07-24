@@ -6,17 +6,20 @@ from copy import deepcopy
 from typing import Any
 
 
-# --- Dynamic speed config ---
-# Start from env defaults, updatable at runtime via update_speed_config().
+# --- Speed config ---
+
+APPROVED_LINEAR_FULL_SCALE = 0.26
+DOGZILLA_VENDOR_MIN_TURN_RATE = 30.0
 
 _SPEED_CONFIG: dict[str, Any] = {
-    "linearFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE", "0.26")),
+    "linearFullScale": APPROVED_LINEAR_FULL_SCALE,
     "lateralFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_LATERAL_FULL_SCALE", "0.20")),
     "angularFullScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_FULL_SCALE", "1.0")),
     "maxXStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_X_STEP", "8")),
     "maxYStep": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_Y_STEP", "0")),
     "maxTurnRate": float(os.environ.get("DOGZILLA_NAV2_GAIT_MAX_TURN_RATE", "24")),
     "forwardTurnScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_FORWARD_TURN_SCALE", "0.25")),
+    "inPlaceTurnScale": float(os.environ.get("DOGZILLA_NAV2_GAIT_IN_PLACE_TURN_SCALE", "0.5")),
     "linearDeadband": float(os.environ.get("DOGZILLA_NAV2_GAIT_LINEAR_DEADBAND", "0.025")),
     "angularDeadband": float(os.environ.get("DOGZILLA_NAV2_GAIT_ANGULAR_DEADBAND", "0.12")),
     "trotLinear": float(os.environ.get("DOGZILLA_NAV2_GAIT_TROT_LINEAR", "0.11")),
@@ -36,8 +39,8 @@ def get_speed_config() -> dict[str, Any]:
 def update_speed_config(overrides: dict[str, Any]) -> dict[str, Any]:
     """Apply overrides to the dynamic speed config. Returns the updated config."""
     allowed = {
-        "linearFullScale", "lateralFullScale", "angularFullScale",
-        "maxXStep", "maxTurnRate", "forwardTurnScale",
+        "lateralFullScale", "angularFullScale",
+        "maxXStep", "maxTurnRate", "forwardTurnScale", "inPlaceTurnScale",
         "linearDeadband", "angularDeadband",
         "trotLinear", "highLinear",
     }
@@ -86,8 +89,11 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
     x_step = scale_symmetric(linear_x, cfg["linearFullScale"], max_x_step)
     y_step = 0.0
     translating = abs(x_step) > 0 or abs(y_step) > 0
-    turn_scale = cfg["forwardTurnScale"] if translating and abs(x_step) > 0 else 1.0
-    turn_rate = scale_symmetric(angular_z, cfg["angularFullScale"], cfg["maxTurnRate"] * turn_scale)
+    in_place_turn = not translating and abs(angular_z) > 0
+    turn_scale = cfg["inPlaceTurnScale"] if in_place_turn else cfg["forwardTurnScale"]
+    turn_rate = scale_symmetric(
+        angular_z, cfg["angularFullScale"], cfg["maxTurnRate"] * turn_scale
+    )
 
     gait = "walk"
     pace = "slow"
@@ -114,7 +120,9 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
             "maxXStep": max_x_step,
             "maxTurnRate": cfg["maxTurnRate"],
             "forwardTurnScale": cfg["forwardTurnScale"],
+            "inPlaceTurnScale": cfg["inPlaceTurnScale"],
             "allowTrot": False,
+            "inPlaceTurnLimited": in_place_turn,
         },
     }
 
@@ -142,6 +150,44 @@ def scale_symmetric(value: float, full_scale: float, output_max: float) -> float
     if full_scale <= 0 or output_max <= 0:
         return 0.0
     return clamp((value / full_scale) * output_max, -output_max, output_max)
+
+
+def pulse_vendor_turn_rate(
+    requested_turn_rate: float,
+    accumulator: float,
+    previous_sign: int,
+    *,
+    minimum_turn_rate: float = DOGZILLA_VENDOR_MIN_TURN_RATE,
+) -> tuple[float, float, int]:
+    """Duty-cycle sub-minimum turns that DOGZILLALib would otherwise amplify.
+
+    DOGZILLALib.turn() coerces every nonzero magnitude below 30 to 30. Sending
+    the requested small value continuously therefore produces a hard turn.
+    Pulsing the real minimum among zero-turn updates preserves the requested
+    average without changing direction or bypassing collision monitoring.
+    """
+
+    requested = first_finite_number(requested_turn_rate, 0.0)
+    minimum = max(first_finite_number(minimum_turn_rate, 0.0), 0.0)
+    if requested == 0.0 or minimum == 0.0:
+        return 0.0, 0.0, 0
+
+    sign = 1 if requested > 0.0 else -1
+    magnitude = abs(requested)
+    if magnitude >= minimum:
+        return requested, 0.0, sign
+
+    duty = magnitude / minimum
+    phase = max(first_finite_number(accumulator, 0.0), 0.0)
+    if previous_sign == 0:
+        phase = 1.0 - duty
+    elif sign != previous_sign:
+        phase = 0.0
+    phase += duty
+
+    if phase >= 1.0:
+        return sign * minimum, phase - 1.0, sign
+    return 0.0, phase, sign
 
 
 def round_float(value: float, *, digits: int = 3) -> float:

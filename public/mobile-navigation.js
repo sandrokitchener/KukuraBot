@@ -1,4 +1,4 @@
-export const MOBILE_VIEWS = Object.freeze(['robot', 'chat', 'audio'])
+export const MOBILE_VIEWS = Object.freeze(['controls', 'chat', 'vision'])
 export const MOBILE_DEFAULT_VIEW = 'chat'
 
 const MOBILE_SWIPE_INTENT_PX = 14
@@ -25,7 +25,10 @@ function bindManualTouchStick(element, stick, manualControl) {
 }
 
 function isSwipeBlockedTarget(target) {
-  return !!target?.closest?.('textarea, input, select, button, a, [contenteditable="true"], .settings-drawer, .connection-drawer, .recon-gallery-drawer')
+  // The command field is the primary Android surface, so a horizontal
+  // gesture may legitimately begin there. Keep only controls where a swipe
+  // would interfere with editing, tapping, or an open drawer.
+  return !!target?.closest?.('input, select, button, a, [contenteditable="true"], .manual-touch-stick, .settings-drawer, .connection-drawer, .recon-gallery-drawer')
 }
 
 function findTouchById(touchList, id) {
@@ -46,6 +49,8 @@ export function createMobileNavigationController({
   manualControl,
   manualTouchLeftStick,
   manualTouchRightStick,
+  appHeader,
+  robotStatePanel,
 }) {
   let mobileView = MOBILE_DEFAULT_VIEW
   let mobileTouch = null
@@ -150,6 +155,7 @@ export function createMobileNavigationController({
     }
 
     documentRef.documentElement.classList.add('android-app')
+    if (appHeader && robotStatePanel) appHeader.append(robotStatePanel)
     manualControl.enableTouch()
     bindManualTouchStick(manualTouchLeftStick, 'left', manualControl)
     bindManualTouchStick(manualTouchRightStick, 'right', manualControl)

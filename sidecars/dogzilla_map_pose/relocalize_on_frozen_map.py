@@ -98,6 +98,26 @@ def resume_pose_hint(metadata: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def require_pose_near_hint(
+    recovered_pose: dict[str, Any],
+    hint: dict[str, Any] | None,
+    *,
+    position_tolerance_m: float,
+    allow_jump: bool = False,
+) -> None:
+    if allow_jump or hint is None:
+        return
+    position_error = math.hypot(
+        float(recovered_pose["position"]["x"]) - float(hint["position"]["x"]),
+        float(recovered_pose["position"]["y"]) - float(hint["position"]["y"]),
+    )
+    if position_error > position_tolerance_m:
+        raise RecoveryError(
+            "Recovered pose disagrees with the saved map pose hint "
+            f"(position error {position_error:.2f} m)."
+        )
+
+
 def service_name(namespace: str, leaf: str) -> str:
     return f"{namespace.rstrip('/')}/{leaf}" if namespace else f"/{leaf}"
 
@@ -352,6 +372,12 @@ class Relocalizer:
                 required_samples=1,
                 require_fresh=False,
             )
+            require_pose_near_hint(
+                recovered_pose,
+                self.resume_pose_hint,
+                position_tolerance_m=self.args.hint_position_tolerance_m,
+                allow_jump=self.args.allow_pose_hint_jump,
+            )
             self.status.update(
                 recoveredPose=recovered_pose,
                 acceptedCrossTrajectoryConstraintCount=len(constraints),
@@ -499,7 +525,10 @@ class Relocalizer:
         self.status.update(previousCartographerProcessIds=sorted(self.original_pids))
 
     def _active_pbstream(self) -> Path:
-        metadata_path = self.maps_dir / "robodoge_home_map.json"
+        metadata_path = Path(self.args.map_metadata)
+        if not metadata_path.is_absolute():
+            metadata_path = self.maps_dir / metadata_path
+        metadata_path = metadata_path.resolve()
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -944,6 +973,7 @@ def parse_args() -> argparse.Namespace:
         description="Relocalize DOGZILLA globally against the active frozen PBSTREAM."
     )
     parser.add_argument("--remote-root", default=os.environ.get("REMOTE_ROOT", "/home/pi/robodoge"))
+    parser.add_argument("--map-metadata", default="robodoge_home_map.json")
     parser.add_argument("--normal-config", default="")
     parser.add_argument("--handoff-config", default="")
     parser.add_argument("--recovery-config", default="")
@@ -952,24 +982,26 @@ def parse_args() -> argparse.Namespace:
         default="/opt/ros/humble/lib/cartographer_ros/cartographer_node",
     )
     parser.add_argument("--no-pause-nav2", action="store_true")
+    parser.add_argument("--allow-pose-hint-jump", action="store_true")
     parser.add_argument("--match-timeout-sec", type=float, default=60.0)
     parser.add_argument("--service-timeout-sec", type=float, default=30.0)
     parser.add_argument("--finish-timeout-sec", type=float, default=90.0)
     parser.add_argument("--stable-timeout-sec", type=float, default=15.0)
     parser.add_argument("--process-stop-timeout-sec", type=float, default=5.0)
-    parser.add_argument("--min-score-percent", type=float, default=45.0)
-    parser.add_argument("--min-cross-nodes", type=int, default=2)
+    parser.add_argument("--min-score-percent", type=float, default=55.0)
+    parser.add_argument("--min-cross-nodes", type=int, default=3)
     parser.add_argument("--stable-samples", type=int, default=5)
     parser.add_argument("--stable-position-tolerance-m", type=float, default=0.10)
     parser.add_argument("--stable-yaw-tolerance-rad", type=float, default=0.10)
     parser.add_argument("--handoff-position-tolerance-m", type=float, default=0.25)
     parser.add_argument("--handoff-yaw-tolerance-rad", type=float, default=0.25)
+    parser.add_argument("--hint-position-tolerance-m", type=float, default=2.0)
     parser.add_argument("--transform-max-age-sec", type=float, default=2.0)
     args = parser.parse_args()
-    if args.min_score_percent < 45.0:
-        parser.error("--min-score-percent cannot be lower than 45")
-    if args.min_cross_nodes < 2:
-        parser.error("--min-cross-nodes cannot be lower than 2")
+    if args.min_score_percent < 55.0:
+        parser.error("--min-score-percent cannot be lower than 55")
+    if args.min_cross_nodes < 3:
+        parser.error("--min-cross-nodes cannot be lower than 3")
     if args.stable_samples < 3:
         parser.error("--stable-samples cannot be lower than 3")
     for name in (
@@ -979,6 +1011,7 @@ def parse_args() -> argparse.Namespace:
         "stable_timeout_sec",
         "process_stop_timeout_sec",
         "transform_max_age_sec",
+        "hint_position_tolerance_m",
     ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")

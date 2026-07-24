@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -10,6 +11,7 @@ import time
 from types import SimpleNamespace
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -447,16 +449,16 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         runtime._lock.release()
 
     def test_battery_motion_recovers_only_at_hysteresis_threshold(self):
-        runtime = battery_safety_runtime(9)
+        runtime = battery_safety_runtime(int(dogzilla_lib_bridge.DEFAULT_BATTERY_CUTOFF_PCT - 1))
         runtime.execute({"kind": "locomotion.relative", "params": {"x_step": 8}})
 
-        runtime.robot.battery = 12
+        runtime.robot.battery = int(dogzilla_lib_bridge.DEFAULT_BATTERY_RECOVERY_PCT - 1)
         runtime.battery_last_read_monotonic = 0
         recovering = runtime.execute({"kind": "locomotion.relative", "params": {"x_step": 8}})
         self.assertFalse(recovering["executed"])
         self.assertEqual(recovering["batterySafety"]["status"], "recovering")
 
-        runtime.robot.battery = 15
+        runtime.robot.battery = int(dogzilla_lib_bridge.DEFAULT_BATTERY_RECOVERY_PCT)
         runtime.battery_last_read_monotonic = 0
         recovered = runtime.execute({"kind": "locomotion.relative", "params": {"x_step": 8}})
         self.assertTrue(recovered["executed"])
@@ -1047,6 +1049,35 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(refresh_calls, [True])
         self.assertTrue(recovered["canSendGoal"])
         self.assertTrue(recovered["waypointReady"])
+
+    def test_nav2_client_accepts_schema_two_persistent_readiness(self):
+        client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
+        nav2_client_module = sys.modules[dogzilla_lib_bridge.Nav2NavigateClient.__module__]
+        original_path = nav2_client_module.DEFAULT_NAV2_READINESS_FILE
+        with tempfile.TemporaryDirectory() as directory:
+            readiness_path = Path(directory) / "navigation-readiness.json"
+            readiness_path.write_text(json.dumps({
+                "schemaVersion": 2,
+                "checkedAt": time.time(),
+                "ownerMode": "normal",
+                "readinessState": "ready",
+                "blockers": [],
+                "actionServerAvailable": True,
+                "stackActive": True,
+                "odomFresh": True,
+                "tfFresh": True,
+                "scanFresh": True,
+                "waypointReady": True,
+            }), encoding="utf-8")
+            nav2_client_module.DEFAULT_NAV2_READINESS_FILE = str(readiness_path)
+            try:
+                readiness = client._read_persistent_readiness()
+            finally:
+                nav2_client_module.DEFAULT_NAV2_READINESS_FILE = original_path
+
+        self.assertIsNotNone(readiness)
+        self.assertEqual(readiness["schemaVersion"], 2)
+        self.assertTrue(readiness["waypointReady"])
 
     def test_nav2_client_keeps_ordinary_healthy_poll_cached(self):
         client = dogzilla_lib_bridge.Nav2NavigateClient.__new__(dogzilla_lib_bridge.Nav2NavigateClient)
@@ -1725,7 +1756,8 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             "angular": {"z": 0.2},
         })
 
-        self.assertGreater(params["x_step"], 0)
+        self.assertEqual(params["x_step"], 4.0)
+        self.assertEqual(params["mapping"]["linearFullScale"], 0.26)
         self.assertEqual(params["mapping"]["maxXStep"], 8.0)
         self.assertEqual(params["y_step"], 0.0)
         self.assertEqual(params["gait"], "walk")
@@ -1734,6 +1766,46 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertLess(params["turn_rate"], 5)
         self.assertFalse(params["mapping"]["allowTrot"])
         self.assertEqual(params["source"], "nav2_cmd_vel")
+
+        recovery = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
+            "linear": {"x": -0.13, "y": 0.0},
+            "angular": {"z": 0.0},
+        })
+        self.assertEqual(recovery["x_step"], -4.0)
+        self.assertEqual(recovery["y_step"], 0.0)
+        self.assertEqual(recovery["gait"], "walk")
+        self.assertEqual(recovery["pace"], "slow")
+
+    def test_nav2_approved_wood_floor_scale_ignores_stale_override(self):
+        globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
+        update_speed_config = globals_["update_speed_config"]
+
+        config = update_speed_config({"linearFullScale": 0.15})
+        params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
+            "linear": {"x": 0.13, "y": 0.0},
+            "angular": {"z": 0.0},
+        })
+
+        self.assertEqual(config["linearFullScale"], 0.26)
+        self.assertEqual(params["x_step"], 4.0)
+
+        env_name = "DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE"
+        previous = os.environ.get(env_name)
+        try:
+            os.environ[env_name] = "0.15"
+            spec = importlib.util.spec_from_file_location(
+                "nav2_gait_adapter_stale_env",
+                BRIDGE_DIR / "nav2_gait_adapter.py",
+            )
+            isolated = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(isolated)
+        finally:
+            if previous is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = previous
+
+        self.assertEqual(isolated.get_speed_config()["linearFullScale"], 0.26)
 
     def test_nav2_cmd_vel_to_locomotion_blocks_lateral_motion_by_default(self):
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
@@ -1778,7 +1850,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(params["pace"], "slow")
         self.assertFalse(params["mapping"]["allowTrot"])
 
-    def test_nav2_cmd_vel_to_locomotion_allows_in_place_turn_when_nav2_requests_it(self):
+    def test_nav2_cmd_vel_to_locomotion_limits_in_place_turn_when_nav2_requests_it(self):
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
             "linear": {"x": 0.0, "y": 0.0},
             "angular": {"z": -1.0},
@@ -1786,9 +1858,33 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
         self.assertEqual(params["x_step"], 0.0)
         self.assertEqual(params["y_step"], 0.0)
-        self.assertLess(params["turn_rate"], 0)
-        self.assertEqual(abs(params["turn_rate"]), dogzilla_lib_bridge.DEFAULT_NAV2_GAIT_MAX_TURN_RATE)
+        self.assertEqual(params["turn_rate"], -12.0)
+        self.assertTrue(params["mapping"]["inPlaceTurnLimited"])
         self.assertEqual(params["gait"], "walk")
+
+    def test_vendor_minimum_turn_is_duty_cycled_instead_of_amplified(self):
+        pulse = dogzilla_lib_bridge.pulse_vendor_turn_rate
+        phase = 0.0
+        sign = 0
+        outputs = []
+
+        for _ in range(10):
+            output, phase, sign = pulse(6.0, phase, sign)
+            outputs.append(output)
+
+        self.assertEqual(
+            outputs,
+            [30.0, 0.0, 0.0, 0.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0],
+        )
+
+    def test_vendor_turn_pulse_damps_direction_reversal(self):
+        pulse = dogzilla_lib_bridge.pulse_vendor_turn_rate
+        output, phase, sign = pulse(6.0, 0.0, 0)
+        self.assertEqual(output, 30.0)
+
+        output, phase, sign = pulse(-6.0, phase, sign)
+        self.assertEqual(output, 0.0)
+        self.assertEqual(sign, -1)
 
     def test_nav2_gait_adapter_command_does_not_cancel_active_navigation(self):
         runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
@@ -1809,6 +1905,38 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(result["kind"], "nav2.cmd_vel.gait_adapter")
         self.assertFalse(runtime.navigation_cancel.is_set())
         self.assertEqual(runtime.robot.calls[:2], [("pace", "slow"), ("gait_type", "walk")])
+        self.assertEqual(runtime.robot.calls[-3][0], "move")
+        self.assertEqual(runtime.robot.calls[-3][1], "x")
+        self.assertGreater(runtime.robot.calls[-3][2], 0)
+        self.assertEqual(runtime.nav2_gait_adapter_count, 1)
+        self.assertEqual(runtime.nav2_gait_nonzero_command_count, 1)
+
+    def test_autonomous_mapping_forward_motion_uses_trot(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(
+            dogzilla_lib_bridge.DogzillaRuntime
+        )
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+
+        with patch.object(
+            dogzilla_lib_bridge,
+            "get_autonomous_mapping_status",
+            return_value={"active": True},
+        ):
+            result = runtime.execute_nav2_cmd_vel({
+                "receivedAt": time.time(),
+                "linear": {"x": 0.13, "y": 0.0},
+                "angular": {"z": 0.0},
+            })
+
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["params"]["gait"], "trot")
+        self.assertEqual(result["params"]["pace"], "normal")
+        self.assertIn(("gait_type", "trot"), runtime.robot.calls)
+        self.assertEqual(runtime.robot.calls[:2], [("pace", "normal"), ("gait_type", "trot")])
         self.assertEqual(runtime.robot.calls[-3][0], "move")
         self.assertEqual(runtime.robot.calls[-3][1], "x")
         self.assertGreater(runtime.robot.calls[-3][2], 0)
@@ -2382,6 +2510,52 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(motion["blockedReason"], "command_preempt")
         self.assertEqual(runtime.robot.calls, [("perform", 0), ("stop",)])
 
+    def test_active_mapping_goal_clears_only_the_command_preempt_latch(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+        runtime.nav2_cmd_vel_blocked = True
+        runtime.nav2_cmd_vel_blocked_reason = "command_preempt"
+        runtime._battery_motion_rejection = lambda *_args, **_kwargs: None
+        original_mapping_status = dogzilla_lib_bridge.get_autonomous_mapping_status
+        dogzilla_lib_bridge.get_autonomous_mapping_status = lambda: {"active": True}
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "get_autonomous_mapping_status", original_mapping_status))
+
+        motion = runtime.execute_nav2_cmd_vel({
+            "receivedAt": time.time(),
+            "linear": {"x": 0.13, "y": 0.0},
+            "angular": {"z": 0.0},
+        })
+
+        self.assertTrue(motion["executed"])
+        self.assertIsNone(runtime._nav2_cmd_vel_block_reason())
+
+    def test_active_mapping_does_not_clear_emergency_stop(self):
+        runtime = dogzilla_lib_bridge.DogzillaRuntime.__new__(dogzilla_lib_bridge.DogzillaRuntime)
+        runtime.import_error = None
+        runtime.robot_error = None
+        runtime.robot = FakeActionRobot()
+        runtime.dry_run = False
+        runtime._lock = threading.Lock()
+        runtime.nav2_cmd_vel_blocked = True
+        runtime.nav2_cmd_vel_blocked_reason = "emergency_stop"
+        runtime._battery_motion_rejection = lambda *_args, **_kwargs: None
+        original_mapping_status = dogzilla_lib_bridge.get_autonomous_mapping_status
+        dogzilla_lib_bridge.get_autonomous_mapping_status = lambda: {"active": True}
+        self.addCleanup(lambda: setattr(dogzilla_lib_bridge, "get_autonomous_mapping_status", original_mapping_status))
+
+        motion = runtime.execute_nav2_cmd_vel({
+            "receivedAt": time.time(),
+            "linear": {"x": 0.13, "y": 0.0},
+            "angular": {"z": 0.0},
+        })
+
+        self.assertFalse(motion["executed"])
+        self.assertEqual(motion["blockedReason"], "emergency_stop")
+
     def test_command_preempt_blocks_cmd_vel_while_nav2_cancel_is_in_flight(self):
         cancel_started = threading.Event()
         release_cancel = threading.Event()
@@ -2527,9 +2701,20 @@ class DogzillaLibBridgeTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
+            candidate_dir = maps_dir / "candidates" / "candidate-existing"
+            candidate_dir.mkdir(parents=True)
+            candidate_metadata = candidate_dir / "candidate.json"
+            candidate_metadata.write_text("{}", encoding="utf-8")
+            os.utime(maps_dir / "robodoge_home_map.json", (100, 100))
+            os.utime(candidate_metadata, (200, 200))
+            (maps_dir / "autonomous-mapping-result.json").write_text(
+                json.dumps({"state": "failed", "detail": "candidate=false no_verified_motion"}),
+                encoding="utf-8",
+            )
 
             status = dogzilla_lib_bridge.get_autonomous_mapping_status(maps_dir, proc_root)
             self.assertFalse(status["active"])
+            self.assertTrue(status["candidateAvailable"])
             (maps_dir / "autonomous-mapping.ready").touch()
             status = dogzilla_lib_bridge.get_autonomous_mapping_status(maps_dir, proc_root)
 

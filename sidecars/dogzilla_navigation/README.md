@@ -39,7 +39,7 @@ cmd_vel_gait_adapter.py -> DOGZILLALib bridge /nav2/cmd_vel
 DOGZILLALib -> pace/gait_type/move/turn
 ```
 
-This keeps the planner intact while translating smooth wheeled-robot velocity commands into DOGZILLA-native gait commands. The default is stability-first: Nav2 forward velocity stays in `walk`/`slow` with conservative `move("x", ...)` and damped turning. In-place turns still pass through when Nav2 commands rotation without forward motion. Trot can be enabled only as an explicit tuning choice.
+This keeps the planner intact while translating smooth wheeled-robot velocity commands into DOGZILLA-native gait commands. The default is stability-first: Nav2 stays in `walk`/`slow` with conservative forward motion and damped turning. Controller-requested in-place turns are limited to half the normal turn ceiling so the robot can face a new path; the recovery tree still contains no `Spin`. During frontier exploration, 20 seconds without meaningful approach cancels only that goal and moves on. Trot can be enabled only as an explicit tuning choice.
 
 Disable the adapter and return to Yahboom's raw `/cmd_vel` base subscriber with:
 
@@ -51,13 +51,14 @@ Useful adapter knobs:
 
 - `DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ` - max HTTP command rate from ROS to DOGZILLALib.
 - `DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC` - send a zero command after `/cmd_vel` goes quiet.
-- `DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE` - Nav2 linear x velocity that maps to max DOGZILLA x step.
+- Nav2 linear x full scale is fixed at the operator-approved `0.26`; stale `DOGZILLA_NAV2_GAIT_LINEAR_FULL_SCALE` values are ignored.
 - `DOGZILLA_NAV2_GAIT_ANGULAR_FULL_SCALE` - Nav2 angular z velocity that maps to max DOGZILLA turn rate.
 - `DOGZILLA_NAV2_GAIT_FORWARD_TURN_SCALE` - turn-rate reduction while also walking forward.
 - `DOGZILLA_NAV2_GAIT_MAX_X_STEP` - max DOGZILLA forward step from Nav2. Default `8`.
 - `DOGZILLA_NAV2_GAIT_MAX_Y_STEP` - max DOGZILLA lateral step from Nav2. Default `3`.
 - `DOGZILLA_NAV2_GAIT_MAX_TURN_RATE` - max DOGZILLA turn rate from Nav2. Default `24`.
-- `DOGZILLA_NAV2_GAIT_ALLOW_TROT=1` - allow Nav2 to request `trot`; default is walk-only for stability.
+- Autonomous mapping uses Yahboom's standard `trot` gait at Nav2's existing
+  `0.26 m/s` ceiling. Normal waypoint navigation remains walk-only.
 
 ## Final heading
 

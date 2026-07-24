@@ -2831,7 +2831,7 @@ finally:
             checked = float(payload.get("checkedAt"))
             if time.time() - checked > DEFAULT_NAV2_READINESS_MAX_AGE_SEC:
                 return None
-            if payload.get("schemaVersion") != 1 or payload.get("ownerMode") != "normal":
+            if payload.get("schemaVersion") not in (1, 2) or payload.get("ownerMode") != "normal":
                 return None
             fields = ("actionServerAvailable", "stackActive", "odomFresh", "tfFresh", "scanFresh", "waypointReady")
             if not all(isinstance(payload.get(field), bool) for field in fields):

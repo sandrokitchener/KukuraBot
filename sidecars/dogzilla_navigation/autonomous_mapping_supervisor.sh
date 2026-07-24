@@ -11,6 +11,12 @@ RESULT_FILE="$REMOTE_ROOT/maps/autonomous-mapping-result.json"
 READY_FILE="$REMOTE_ROOT/maps/autonomous-mapping.ready"
 ACTIVE_FILE="$REMOTE_ROOT/maps/autonomous-mapping.active"
 EXPLORER="$REMOTE_ROOT/sidecars/dogzilla_navigation/frontier_explorer.py"
+MAPPING_NAV2_READY_TIMEOUT_SEC="${DOGZILLA_MAPPING_NAV2_READY_TIMEOUT_SEC:-120}"
+MAPPING_ROTATION_TIMEOUT_SEC="${DOGZILLA_MAPPING_ROTATION_TIMEOUT_SEC:-8}"
+MAPPING_CANCEL_TIMEOUT_SEC="${DOGZILLA_MAPPING_CANCEL_TIMEOUT_SEC:-2}"
+MAPPING_SCAN_PAUSE_SEC="${DOGZILLA_MAPPING_SCAN_PAUSE_SEC:-2}"
+MAPPING_SCAN_TIMEOUT_SEC="${DOGZILLA_MAPPING_SCAN_TIMEOUT_SEC:-120}"
+MAPPING_MIN_TRANSLATION_COMMAND_SEC="${DOGZILLA_MAPPING_MIN_TRANSLATION_COMMAND_SEC:-1.0}"
 
 write_result() {
   python3 - "$1" "${2:-}" "${3:-}" <<'PY'
@@ -51,7 +57,51 @@ save_candidate() {
     -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
     -e DOGZILLA_MAP_SAVE_CANDIDATE=1 \
     robodoge-map-pose bash "$REMOTE_ROOT/sidecars/dogzilla_map_pose/save-map-pose-in-container.sh" \
-    >/dev/null 2>&1
+    >"$REMOTE_ROOT/logs/autonomous-mapping-save.log" 2>&1
+}
+
+battery_watchdog() {
+  python3 - "$STOP_FILE" "$FINISH_FILE" <<'PY'
+import json
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+stop_file = Path(sys.argv[1])
+finish_file = Path(sys.argv[2])
+while not stop_file.exists():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8893/healthz-lite", timeout=3) as response:
+            safety = (json.load(response).get("batterySafety") or {})
+        value = float(safety["value"])
+        warning = float(safety["warningPercent"])
+        if safety.get("motionAllowed") is False or value <= warning:
+            finish_file.touch()
+            stop_file.touch()
+            break
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+        pass
+    time.sleep(2)
+PY
+}
+
+wait_for_mapping_nav2() {
+  docker exec \
+    -e REMOTE_ROOT="$REMOTE_ROOT" \
+    -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
+    "$ROS_CONTAINER" bash "$REMOTE_ROOT/sidecars/dogzilla_navigation/wait-nav2-ready.sh" \
+      "$ROS_DOMAIN_ID" \
+      "$REMOTE_ROOT" \
+      auto \
+      "$MAPPING_NAV2_READY_TIMEOUT_SEC" \
+      1 \
+      cartographer \
+      once \
+      "http://127.0.0.1:8893/nav2/cmd_vel/health" \
+      20 \
+      mapping \
+    >"$REMOTE_ROOT/logs/autonomous-mapping-nav2-ready.log" 2>&1
 }
 
 active_map_has_verified_pbstream() {
@@ -113,14 +163,29 @@ if [ ! -f "$READY_FILE" ]; then
   exit 1
 fi
 
+if ! wait_for_mapping_nav2; then
+  if restore_localization; then
+    write_result "$RESULT_FILE" failed "mapping_nav2_not_ready; no_frontier_goal_sent"
+  else
+    stop_mapping_nav2
+    write_result "$RESULT_FILE" failed "mapping_nav2_not_ready_restore_failed; no_frontier_goal_sent"
+  fi
+  exit 1
+fi
+
 set +e
+battery_watchdog &
+battery_watchdog_pid=$!
 docker exec \
   -e REMOTE_ROOT="$REMOTE_ROOT" \
   -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
   "$ROS_CONTAINER" bash -lc \
-  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 15 --scan-timeout 10 --pose-timeout 20 --goal-timeout 45 --goal-max-duration 300 --goal-progress-distance 0.1 --failed-goal-radius 0.75 --max-goals 80 --max-failures 6 --complete-after-no-frontier 30" \
+  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 15 --scan-pause-after '$MAPPING_SCAN_PAUSE_SEC' --scan-timeout '$MAPPING_SCAN_TIMEOUT_SEC' --pose-timeout 20 --goal-max-duration 90 --failed-goal-radius 0.5 --rotation-timeout '$MAPPING_ROTATION_TIMEOUT_SEC' --cancel-timeout '$MAPPING_CANCEL_TIMEOUT_SEC' --max-goals 80 --complete-after-no-frontier 30" \
   >"$REMOTE_ROOT/logs/frontier-explorer.log" 2>&1
 explorer_exit=$?
+kill "$battery_watchdog_pid" >/dev/null 2>&1 || true
+wait "$battery_watchdog_pid" 2>/dev/null || true
+cp "$REMOTE_ROOT/logs/nav2-navigation.log" "$REMOTE_ROOT/logs/autonomous-mapping-nav2-last.log" 2>/dev/null || true
 set -e
 
 finish_requested=false
@@ -140,16 +205,21 @@ fi
 
 motion_proven=false
 if [ -s "$STATUS_FILE" ]; then
-  motion_proven="$(python3 - "$STATUS_FILE" <<'PY'
+  motion_proven="$(python3 - "$STATUS_FILE" "$MAPPING_MIN_TRANSLATION_COMMAND_SEC" <<'PY'
 import json
 import sys
 try:
     status = json.load(open(sys.argv[1], encoding="utf-8"))
-    # Older explorers only report per-goal displacement.
-    displacement = float(status.get("sessionMaxGoalDisplacement", status.get("goalDisplacement")) or 0.0)
+    displacement = float(status.get("sessionMaxGoalDisplacement") or 0.0)
+    translation_command_sec = float(status.get("sessionTranslationCommandSec") or 0.0)
 except Exception:
     displacement = 0.0
-print("true" if displacement >= 0.05 else "false")
+    translation_command_sec = 0.0
+print(
+    "true"
+    if displacement >= 0.05 and translation_command_sec >= float(sys.argv[2])
+    else "false"
+)
 PY
 )"
 fi

@@ -88,8 +88,15 @@ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_STALE_ST
 DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC="${DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC:-0.8}"
 DOGZILLA_LOCALIZATION_BACKEND="${DOGZILLA_LOCALIZATION_BACKEND:-amcl}"
 DOGZILLA_NAV2_MAPPING_MODE="${DOGZILLA_NAV2_MAPPING_MODE:-0}"
+DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY="${DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY:-0.13}"
+DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE="${DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE:-20.0}"
 DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC="${DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC:-120}"
-DOGZILLA_NAV2_READINESS_GRACE_SEC="${DOGZILLA_NAV2_READINESS_GRACE_SEC:-20}"
+DOGZILLA_NAV2_READINESS_RECHECK_TIMEOUT_SEC="${DOGZILLA_NAV2_READINESS_RECHECK_TIMEOUT_SEC:-10}"
+if [ "$DOGZILLA_NAV2_MAPPING_MODE" = "1" ]; then
+  DOGZILLA_NAV2_READINESS_GRACE_SEC="${DOGZILLA_NAV2_MAPPING_READINESS_GRACE_SEC:-120}"
+else
+  DOGZILLA_NAV2_READINESS_GRACE_SEC="${DOGZILLA_NAV2_READINESS_GRACE_SEC:-20}"
+fi
 DOGZILLA_NAV2_BRIDGE_HEALTH_URL="${DOGZILLA_NAV2_BRIDGE_HEALTH_URL:-http://127.0.0.1:8893/nav2/cmd_vel/health}"
 DOGZILLA_INITIAL_POSE_X="${DOGZILLA_INITIAL_POSE_X:-}"
 DOGZILLA_INITIAL_POSE_Y="${DOGZILLA_INITIAL_POSE_Y:-}"
@@ -110,7 +117,9 @@ export DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG DOGZILLA_NAV2_SCAN_FILTER_MASK_E
 export DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS
 export DOGZILLA_NAV2_GAIT_ADAPTER_URL DOGZILLA_NAV2_GAIT_ADAPTER_INPUT_TOPIC
 export DOGZILLA_NAV2_GAIT_ADAPTER_MAX_RATE_HZ DOGZILLA_NAV2_GAIT_ADAPTER_STALE_STOP_SEC DOGZILLA_NAV2_GAIT_ADAPTER_HTTP_TIMEOUT_SEC
-export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_NAV2_MAPPING_MODE DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
+export DOGZILLA_LOCALIZATION_BACKEND DOGZILLA_NAV2_MAPPING_MODE DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY
+export DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE
+export DOGZILLA_INITIAL_POSE_X DOGZILLA_INITIAL_POSE_Y DOGZILLA_INITIAL_POSE_YAW
 export REMOTE_ROOT
 
 mkdir -p "$REMOTE_ROOT/logs"
@@ -301,6 +310,11 @@ mta = env_f_required("DOGZILLA_NAV2_MOVEMENT_TIME_ALLOWANCE")
 ft = env_f_required("DOGZILLA_NAV2_FAILURE_TOLERANCE")
 msx = env_f_required("DOGZILLA_NAV2_MIN_SPEED_XY")
 tsv = env_f_required("DOGZILLA_NAV2_TRANS_STOPPED_VELOCITY")
+mapping_msx = max(env_f_required("DOGZILLA_NAV2_MAPPING_MIN_SPEED_XY"), 0.0)
+mapping_prefer_forward_scale = max(
+    env_f_required("DOGZILLA_NAV2_MAPPING_PREFER_FORWARD_SCALE"),
+    0.0,
+)
 try:
     collision_stop_points = json.loads(os.environ["DOGZILLA_NAV2_COLLISION_STOP_POLYGON_POINTS"])
     if len(collision_stop_points) < 6 or len(collision_stop_points) % 2:
@@ -370,13 +384,25 @@ for name in ctrl.get("controller_plugins", []):
     if isinstance(fp2, dict):
         fp2["xy_goal_tolerance"] = xy
         fp2["yaw_goal_tolerance"] = yaw
-        fp2["min_speed_xy"] = msx
+        fp2["min_vel_x"] = 0.0
+        fp2["min_speed_xy"] = max(msx, mapping_msx) if mapping_mode else msx
         fp2["trans_stopped_velocity"] = tsv
         fp2["min_vel_y"] = -mvy
         fp2["max_vel_y"] = mvy
         fp2["acc_lim_y"] = lay
         fp2["decel_lim_y"] = -lay
         fp2["vy_samples"] = vys
+        if mapping_mode and mapping_prefer_forward_scale > 0.0:
+            critics = fp2.get("critics")
+            if isinstance(critics, list) and "PreferForward" not in critics:
+                insert_at = critics.index("BaseObstacle") + 1 if "BaseObstacle" in critics else 0
+                critics.insert(insert_at, "PreferForward")
+            fp2["PreferForward.scale"] = mapping_prefer_forward_scale
+for name in ctrl.get("goal_checker_plugins", []):
+    goal_checker = ctrl.get(name)
+    if isinstance(goal_checker, dict):
+        goal_checker["xy_goal_tolerance"] = xy
+        goal_checker["yaw_goal_tolerance"] = yaw
 
 pc = p.setdefault("controller_server", {}).setdefault("ros__parameters", {}).setdefault("progress_checker", {})
 pc["required_movement_radius"] = rmr
@@ -413,7 +439,7 @@ collision.update({
     "cmd_vel_out_topic": "cmd_vel",
     "transform_tolerance": 0.5,
     "source_timeout": env_f_required("DOGZILLA_NAV2_COLLISION_SOURCE_TIMEOUT"),
-    "base_shift_correction": True,
+    "base_shift_correction": False,
     "stop_pub_timeout": 1.0,
     "polygons": ["PolygonStop"],
     "PolygonStop": {
@@ -616,19 +642,40 @@ handle_navigation_stop() {
 }
 trap handle_navigation_stop TERM INT
 
+run_nav2_readiness() {
+  local probe_mode="$1"
+  local probe_timeout="$2"
+  bash "$REMOTE_ROOT/sidecars/dogzilla_navigation/wait-nav2-ready.sh" \
+    "$ROS_DOMAIN_ID" \
+    "$REMOTE_ROOT" \
+    auto \
+    "$probe_timeout" \
+    "$DOGZILLA_NAV2_MAPPING_MODE" \
+    "$DOGZILLA_LOCALIZATION_BACKEND" \
+    "$probe_mode" \
+    "$DOGZILLA_NAV2_BRIDGE_HEALTH_URL" \
+    "$DOGZILLA_NAV2_READINESS_GRACE_SEC" \
+    "$NAV2_OWNER_MODE"
+}
+
 set +e
-bash "$REMOTE_ROOT/sidecars/dogzilla_navigation/wait-nav2-ready.sh" \
-  "$ROS_DOMAIN_ID" \
-  "$REMOTE_ROOT" \
-  auto \
-  "$DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC" \
-  "$DOGZILLA_NAV2_MAPPING_MODE" \
-  "$DOGZILLA_LOCALIZATION_BACKEND" \
-  watch \
-  "$DOGZILLA_NAV2_BRIDGE_HEALTH_URL" \
-  "$DOGZILLA_NAV2_READINESS_GRACE_SEC" \
-  "$NAV2_OWNER_MODE"
-readiness_status=$?
+readiness_status=0
+while true; do
+  run_nav2_readiness watch "$DOGZILLA_NAV2_READINESS_STARTUP_TIMEOUT_SEC"
+  readiness_status=$?
+  if [ "$readiness_status" -eq 0 ]; then
+    break
+  fi
+
+  echo "Nav2 readiness watcher exited with status $readiness_status; requiring a fresh independent confirmation before stopping Nav2." >&2
+  run_nav2_readiness once "$DOGZILLA_NAV2_READINESS_RECHECK_TIMEOUT_SEC"
+  recheck_status=$?
+  if [ "$recheck_status" -ne 0 ]; then
+    echo "Fresh Nav2 readiness recheck confirmed the failure with status $recheck_status." >&2
+    break
+  fi
+  echo "Fresh Nav2 readiness recheck passed; replacing the stale watcher without interrupting Nav2." >&2
+done
 set -e
 
 trap - TERM INT

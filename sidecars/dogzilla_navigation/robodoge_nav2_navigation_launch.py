@@ -64,6 +64,7 @@ def generate_launch_description():
                         "--mask-start-deg", os.environ["DOGZILLA_NAV2_SCAN_FILTER_MASK_START_DEG"],
                         "--mask-end-deg", os.environ["DOGZILLA_NAV2_SCAN_FILTER_MASK_END_DEG"],
                         "--mask-range-m", os.environ["DOGZILLA_NAV2_SCAN_FILTER_MASK_RANGE_M"],
+                        "--self-radius-m", os.environ["DOGZILLA_NAV2_ROBOT_RADIUS"],
                     ],
                     output="screen",
                     respawn=True,

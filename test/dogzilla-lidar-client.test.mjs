@@ -5,9 +5,30 @@ import {
   getRosbridgeClient,
   getDogzillaLidarDiagnostics,
   getDogzillaLidarHealth,
+  getDogzillaMapData,
   getDogzillaLidarScan,
   getDogzillaRobotPose,
 } from '../lib/dogzilla-lidar-client.mjs'
+
+test('getDogzillaMapData reads candidate review data from the direct bridge', async () => {
+  let requestedUrl = ''
+  const result = await getDogzillaMapData({
+    stream: 'candidate',
+    config: {
+      bridges: { direct: { baseUrl: 'http://127.0.0.1:8893' } },
+      lidar: { enabled: false },
+    },
+    fetchImpl: async (url) => {
+      requestedUrl = url
+      return { json: async () => ({ ok: true, width: 329, height: 301, cells: 'AA==' }) }
+    },
+  })
+
+  assert.equal(requestedUrl, 'http://127.0.0.1:8893/map/candidate')
+  assert.equal(result.ok, true)
+  assert.equal(result.width, 329)
+  assert.equal(result.stream, 'candidate')
+})
 
 function withFakeRosbridge(overrides, callback) {
   const client = getRosbridgeClient()

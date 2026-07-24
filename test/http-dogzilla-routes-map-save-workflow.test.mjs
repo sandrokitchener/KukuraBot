@@ -3,8 +3,9 @@ import test from 'node:test'
 
 import { tryHandleDogzillaRoute } from '../lib/http-dogzilla-routes.mjs'
 
-test('autonomous mapping start plays robot speaker cue after startup succeeds', async () => {
+test('autonomous mapping start cues preparation before work and readiness after success', async () => {
   const cues = []
+  const events = []
   const sent = []
 
   await tryHandleDogzillaRoute({
@@ -14,13 +15,39 @@ test('autonomous mapping start plays robot speaker cue after startup succeeds', 
     readJsonBody: async () => ({ action: 'start-autonomous-mapping', live: true }),
     sendJson: async (_response, statusCode, payload) => { sent.push({ statusCode, payload }); return true },
     getDogzillaPoseTrack: () => [],
-    runDogzillaConnectionActionImpl: async () => ({ status: 'started' }),
+    runDogzillaConnectionActionImpl: async () => { events.push('run'); return { status: 'ok' } },
+    sendDogzillaAudioCueImpl: async (cue) => {
+      cues.push(cue)
+      events.push(cue)
+      return { status: 'ok', ok: true, cue }
+    },
+  })
+
+  assert.deepEqual(cues, ['thinking-start', 'thinking-stop', 'mapping-start'])
+  assert.deepEqual(events, ['thinking-start', 'run', 'thinking-stop', 'mapping-start'])
+  assert.equal(sent[0].payload.preparingAudioCue.ok, true)
+  assert.equal(sent[0].payload.preparingAudioCueStop.ok, true)
+  assert.equal(sent[0].payload.audioCue.ok, true)
+  assert.equal(sent[0].statusCode, 200)
+})
+
+test('resume draft mapping stops its preparation cue and omits ready cue on failure', async () => {
+  const cues = []
+  const sent = []
+
+  await tryHandleDogzillaRoute({
+    request: { method: 'POST' },
+    requestUrl: new URL('http://localhost/api/dogzilla/connection/action'),
+    response: {},
+    readJsonBody: async () => ({ action: 'resume-draft-mapping', live: true }),
+    sendJson: async (_response, statusCode, payload) => { sent.push({ statusCode, payload }); return true },
+    getDogzillaPoseTrack: () => [],
+    runDogzillaConnectionActionImpl: async () => ({ status: 'error', error: 'startup failed' }),
     sendDogzillaAudioCueImpl: async (cue) => { cues.push(cue); return { status: 'ok', ok: true, cue } },
   })
 
-  assert.deepEqual(cues, ['mapping-start'])
-  assert.equal(sent[0].payload.audioCue.ok, true)
-  assert.equal(sent[0].statusCode, 202)
+  assert.deepEqual(cues, ['thinking-start', 'thinking-stop'])
+  assert.equal(sent[0].statusCode, 400)
 })
 
 test('save-map-pose route saves map, clears the legacy origin, and restarts localization', async () => {

@@ -36,6 +36,18 @@ test('DOGZILLA waypoint readiness trusts the bridge instead of rebuilding its Na
   assert.equal(readiness.reason, '')
 })
 
+test('DOGZILLA waypoint readiness honors bridge localization lockout over nested Nav2 readiness', () => {
+  const readiness = getDogzillaWaypointNavigationReadiness({
+    navigation: {
+      waypointReady: false,
+      nav2: readyNav2(),
+    },
+  })
+
+  assert.equal(readiness.ready, false)
+  assert.match(readiness.reason, /Bridge reported waypointReady=false/)
+})
+
 test('DOGZILLA waypoint readiness requires fresh odom samples and fresh odom TF', () => {
   for (const staleField of ['fresh', 'tfFresh']) {
     const nav2 = readyNav2()

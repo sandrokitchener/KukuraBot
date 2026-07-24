@@ -303,20 +303,25 @@ test('buildDogzillaActionPlan keeps autonomous mapping and candidate promotion e
   })
   const startPlan = buildDogzillaActionPlan('start-autonomous-mapping', config)
   const continuePlan = buildDogzillaActionPlan('continue-autonomous-mapping', config)
+  const resumeDraftPlan = buildDogzillaActionPlan('resume-draft-mapping', config)
   const finishPlan = buildDogzillaActionPlan('finish-autonomous-mapping', config)
   const promotePlan = buildDogzillaActionPlan('promote-map-candidate', config)
 
   assert.ok(startPlan.args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
   assert.ok(continuePlan.args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
   assert.ok(continuePlan.args.includes('-ContinueCurrentMap'))
+  assert.equal(continuePlan.args[continuePlan.args.indexOf('-ResumeSource') + 1], 'active')
+  assert.ok(resumeDraftPlan.args.includes('-ContinueCurrentMap'))
+  assert.equal(resumeDraftPlan.args[resumeDraftPlan.args.indexOf('-ResumeSource') + 1], 'candidate')
   assert.ok(finishPlan.args.some((arg) => arg.endsWith('finish-dogzilla-autonomous-mapping-ssh.ps1')))
   assert.ok(promotePlan.args.some((arg) => arg.endsWith('promote-dogzilla-map-candidate-ssh.ps1')))
   assert.equal(startPlan.timeoutMs, 240_000)
   assert.equal(continuePlan.timeoutMs, 1_080_000)
+  assert.equal(resumeDraftPlan.timeoutMs, 1_080_000)
   assert.equal(finishPlan.timeoutMs, 240_000)
 })
 
-test('autonomous mapping starts in the background and returns started immediately', async () => {
+test('autonomous mapping waits for the startup script to prove it launched', async () => {
   const config = normalizeDogzillaConnectionConfig({
     ssh: { host: '192.168.8.88', user: 'pi', alias: 'dogzilla' },
     remoteRoot: '/home/pi/robodoge',
@@ -328,13 +333,13 @@ test('autonomous mapping starts in the background and returns started immediatel
     config,
     noSync: true,
     obstacleAvoidance: {},
-    spawnImpl: (command, args) => {
+    execFilePromiseImpl: async (command, args) => {
       calls.push({ command, args })
-      return { pid: 123, unref() {} }
+      return { exitCode: 0, stdout: 'started', stderr: '' }
     },
   })
 
-  assert.equal(result.status, 'started')
+  assert.equal(result.status, 'ok')
   assert.equal(calls.length, 1)
   assert.ok(calls[0].args.some((arg) => arg.endsWith('start-dogzilla-autonomous-mapping-ssh.ps1')))
   assert.ok(!calls[0].args.some((arg) => arg.endsWith('dogzilla-ssh.ps1')))

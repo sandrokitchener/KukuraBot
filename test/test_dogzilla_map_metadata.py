@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import importlib.util
 import json
@@ -13,6 +14,41 @@ SPEC.loader.exec_module(map_metadata)
 
 
 class DogzillaMapMetadataTests(unittest.TestCase):
+    def test_latest_candidate_is_returned_as_an_occupancy_grid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            candidate = Path(tmp) / "candidates" / "candidate-new"
+            candidate.mkdir(parents=True)
+            yaml_path = candidate / "map.yaml"
+            pgm_path = candidate / "map.pgm"
+            pbstream_path = candidate / "map.pbstream"
+            metadata_path = candidate / "candidate.json"
+            yaml_path.write_text(
+                "image: map.pgm\nresolution: 0.5\norigin: [-1, -2, 0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n",
+                encoding="utf-8",
+            )
+            pgm_path.write_bytes(b"P5\n2 2\n255\n" + bytes([0, 254, 205, 0]))
+            pbstream_path.write_bytes(b"candidate state")
+            metadata_path.write_text(json.dumps({
+                "id": "candidate-new",
+                "state": "candidate",
+                "artifacts": {
+                    "yaml": {"path": str(yaml_path), "sha256": hashlib.sha256(yaml_path.read_bytes()).hexdigest()},
+                    "pgm": {"path": str(pgm_path), "sha256": hashlib.sha256(pgm_path.read_bytes()).hexdigest()},
+                    "pbstream": {"path": str(pbstream_path), "sha256": hashlib.sha256(pbstream_path.read_bytes()).hexdigest()},
+                },
+            }), encoding="utf-8")
+
+            result = map_metadata.read_latest_candidate_occupancy_grid(Path(tmp))
+
+            self.assertTrue(result["ok"])
+            self.assertEqual((result["width"], result["height"]), (2, 2))
+            self.assertEqual(list(base64.b64decode(result["cells"])), [255, 100, 100, 0])
+            self.assertEqual(result["bbox"], {"minX": -1.0, "minY": -2.0, "maxX": 0.0, "maxY": -1.0})
+
+            (Path(tmp) / "robodoge_home_map.json").write_text("{}", encoding="utf-8")
+            promoted = map_metadata.read_latest_candidate_occupancy_grid(Path(tmp))
+            self.assertFalse(promoted["ok"])
+
     def test_hashed_occupancy_map_without_pbstream_is_valid_and_tamper_checked(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

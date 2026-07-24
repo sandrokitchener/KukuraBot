@@ -133,7 +133,7 @@
               <span id="manual-control-chip" class="manual-control-chip">Off</span>
             </div>
             <div class="manual-control-actions">
-              <button id="manual-control-toggle-button" type="button">Enable gamepad</button>
+              <button id="manual-control-toggle-button" type="button">Enable manual control</button>
               <button id="manual-control-neutral-button" type="button">Neutral</button>
             </div>
             <div id="manual-touch-controls" class="manual-touch-controls" hidden aria-label="Android touch controller">
@@ -186,6 +186,7 @@
             <div id="primary-robot-tab-shell" class="robot-tab-shell">
               <button class="robot-tab is-active" type="button" aria-selected="true" data-robot-view="overview">
                 <span id="primary-robot-tab-name">Questing Beast</span>
+                <span class="android-map-tab-label" aria-hidden="true">Map</span>
               </button>
               <button
                 id="robot-name-edit-button"
@@ -256,8 +257,7 @@
             <div class="robot-map-head">
               <h2>Mini Map</h2>
             </div>
-          </div>
-<div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
+            <div id="robot-map" class="robot-map" role="img" aria-label="Robot mini map">
               <canvas id="robot-lidar-scan" class="robot-lidar-scan" width="360" height="360" aria-hidden="true"></canvas>
               <span class="robot-map-axis robot-map-axis-x" aria-hidden="true"></span>
               <span class="robot-map-axis robot-map-axis-y" aria-hidden="true"></span>
@@ -267,8 +267,8 @@
               <span id="robot-pose-readout" class="robot-pose-readout">pose -</span>
               <div class="robot-map-zoom-controls">
                 <button type="button" class="robot-map-zoom-btn" data-zoom-action="in" aria-label="Zoom in" title="Zoom in">+</button>
-                <span class="robot-map-zoom-indicator" role="button" tabindex="0" aria-label="Zoom level â€” click to reset" title="Zoom: 100% â€” scroll to zoom, click to reset">100%</span>
-                <button type="button" class="robot-map-zoom-btn" data-zoom-action="out" aria-label="Zoom out" title="Zoom out">âˆ’</button>
+                <span class="robot-map-zoom-indicator" role="button" tabindex="0" aria-label="Zoom level — click to reset" title="Zoom: 100% — scroll to zoom, click to reset">100%</span>
+                <button type="button" class="robot-map-zoom-btn" data-zoom-action="out" aria-label="Zoom out" title="Zoom out">−</button>
               </div>
             </div>
             <div id="robot-map-meta" class="robot-map-meta">Waiting for robot.state.</div>
@@ -291,8 +291,11 @@
                   <div class="map-workflow-actions">
                     <button type="button" id="autonomous-map-start-button" class="map-workflow-button map-workflow-button-primary" data-connection-action="start-autonomous-mapping">Map This Floor</button>
                     <details class="map-workflow-secondary-action">
-                      <summary>Resume an existing map</summary>
-                      <button type="button" id="autonomous-map-continue-button" class="map-workflow-button" data-connection-action="continue-autonomous-mapping">Continue Current Map</button>
+                      <summary>Continue mapping</summary>
+                      <div class="map-workflow-secondary-actions">
+                        <button type="button" id="autonomous-map-resume-draft-button" class="map-workflow-button" data-connection-action="resume-draft-mapping">Resume Draft Map</button>
+                        <button type="button" id="autonomous-map-continue-button" class="map-workflow-button" data-connection-action="continue-autonomous-mapping">Extend Active Map</button>
+                      </div>
                     </details>
                     <button type="button" id="autonomous-map-finish-button" class="map-workflow-button" data-connection-action="finish-autonomous-mapping" disabled>Stop Early</button>
                     <button type="button" id="autonomous-map-promote-button" class="map-workflow-button" data-connection-action="promote-map-candidate" disabled>Use New Map</button>

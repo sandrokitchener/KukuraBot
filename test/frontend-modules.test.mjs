@@ -39,6 +39,7 @@ import {
 } from '../public/robot-map.js'
 import {
   buildNavChainComponents,
+  formatLocalizationRecoveryMessage,
   getConnectionActionConfirmation,
   isDangerousConnectionAction,
   summarizeNavChain,
@@ -85,10 +86,89 @@ test('mobile navigation initializes Android shell and swipes between views', () 
   listeners.get('touchend')({
     changedTouches: [{ identifier: 1, clientX: 150, clientY: 100 }],
   })
-  assert.equal(documentRef.documentElement.dataset.mobileView, 'robot')
+  assert.equal(documentRef.documentElement.dataset.mobileView, 'controls')
+
+  controller.setMobileView('chat')
+  listeners.get('touchstart')({
+    target: { closest: () => null },
+    touches: [{ identifier: 2, clientX: 150, clientY: 100 }],
+    changedTouches: [],
+  })
+  listeners.get('touchend')({
+    changedTouches: [{ identifier: 2, clientX: 100, clientY: 100 }],
+  })
+  assert.equal(documentRef.documentElement.dataset.mobileView, 'vision')
 
   controller.setMobileView('invalid')
   assert.equal(controller.getMobileView(), 'chat')
+})
+
+test('mobile navigation allows a horizontal swipe to start in the chat textarea', () => {
+  const listeners = new Map()
+  const classes = new Set(['android-app'])
+  const documentRef = {
+    documentElement: {
+      dataset: {},
+      classList: {
+        add: (name) => classes.add(name),
+        contains: (name) => classes.has(name),
+      },
+    },
+    addEventListener: (name, handler) => listeners.set(name, handler),
+  }
+  const controller = createMobileNavigationController({
+    documentRef,
+    navigatorRef: { userAgent: 'Android wv' },
+    windowRef: {},
+    manualControl: { enableTouch() {} },
+  })
+
+  controller.init()
+  const textarea = { closest: (selector) => selector.includes('textarea') ? {} : null }
+  listeners.get('touchstart')({
+    target: textarea,
+    touches: [{ identifier: 4, clientX: 100, clientY: 100 }],
+    changedTouches: [],
+  })
+  listeners.get('touchend')({
+    changedTouches: [{ identifier: 4, clientX: 150, clientY: 100 }],
+  })
+
+  assert.equal(documentRef.documentElement.dataset.mobileView, 'controls')
+})
+
+test('mobile navigation leaves joystick gestures to the touch controller', () => {
+  const listeners = new Map()
+  const classes = new Set(['android-app'])
+  const documentRef = {
+    documentElement: {
+      dataset: {},
+      classList: {
+        add: (name) => classes.add(name),
+        contains: (name) => classes.has(name),
+      },
+    },
+    addEventListener: (name, handler) => listeners.set(name, handler),
+  }
+  const controller = createMobileNavigationController({
+    documentRef,
+    navigatorRef: { userAgent: 'Android wv' },
+    windowRef: {},
+    manualControl: { enableTouch() {} },
+  })
+
+  controller.init()
+  const joystick = { closest: (selector) => selector.includes('manual-touch-stick') ? {} : null }
+  listeners.get('touchstart')({
+    target: joystick,
+    touches: [{ identifier: 5, clientX: 100, clientY: 100 }],
+    changedTouches: [],
+  })
+  listeners.get('touchend')({
+    changedTouches: [{ identifier: 5, clientX: 150, clientY: 100 }],
+  })
+
+  assert.equal(documentRef.documentElement.dataset.mobileView, 'chat')
 })
 
 test('camera viewer is gated by the visible Camera tab', async () => {
@@ -494,6 +574,8 @@ test('manual touch controller combines two sticks and neutralizes on final relea
     })
 
     controller.enableTouch()
+    controller.handleToggle()
+    assert.equal(elements.toggleButton.textContent, 'Disable touch control')
     controller.handleTouchPointerDown({
       pointerId: 1,
       pointerType: 'touch',
@@ -1113,6 +1195,30 @@ test('buildNavChainComponents rejects fresh TF when global localization is untru
   assert.match(localization.detail, /untrusted/)
 })
 
+test('global localization timeout gives the operator a safe recovery path', () => {
+  const error = 'Global localization timed out without 3 distinct frozen-map constraint matches.'
+  const guidance = formatLocalizationRecoveryMessage(error)
+  const components = buildNavChainComponents({
+    navigation: {
+      blockers: [error],
+      actionAvailable: true,
+      odomReady: true,
+      odomTfAvailable: true,
+      lifecycleActive: true,
+      scanReady: true,
+    },
+    sensors: {
+      lidar: { ok: true, topic: '/scan' },
+      localization: { ok: true, waypointSafe: true, mapPose: { frame: 'map' } },
+    },
+  })
+
+  assert.match(guidance, /Manual Control/)
+  assert.match(guidance, /distinctive spot/)
+  assert.match(guidance, /Map This Floor/)
+  assert.equal(components.find((component) => component.id === 'localization')?.detail, guidance)
+})
+
 test('dangerous maintenance actions require confirmation with consequence text', () => {
   assert.ok(isDangerousConnectionAction('sync-bridges'))
   assert.ok(isDangerousConnectionAction('stop-vendor-app'))
@@ -1121,6 +1227,7 @@ test('dangerous maintenance actions require confirmation with consequence text',
   assert.ok(isDangerousConnectionAction('save-map-pose'))
   assert.ok(isDangerousConnectionAction('start-autonomous-mapping'))
   assert.ok(isDangerousConnectionAction('continue-autonomous-mapping'))
+  assert.ok(isDangerousConnectionAction('resume-draft-mapping'))
   assert.ok(isDangerousConnectionAction('finish-autonomous-mapping'))
   assert.ok(isDangerousConnectionAction('promote-map-candidate'))
 
