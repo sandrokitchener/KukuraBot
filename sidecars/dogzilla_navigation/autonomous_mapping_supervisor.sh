@@ -18,8 +18,6 @@ MAPPING_SCAN_TIMEOUT_SEC="${DOGZILLA_MAPPING_SCAN_TIMEOUT_SEC:-120}"
 MAPPING_MIN_TRANSLATION_COMMAND_SEC="${DOGZILLA_MAPPING_MIN_TRANSLATION_COMMAND_SEC:-1.0}"
 MAPPING_FORWARD_SPEED="${DOGZILLA_MAPPING_FORWARD_SPEED:-0.18}"
 MAPPING_TURN_SPEED="${DOGZILLA_MAPPING_TURN_SPEED:-0.75}"
-MAPPING_BACKUP_SPEED="${DOGZILLA_MAPPING_BACKUP_SPEED:-0.08}"
-MAPPING_BACKUP_DURATION="${DOGZILLA_MAPPING_BACKUP_DURATION:-1.5}"
 MAPPING_STOP_DISTANCE="${DOGZILLA_MAPPING_STOP_DISTANCE:-0.55}"
 MAPPING_CLEAR_DISTANCE="${DOGZILLA_MAPPING_CLEAR_DISTANCE:-0.75}"
 MAPPING_NO_GROWTH_TIMEOUT="${DOGZILLA_MAPPING_NO_GROWTH_TIMEOUT:-60}"
@@ -188,7 +186,7 @@ docker exec \
   -e REMOTE_ROOT="$REMOTE_ROOT" \
   -e ROS_DOMAIN_ID="$ROS_DOMAIN_ID" \
   "$ROS_CONTAINER" bash -lc \
-  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 15 --scan-pause-after '$MAPPING_SCAN_PAUSE_SEC' --scan-timeout '$MAPPING_SCAN_TIMEOUT_SEC' --pose-timeout 20 --rotation-timeout '$MAPPING_ROTATION_TIMEOUT_SEC' --forward-speed '$MAPPING_FORWARD_SPEED' --turn-speed '$MAPPING_TURN_SPEED' --backup-speed '$MAPPING_BACKUP_SPEED' --backup-duration '$MAPPING_BACKUP_DURATION' --stop-distance '$MAPPING_STOP_DISTANCE' --clear-distance '$MAPPING_CLEAR_DISTANCE' --map-growth-cells '$MAPPING_MAP_GROWTH_CELLS' --no-growth-timeout '$MAPPING_NO_GROWTH_TIMEOUT' --max-session-duration '$MAPPING_MAX_SESSION_DURATION'" \
+  "source /opt/ros/humble/setup.bash; source /root/yahboomcar_ws/install/setup.bash 2>/dev/null || true; exec python3 -u '$EXPLORER' --status-file '$STATUS_FILE' --stop-file '$STOP_FILE' --lock-file '$REMOTE_ROOT/maps/autonomous-mapping.lock' --map-timeout 15 --scan-pause-after '$MAPPING_SCAN_PAUSE_SEC' --scan-timeout '$MAPPING_SCAN_TIMEOUT_SEC' --pose-timeout 20 --rotation-timeout '$MAPPING_ROTATION_TIMEOUT_SEC' --forward-speed '$MAPPING_FORWARD_SPEED' --turn-speed '$MAPPING_TURN_SPEED' --stop-distance '$MAPPING_STOP_DISTANCE' --clear-distance '$MAPPING_CLEAR_DISTANCE' --map-growth-cells '$MAPPING_MAP_GROWTH_CELLS' --no-growth-timeout '$MAPPING_NO_GROWTH_TIMEOUT' --max-session-duration '$MAPPING_MAX_SESSION_DURATION'" \
   >"$REMOTE_ROOT/logs/frontier-explorer.log" 2>&1
 explorer_exit=$?
 kill "$battery_watchdog_pid" >/dev/null 2>&1 || true

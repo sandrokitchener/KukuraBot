@@ -50,8 +50,6 @@ def active_explorer():
         clear_distance=0.65,
         forward_speed=0.18,
         turn_speed=0.45,
-        backup_speed=0.08,
-        backup_duration=1.5,
         rotation_timeout=8.0,
     )
     ranges, angle_min, angle_increment = lidar_scan()
@@ -75,7 +73,6 @@ def active_explorer():
     explorer.last_command = {}
     explorer.turn_direction = 1
     explorer.turn_started_at = 100.0
-    explorer.backing_until = 0.0
     explorer.turn_retries = 0
     explorer.turn_count = 1
     explorer.last_status_write_at = 109.0
@@ -138,16 +135,6 @@ class ReactiveMapperTests(unittest.TestCase):
             frontier_explorer._known_cell_count([-1, -1, 0, 50, 100]),
             3,
         )
-
-    def test_wall_backs_up_before_turning(self):
-        explorer = active_explorer()
-        explorer.turn_direction = 0
-        published = []
-        explorer._publish = lambda linear, angular: published.append((linear, angular))
-        with patch.object(frontier_explorer.time, "monotonic", return_value=109.0):
-            explorer._tick()
-        self.assertEqual(published[-1], (-0.08, 0.0))
-        self.assertEqual(explorer.status["state"], "backing")
 
     def test_displacement_tracks_net_motion_from_start(self):
         explorer = active_explorer()

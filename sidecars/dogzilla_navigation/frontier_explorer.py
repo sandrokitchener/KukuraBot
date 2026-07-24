@@ -252,7 +252,6 @@ class FrontierExplorer:
         self.last_command: dict[str, float | int | str] = {}
         self.turn_direction = 0
         self.turn_started_at = 0.0
-        self.backing_until = 0.0
         self.turn_retries = 0
         self.turn_count = 0
         self.last_status_write_at = 0.0
@@ -497,18 +496,9 @@ class FrontierExplorer:
         )
         next_turn = int(command["turning"])
         if next_turn and not self.turn_direction:
-            self.backing_until = now + self.args.backup_duration
-            self.turn_started_at = self.backing_until
+            self.turn_started_at = now
             self.turn_count += 1
         self.turn_direction = next_turn
-        if now < self.backing_until:
-            command.update(
-                {
-                    "linearX": -self.args.backup_speed,
-                    "angularZ": 0.0,
-                    "reason": "backing from wall",
-                }
-            )
         if (
             self.turn_direction
             and now - self.turn_started_at >= self.args.rotation_timeout
@@ -537,11 +527,7 @@ class FrontierExplorer:
         self.status.update(
             {
                 "state": (
-                    "backing"
-                    if now < self.backing_until
-                    else "turning"
-                    if self.turn_direction
-                    else "exploring"
+                    "turning" if self.turn_direction else "exploring"
                 ),
                 "reason": command["reason"],
             }
@@ -574,8 +560,6 @@ def main() -> int:
     parser.add_argument("--clear-distance", type=float, default=0.75)
     parser.add_argument("--forward-speed", type=float, default=0.18)
     parser.add_argument("--turn-speed", type=float, default=0.75)
-    parser.add_argument("--backup-speed", type=float, default=0.08)
-    parser.add_argument("--backup-duration", type=float, default=1.5)
     parser.add_argument("--rotation-timeout", type=float, default=8.0)
     parser.add_argument("--control-period", type=float, default=0.2)
     parser.add_argument("--map-growth-cells", type=int, default=20)
