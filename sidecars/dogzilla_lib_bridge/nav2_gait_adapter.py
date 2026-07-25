@@ -95,8 +95,8 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
         angular_z, cfg["angularFullScale"], cfg["maxTurnRate"] * turn_scale
     )
 
-    gait = "walk"
-    pace = "slow"
+    gait = "trot" if x_step > 0 else "walk"
+    pace = "normal"
 
     return {
         "x_step": round_float(x_step),
@@ -121,7 +121,7 @@ def nav2_cmd_vel_to_locomotion(payload: dict[str, Any]) -> dict[str, Any]:
             "maxTurnRate": cfg["maxTurnRate"],
             "forwardTurnScale": cfg["forwardTurnScale"],
             "inPlaceTurnScale": cfg["inPlaceTurnScale"],
-            "allowTrot": False,
+            "allowTrot": gait == "trot",
             "inPlaceTurnLimited": in_place_turn,
         },
     }

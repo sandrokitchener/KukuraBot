@@ -1,0 +1,175 @@
+- generic [ref=e1]:
+  - link "Skip to command console" [ref=e2] [cursor=pointer]:
+    - /url: "#chat-form"
+  - main [ref=e3]:
+    - generic "Questing Beast actions" [ref=e4]:
+      - generic [ref=e5]: Questing Beast
+      - generic [ref=e7]:
+        - button "Toggle DOGZILLA diagnostics" [ref=e8] [cursor=pointer]:
+          - generic [ref=e14]: Diagnostics
+        - button "Toggle help" [ref=e15] [cursor=pointer]:
+          - generic [ref=e16]: "?"
+          - generic [ref=e17]: Help
+        - button "Toggle settings" [ref=e18] [cursor=pointer]:
+          - generic [ref=e20]: Settings
+    - generic [ref=e21]:
+      - complementary "Questing Beast navigation" [ref=e22]:
+        - generic "Questing Beast" [ref=e23]:
+          - img "Questing Beast icon" [ref=e24]
+        - navigation "Operator views" [ref=e25]:
+          - button "Open command console" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]: ⌁
+          - button "Show map" [ref=e28] [cursor=pointer]:
+            - generic [ref=e29]: ⊞
+          - button "Show camera" [ref=e30] [cursor=pointer]
+          - button "Show waypoints" [ref=e33] [cursor=pointer]:
+            - generic [ref=e34]: ◇
+          - button "Open saved snapshots" [ref=e35] [cursor=pointer]:
+            - generic [ref=e36]: ▣
+          - button "Show conversation history" [ref=e37] [cursor=pointer]:
+            - generic [ref=e38]: ≡
+          - button "Open CPU status" [ref=e39] [cursor=pointer]:
+            - generic [ref=e40]: ●
+        - img "DTX"
+      - generic [ref=e42]:
+        - generic [ref=e44]:
+          - paragraph [ref=e45]: Quadruped inspection console
+          - heading "Questing Beast" [level=1] [ref=e46]:
+            - img "Questing Beast" [ref=e47]
+        - generic [ref=e51]:
+          - generic [ref=e52]: Command
+          - textbox "Command" [ref=e53]:
+            - /placeholder: "Try: go to the living room"
+          - generic [ref=e54]:
+            - button "Send request" [ref=e55]
+            - button "Emergency stop robot" [ref=e182] [cursor=pointer]: Stop
+        - region [ref=e57]:
+          - generic [ref=e58]:
+            - heading "Execution" [level=2] [ref=e59]
+            - generic [ref=e60]: Ready.
+          - list [ref=e61]:
+            - listitem [ref=e62]:
+              - generic [ref=e64]:
+                - strong [ref=e65]: Intent parsing
+                - generic [ref=e66]: Waiting for a command.
+            - listitem [ref=e67]:
+              - generic [ref=e69]:
+                - strong [ref=e70]: Planning
+                - generic [ref=e71]: Not started.
+            - listitem [ref=e72]:
+              - generic [ref=e74]:
+                - strong [ref=e75]: Navigation
+                - generic [ref=e76]: Not applicable.
+            - listitem [ref=e77]:
+              - generic [ref=e79]:
+                - strong [ref=e80]: Completion
+                - generic [ref=e81]: Waiting for a command.
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - heading "Manual Control" [level=2] [ref=e84]
+            - generic [ref=e85]: "Off"
+          - generic [ref=e86]:
+            - button "Enable gamepad" [ref=e87]
+            - button "Neutral" [ref=e88]
+          - generic [ref=e89]:
+            - generic [ref=e90]: Forward gait
+            - slider "Forward gait" [ref=e91]: "45"
+            - status [ref=e92]: 45%
+          - generic "Manual control input" [ref=e93]:
+            - generic [ref=e94]:
+              - generic [ref=e95]: Forward
+              - strong [ref=e96]: "0.00"
+            - generic [ref=e98]:
+              - generic [ref=e99]: Strafe
+              - strong [ref=e100]: "0.00"
+            - generic [ref=e102]:
+              - generic [ref=e103]: Turn
+              - strong [ref=e104]: "0.00"
+          - generic [ref=e106]:
+            - generic [ref=e107]: No gamepad
+            - generic [ref=e108]: Gamepad idle.
+        - generic [ref=e109]:
+          - heading "Conversation History" [level=2] [ref=e111]
+          - article [ref=e114]:
+            - generic [ref=e115]: Questing Beast
+            - generic [ref=e116]: Waiting for first message.
+            - generic [ref=e117]: Prompt ready.
+        - generic [ref=e118]: Preparing robot for autonomous mapping...
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - heading "Voice readiness" [level=2] [ref=e123]
+            - generic [ref=e124]: Parakeet Test (Sidecar)
+          - paragraph [ref=e125]: Requesting microphone for Parakeet Test (Sidecar)...
+          - generic [ref=e126]: "Ready: Parakeet Test (Sidecar) Device: auto"
+      - generic [ref=e127]:
+        - navigation "Robot tabs" [ref=e128]:
+          - generic [ref=e129]:
+            - button "Questing Beast" [ref=e130]
+            - button "Edit robot name" [ref=e132]: ✎
+          - button "Camera" [ref=e133]
+        - generic [ref=e134]:
+          - generic [ref=e135]:
+            - heading "Robot Info" [level=2] [ref=e136]
+            - generic [ref=e137]: Live
+          - generic [ref=e138]:
+            - generic [ref=e139]:
+              - generic [ref=e140]: Robot
+              - strong [ref=e141]: Questing Beast
+            - generic [ref=e142]:
+              - generic [ref=e143]: Task
+              - strong
+            - generic [ref=e144]:
+              - generic [ref=e145]: Battery
+              - img "Battery 79%" [ref=e213]:
+                - strong [ref=e147]: 79%
+              - generic [ref=e148]: DOGZILLALib | battery DOGZILLALib.read_battery | pose map
+            - generic [ref=e149]:
+              - generic [ref=e150]: Navigation
+              - strong [ref=e151]: "⚠ Blocked: /odom odometry samples are stale."
+            - generic [ref=e184]:
+              - generic [ref=e185]: Nav chain
+              - button "Navigation chain health" [ref=e186] [cursor=pointer]:
+                - 'generic "LiDAR: Raw scan flowing on /scan" [ref=e187]'
+                - 'generic "Localization: Map location verified by global match" [ref=e188]'
+                - 'generic "Odom + TF: Odom not ready" [ref=e208]'
+                - 'generic "Nav2 action: Action server unavailable" [ref=e209]'
+                - 'generic "Nav2 lifecycle: OK" [ref=e191]'
+                - 'generic "Filtered scan: Scan not ready" [ref=e210]'
+              - strong [ref=e193]: 3/6 ready (Odom + TF, Nav2 action, Filtered scan)
+        - generic [ref=e152]:
+          - heading "Mini Map" [level=2] [ref=e154]
+          - img "Robot mini map" [ref=e155]:
+            - generic:
+              - generic: Garage
+              - generic: Charger
+            - 'generic "map pose: x -1.802 m, y -0.001 m, theta -1.445 rad" [ref=e214]': map -1.80, -0.00, -1.45
+            - generic [ref=e158]:
+              - button "Zoom in" [ref=e159] [cursor=pointer]: +
+              - button "Zoom level — click to reset" [ref=e160] [cursor=pointer]: 100%
+              - button "Zoom out" [ref=e161] [cursor=pointer]: −
+          - generic [ref=e162]: "x -1.80m, y -0.00m, θ -1.45rad. Updated 9:08:21 AM. 6 stale waypoint(s) hidden Waypoints not ready: navigation not ready: Nav2 NavigateToPose action server is not available; /odom odometry samples are stale.; /scan_nav2 LaserScan samples are stale; Bridge reported waypointReady=false. Lidar: 438/463 pts, min 0.64m, near F/L/R 9/6/0."
+        - group [ref=e163]:
+          - generic "Map Controls Mapping active. The robot will stop and save automatically when coverage is complete. ▸" [ref=e212] [cursor=pointer]:
+            - generic [ref=e165]: Map Controls
+            - generic [ref=e166]: Mapping active. The robot will stop and save automatically when coverage is complete.
+            - text: ▸
+          - tablist "Map controls" [ref=e167]:
+            - tab "Mapping" [selected] [ref=e168]
+            - tab "Navigation" [ref=e169]
+            - tab "Waypoints" [ref=e170]
+          - tabpanel [ref=e172]:
+            - generic [ref=e173]:
+              - generic [ref=e174]: "1"
+              - generic [ref=e175]: Build Map
+              - generic [ref=e176]:
+                - button "Map This Floor" [disabled] [ref=e177]
+                - group [ref=e178]:
+                  - generic "Continue mapping" [ref=e179] [cursor=pointer]
+                - button "Stop Early" [ref=e180]
+                - button "Use New Map" [disabled] [ref=e181]
+  - dialog [ref=e215]:
+    - heading "Finish Autonomous Mapping" [level=3] [ref=e216]
+    - paragraph [ref=e201]: Robot will stop, save a candidate map, and restore the previous active map for normal navigation.
+    - generic [ref=e202]:
+      - button "Cancel" [active] [ref=e203] [cursor=pointer]
+      - button "Confirm" [ref=e204] [cursor=pointer]

@@ -215,6 +215,8 @@ let connectionActionPending = false
 let autonomousMappingActive = false
 let autonomousMappingStarting = false
 let autonomousMapCandidateAvailable = false
+let displayedDogzillaMapStream = 'active'
+let activeDogzillaMapIdentity = null
 
 function isAutonomousMappingStartAction(action) {
   return action === 'start-autonomous-mapping'
@@ -351,6 +353,7 @@ const robotMap = createRobotMapRenderer({
   defaultRobotRuntime: DEFAULT_ROBOT_RUNTIME,
   getRuntimeConfig: () => runtimeConfig,
   formatEventTimestamp,
+  onMapClick: handleRobotMapClick,
 })
 
 mobileNavigation.init()
@@ -453,11 +456,16 @@ document.addEventListener('click', (event) => {
 })
 
 const waypointCaptureButton = document.getElementById('waypoint-capture-button')
+const waypointMapButton = document.getElementById('waypoint-map-button')
 const waypointCaptureInput = document.getElementById('waypoint-capture-name')
 const waypointCaptureStatus = document.getElementById('waypoint-capture-status')
 const waypointReadinessButton = document.getElementById('waypoint-readiness-button')
 const mapWorkflowStatus = document.getElementById('map-workflow-status')
 waypointCaptureButton?.addEventListener('click', handleWaypointCapture)
+waypointMapButton?.addEventListener('click', () => {
+  robotMapPanel?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  setMapWorkflowStatus('Click a free cell on the mini map, then enter a waypoint name.', 'success')
+})
 waypointReadinessButton?.addEventListener('click', handleWaypointReadinessCheck)
 
 document.querySelectorAll('.robot-map-zoom-btn[data-zoom-action]').forEach((btn) => {
@@ -1167,9 +1175,8 @@ function startRobotMapPolling() {
 }
 
 async function refreshDogzillaMap() {
-  const mapPath = autonomousMapCandidateAvailable
-    ? '/api/dogzilla/map?stream=candidate'
-    : slamMappingSessionActive ? '/api/dogzilla/map?stream=slam' : '/api/dogzilla/map'
+  const mapPath = slamMappingSessionActive ? '/api/dogzilla/map?stream=slam' : '/api/dogzilla/map'
+  displayedDogzillaMapStream = slamMappingSessionActive ? 'slam' : 'active'
   const healthPath = '/api/dogzilla/lidar/health'
 
   try {
@@ -1184,6 +1191,7 @@ async function refreshDogzillaMap() {
 
     if (!mapResponse.ok || payload?.ok !== true) {
       robotMap.setMapData(null)
+      activeDogzillaMapIdentity = null
       document.querySelector('.robot-map-head')?.classList.remove('has-map')
       renderMapStatus(payload, healthPayload)
       adaptMapPollInterval(healthPayload)
@@ -1191,11 +1199,15 @@ async function refreshDogzillaMap() {
     }
 
     robotMap.setMapData(payload)
+    activeDogzillaMapIdentity = displayedDogzillaMapStream === 'active'
+      ? normalizeActiveMapIdentity(healthPayload?.runtime?.map || healthPayload?.body?.runtime?.map)
+      : null
     document.querySelector('.robot-map-head')?.classList.add('has-map')
     renderMapStatus(payload, healthPayload)
     adaptMapPollInterval(healthPayload)
-} catch {
+  } catch {
     robotMap.setMapData(null)
+    activeDogzillaMapIdentity = null
     document.querySelector('.robot-map-head')?.classList.remove('has-map')
     renderMapStatus(null, null)
     adaptMapPollInterval(null)
@@ -2107,6 +2119,94 @@ async function handleDogzillaConnectionAction(event) {
   }
 }
 
+function normalizeActiveMapIdentity(map) {
+  const mapId = String(map?.id || map?.mapId || '').trim()
+  const mapFingerprint = String(map?.fingerprint || map?.mapFingerprint || '').trim()
+  return mapId && mapFingerprint ? { mapId, mapFingerprint } : null
+}
+
+function normalizeWaypointId(name) {
+  return String(name || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+}
+
+async function saveDogzillaWaypoint(name, waypointPayload = {}) {
+  const response = await apiFetch('/api/dogzilla/waypoints', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, ...waypointPayload }),
+  })
+  const payload = await response.json()
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.error || payload.status || 'Waypoint capture failed')
+  }
+  return payload
+}
+
+function upsertRuntimeWaypoint(waypoint, fallbackName) {
+  if (!waypoint || typeof waypoint !== 'object') return
+  const next = {
+    id: waypoint.id || waypoint.name || normalizeWaypointId(fallbackName),
+    label: waypoint.label || waypoint.name || fallbackName,
+    ...waypoint,
+  }
+  if (!Array.isArray(runtimeConfig.robotRuntime.waypoints)) {
+    runtimeConfig.robotRuntime.waypoints = []
+  }
+  const id = normalizeWaypointId(next.id)
+  const index = runtimeConfig.robotRuntime.waypoints.findIndex((item) => normalizeWaypointId(item.id || item.name) === id)
+  if (index >= 0) {
+    runtimeConfig.robotRuntime.waypoints[index] = next
+  } else {
+    runtimeConfig.robotRuntime.waypoints.push(next)
+  }
+  robotMap.renderWaypoints()
+}
+
+async function handleRobotMapClick({ pose, cell }) {
+  if (displayedDogzillaMapStream !== 'active') {
+    setMapWorkflowStatus('Finish mapping before saving waypoints.', 'error')
+    return
+  }
+  if (!activeDogzillaMapIdentity) {
+    setMapWorkflowStatus('No active navigation map is available. Start or load a map first.', 'error')
+    return
+  }
+  if (cell === null) {
+    setMapWorkflowStatus('Click inside the mapped grid to create a waypoint.', 'error')
+    return
+  }
+  if (cell < 0 || cell > 50) {
+    setMapWorkflowStatus('Choose a free mapped cell for a waypoint.', 'error')
+    return
+  }
+  const name = window.prompt('Waypoint name')
+  if (!name?.trim()) return
+  const normalizedId = normalizeWaypointId(name)
+  const existingIds = Array.isArray(runtimeConfig.robotRuntime?.waypoints)
+    ? runtimeConfig.robotRuntime.waypoints.map((waypoint) => normalizeWaypointId(waypoint.id || waypoint.name))
+    : []
+  if (existingIds.includes(normalizedId)) {
+    const confirmed = await showConfirmModal('Overwrite waypoint?', `Waypoint "${name.trim()}" already exists. Replace it with this map location?`)
+    if (!confirmed) return
+  }
+  try {
+    const payload = await saveDogzillaWaypoint(name.trim(), {
+      pose: { frame: 'map', x: pose.x, y: pose.y, yaw: 0 },
+      ...activeDogzillaMapIdentity,
+    })
+    upsertRuntimeWaypoint(payload.waypoint, name.trim())
+    const message = `Saved "${name.trim()}" at (${payload.waypoint?.x?.toFixed?.(2) || '?'}, ${payload.waypoint?.y?.toFixed?.(2) || '?'}).`
+    setMapWorkflowStatus(message, 'success')
+    setStatus(message)
+    const readiness = await refreshDogzillaWaypointReadiness()
+    setMapWorkflowStatus(formatWaypointReadinessSummary(readiness) || message, readiness?.readyForMapWaypoints === true ? 'success' : 'error')
+  } catch (error) {
+    const message = formatError(error)
+    setMapWorkflowStatus(message, 'error')
+    setStatus(message, 'error')
+  }
+}
+
 async function handleWaypointCapture() {
   const name = (waypointCaptureInput?.value || '').trim()
   if (!name) {
@@ -2120,16 +2220,8 @@ async function handleWaypointCapture() {
   waypointCaptureStatus.className = 'waypoint-capture-status'
 
   try {
-    const response = await apiFetch('/api/dogzilla/waypoints', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    const payload = await response.json()
-
-    if (!response.ok || payload.ok !== true) {
-      throw new Error(payload.error || payload.status || 'Waypoint capture failed')
-    }
+    const payload = await saveDogzillaWaypoint(name)
+    upsertRuntimeWaypoint(payload.waypoint, name)
 
     waypointCaptureStatus.textContent = `Saved "${name}" at (${payload.waypoint?.x?.toFixed?.(2) || '?'}, ${payload.waypoint?.y?.toFixed?.(2) || '?'})`
     waypointCaptureStatus.className = 'waypoint-capture-status success'

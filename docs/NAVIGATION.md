@@ -121,6 +121,7 @@ Direct bridge runtime truth distinguishes action discovery from waypoint-ready s
 - `navigation.waypointReady` / `navigation.available` require `can_send_goal()` to be true — the active backend must be able to actually send goals. If Docker goal sending is disabled or the host action client is missing, `waypointReady` is `false` even when lifecycle nodes, `/odom`, and `/scan_nav2` are live.
 - `send_goal` still waits for the real `NavigateToPose` action server before accepting a waypoint command. Do not remove that send-time wait.
 - App command preflight keeps full `/healthz` lifecycle status diagnostic when direct bridge command path is usable (`canSendGoal=true`, action server visible, `/odom` live with TF, `/scan_nav2` available). In that state dispatch proceeds and bridge `send_goal` is authority.
+- When the bridge reports explicit waypoint blockers, command preflight surfaces those blockers before generic Nav2 service recovery guidance.
 
 When startup or preflight says the action server is blocked but lifecycle, `/odom`, and `/scan_nav2` are green in `/healthz`, treat action discovery as diagnostic evidence, not automatic proof that Nav2 is down.
 
@@ -317,7 +318,7 @@ Chat command handling must use the same resolved runtime and ROS2 config for pre
 
 `config/robot-obstacle-avoidance.json` carries Nav2 tuning knobs, including robot radius, inflation, scan filter mask, yaw tolerance, XY tolerance, controller/planner frequency, and movement allowance. Current config makes final yaw effectively non-blocking with `yawGoalTolerance: 6.283`; startup applies both tolerances to Nav2's loaded goal checkers as well as DWB, otherwise `general_goal_checker` keeps its upstream `0.25` rad yaw requirement and curves toward map yaw zero instead of completing.
 
-Autonomous gait keeps the operator-approved wood-floor limits from the 2026-07-21 mapping run: immutable `linearFullScale=0.26`, forward stride no greater than `8`, and zero lateral/Nav2 Y motion. During autonomous mapping only, the direct bridge uses Yahboom's standard `trot/normal` gait for translation and `walk/normal` for in-place turns; normal waypoint navigation remains `walk/slow`. Startup, resume, and recovery share this direct-bridge conversion; stale runtime/environment values cannot restore the slidey `0.15` scale, re-enable strafing, or exceed the stride ceiling. Prior larger/crab steps made DOGZILLA fall.
+Autonomous gait keeps the operator-approved wood-floor limits from the 2026-07-21 mapping run: immutable `linearFullScale=0.26`, forward stride no greater than `8`, and zero lateral/Nav2 Y motion. The direct bridge uses Yahboom's standard `trot/normal` gait for forward Nav2 translation and `walk/normal` for reverse or in-place turns. Startup, resume, and recovery share this direct-bridge conversion; stale runtime/environment values cannot restore the slidey `0.15` scale, re-enable strafing, or exceed the stride ceiling. Prior larger/crab steps made DOGZILLA fall.
 
 Autonomous mapping has no Nav2 recovery tree. The reactive explorer stops at a wall, turns toward the clearer LiDAR side, tries the opposite direction after eight seconds, and stops if neither direction clears. Keep the static collision polygon unchanged because it remains the safety path for every mapping command.
 
@@ -332,7 +333,7 @@ The LiDAR filter removes returns inside the configured `0.22 m` robot radius in 
 ## Known live-work rules
 
 - For "spins/goes nowhere", inspect live costmap, scan, timeout, and recovery evidence before changing planner assumptions or waypoint data.
-- Live operator observation (2026-07-21): the `linearFullScale=0.26`, `walk/slow` profile moved without slipping on wood flooring. A later `0.15` calibration did not reproduce that gait; keep `0.26` as the default and retain the `8` stride ceiling.
+- Live operator observations: `linearFullScale=0.26` moved without slipping on wood flooring; `walk/slow` was later rejected as too wobbly for waypoint travel, so forward Nav2 motion uses `trot/normal`. Keep `0.26` as the default and retain the `8` stride ceiling.
 - Local tests prove plumbing, not live route correctness.
 - Yahboom `DOGZILLALib.turn()` coerces every nonzero magnitude below `30` to `30`. The direct bridge therefore duty-cycles sub-minimum Nav2 turns among zero-turn gait updates; passing a nominal `1-12` continuously makes tiny DWB steering corrections become hard turns. The pulse preserves the requested average turn and sign while the collision monitor still evaluates the original guarded Twist.
 - If robot is low battery or unhealthy, pause live motion retries and continue only local code/tests.
@@ -357,3 +358,8 @@ After a dedicated `mapping` or `continue_mapping` container reaches its ready co
 - `docs/archive/dogzilla-real-map-pose.md`
 - `docs/archive/waypoint-mapping-guide.md`
 - `docs/archive/dogzilla-waypoint-navigation-evaluation.md`
+
+## Click waypoints and relocalization
+
+- Active-map free cells in the top-down minimap can be clicked/tapped to create explicit `map`-frame waypoints. Candidate/SLAM map views, unknown/uncertain/occupied cells, and clicks outside the active grid fail closed.
+- `Relocalize on Map` works from arbitrary recognizable positions inside the active saved map, but intentionally fails closed when geometry is ambiguous, changed, repetitive, or featureless.

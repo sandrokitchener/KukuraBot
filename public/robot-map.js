@@ -57,6 +57,7 @@ export function createRobotMapRenderer({
   getRuntimeConfig,
   defaultRobotRuntime,
   formatEventTimestamp,
+  onMapClick,
 } = {}) {
   let baseMeta = ''
   let waypointReadinessSummary = ''
@@ -144,15 +145,24 @@ export function createRobotMapRenderer({
     const width = elements?.map?.clientWidth || lastMapCanvasWidth
     const height = elements?.map?.clientHeight || lastMapCanvasHeight
     if (!width || !height) return
-    panStart = { x: event.clientX, y: event.clientY, width, height }
+    const rect = elements.map.getBoundingClientRect?.()
+    panStart = { x: event.clientX, y: event.clientY, left: rect?.left || 0, top: rect?.top || 0, width, height, dragged: false }
     elements.map.setPointerCapture?.(event.pointerId)
   }
 
   function handleMapPointerMove(event) {
     if (!panStart) return
+    const deltaX = event.clientX - panStart.x
+    const deltaY = event.clientY - panStart.y
+    if (Math.hypot(deltaX, deltaY) <= 5 && !panStart.dragged) {
+      return
+    }
+    if (!panStart.dragged) {
+      panStart.dragged = true
+    }
     const view = getCurrentMapView(ROBOT_MAP_RANGE_METERS)
     const unpanned = { ...view, centerX: view.centerX - viewCenterX, centerY: view.centerY - viewCenterY }
-    const next = panMapView(unpanned, event.clientX - panStart.x, event.clientY - panStart.y, panStart.width, panStart.height)
+    const next = panMapView(unpanned, deltaX, deltaY, panStart.width, panStart.height)
     if (!next) return
     viewCenterX = next.centerX - unpanned.centerX
     viewCenterY = next.centerY - unpanned.centerY
@@ -161,8 +171,18 @@ export function createRobotMapRenderer({
 
   function handleMapPointerUp(event) {
     if (!panStart) return
+    const gesture = panStart
     panStart = null
     elements.map.releasePointerCapture?.(event.pointerId)
+    if (gesture.dragged || typeof onMapClick !== 'function') return
+    const view = getCurrentMapView(ROBOT_MAP_RANGE_METERS)
+    const pose = mapPointerToPose(view, event.clientX - gesture.left, event.clientY - gesture.top, gesture.width, gesture.height)
+    if (!pose) return
+    onMapClick({
+      pose,
+      cell: getMapGridCellValue(mapGrid, pose),
+      view,
+    })
   }
 
   elements?.map?.setAttribute?.('data-view-mode', mapViewMode)
@@ -1184,6 +1204,51 @@ export function poseToMapPosition(pose, rangeMeters = ROBOT_MAP_RANGE_METERS, ce
     xPercent: 50 + (xRatio * 50),
     yPercent: 50 - (yRatio * 50),
   }
+}
+
+export function mapPointerToPose(view, pixelX, pixelY, width, height) {
+  const mapWidth = toFiniteNumber(width)
+  const mapHeight = toFiniteNumber(height)
+  const x = toFiniteNumber(pixelX)
+  const y = toFiniteNumber(pixelY)
+  const centerX = toFiniteNumber(view?.centerX)
+  const centerY = toFiniteNumber(view?.centerY)
+  const rangeMeters = toFiniteNumber(view?.rangeMeters)
+  const rangeYMeters = toFiniteNumber(view?.rangeYMeters ?? view?.rangeMeters)
+  if (![mapWidth, mapHeight, x, y, centerX, centerY, rangeMeters, rangeYMeters].every(Number.isFinite)) {
+    return null
+  }
+  if (mapWidth <= 0 || mapHeight <= 0 || rangeMeters <= 0 || rangeYMeters <= 0) {
+    return null
+  }
+  return {
+    frame: 'map',
+    x: centerX + ((x / mapWidth) - 0.5) * 2 * rangeMeters,
+    y: centerY + (0.5 - (y / mapHeight)) * 2 * rangeYMeters,
+    yaw: 0,
+  }
+}
+
+export function getMapGridCellValue(grid, pose) {
+  const x = toFiniteNumber(pose?.x)
+  const y = toFiniteNumber(pose?.y)
+  const width = Number(grid?.width)
+  const height = Number(grid?.height)
+  const resolution = toFiniteNumber(grid?.resolution)
+  const originX = toFiniteNumber(grid?.originX ?? grid?.origin?.x)
+  const originY = toFiniteNumber(grid?.originY ?? grid?.origin?.y)
+  const cells = grid?.cells
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isInteger(width) || !Number.isInteger(height)
+    || width <= 0 || height <= 0 || !Number.isFinite(resolution) || resolution <= 0
+    || !Number.isFinite(originX) || !Number.isFinite(originY) || !cells || cells.length < width * height) {
+    return null
+  }
+  const col = Math.floor((x - originX) / resolution)
+  const row = Math.floor((y - originY) / resolution)
+  if (col < 0 || col >= width || row < 0 || row >= height) {
+    return null
+  }
+  return cells[row * width + col]
 }
 
 export function panMapView(view, deltaXPixels, deltaYPixels, viewportWidth, viewportHeight) {

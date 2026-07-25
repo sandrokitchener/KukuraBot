@@ -26,12 +26,14 @@ import {
   formatRobotMapWaypointTitle,
   formatWaypointReadinessSummary,
   getMapGridView,
+  getMapGridCellValue,
   getRenderableRobotMapWaypoints,
   getRobotMapRouteSegments,
   getSlamMapView,
   getRobotMapRangeMeters,
   headingRadiansToCssRotation,
   lidarPointToMapPose,
+  mapPointerToPose,
   occupancyGridCellToRGBA,
   panMapView,
   poseToMapPosition,
@@ -793,12 +795,101 @@ test('poseToMapPosition returns null for invalid pose', () => {
   assert.equal(poseToMapPosition({}, 4), null)
 })
 
+test('mapPointerToPose converts center and corners through current view', () => {
+  const view = { centerX: 2, centerY: -1, rangeMeters: 10, rangeYMeters: 5 }
+  assert.deepEqual(mapPointerToPose(view, 200, 100, 400, 200), { frame: 'map', x: 2, y: -1, yaw: 0 })
+  assert.deepEqual(mapPointerToPose(view, 400, 0, 400, 200), { frame: 'map', x: 12, y: 4, yaw: 0 })
+})
+
+test('mapPointerToPose supports zoomed and panned non-square views', () => {
+  assert.deepEqual(
+    mapPointerToPose({ centerX: -3, centerY: 7, rangeMeters: 4, rangeYMeters: 2 }, 300, 150, 400, 200),
+    { frame: 'map', x: -1, y: 6, yaw: 0 },
+  )
+})
+
+test('mapPointerToPose rejects invalid inputs', () => {
+  assert.equal(mapPointerToPose(null, 0, 0, 400, 200), null)
+  assert.equal(mapPointerToPose({ centerX: 0, centerY: 0, rangeMeters: 1, rangeYMeters: 1 }, 0, 0, 0, 200), null)
+  assert.equal(mapPointerToPose({ centerX: 0, centerY: 0, rangeMeters: 0, rangeYMeters: 1 }, 0, 0, 400, 200), null)
+})
+
+test('getMapGridCellValue reads ROS occupancy cells and rejects outside coordinates', () => {
+  const grid = {
+    width: 2,
+    height: 2,
+    resolution: 1,
+    originX: -1,
+    originY: -1,
+    cells: new Int8Array([0, -1, 51, 100]),
+  }
+  assert.equal(getMapGridCellValue(grid, { x: -0.5, y: -0.5 }), 0)
+  assert.equal(getMapGridCellValue(grid, { x: 0.5, y: -0.5 }), -1)
+  assert.equal(getMapGridCellValue(grid, { x: -0.5, y: 0.5 }), 51)
+  assert.equal(getMapGridCellValue(grid, { x: 0.5, y: 0.5 }), 100)
+  assert.equal(getMapGridCellValue(grid, { x: 2, y: 0 }), null)
+})
+
 test('panMapView converts Android viewport drag pixels into map coordinates', () => {
   assert.deepEqual(
     panMapView({ centerX: 5, centerY: 2, rangeMeters: 10, rangeYMeters: 5 }, 40, -20, 400, 200),
     { centerX: 3, centerY: 1, rangeMeters: 10, rangeYMeters: 5 },
   )
   assert.equal(panMapView(null, 1, 1, 400, 200), null)
+})
+
+test('robot map renderer invokes map click callback for short pointer gesture', () => {
+  const listeners = new Map()
+  const map = {
+    clientWidth: 400,
+    clientHeight: 200,
+    dataset: {},
+    addEventListener: (name, handler) => listeners.set(name, handler),
+    setAttribute() {},
+    setPointerCapture() {},
+    releasePointerCapture() {},
+    querySelector: () => null,
+    getBoundingClientRect: () => ({ left: 10, top: 20 }),
+  }
+  const clicks = []
+  createRobotMapRenderer({
+    elements: { map },
+    getRuntimeConfig: () => ({ robotRuntime: { waypoints: [] } }),
+    onMapClick: (event) => clicks.push(event),
+  })
+
+  listeners.get('pointerdown')({ button: 0, pointerId: 1, clientX: 210, clientY: 120, target: {} })
+  listeners.get('pointerup')({ pointerId: 1, clientX: 210, clientY: 120 })
+
+  assert.equal(clicks.length, 1)
+  assert.deepEqual(clicks[0].pose, { frame: 'map', x: 0, y: 0, yaw: 0 })
+})
+
+test('robot map renderer pans on drag without invoking map click callback', () => {
+  const listeners = new Map()
+  const map = {
+    clientWidth: 400,
+    clientHeight: 200,
+    dataset: {},
+    addEventListener: (name, handler) => listeners.set(name, handler),
+    setAttribute() {},
+    setPointerCapture() {},
+    releasePointerCapture() {},
+    querySelector: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+  }
+  let clicks = 0
+  createRobotMapRenderer({
+    elements: { map },
+    getRuntimeConfig: () => ({ robotRuntime: { waypoints: [] } }),
+    onMapClick: () => { clicks += 1 },
+  })
+
+  listeners.get('pointerdown')({ button: 0, pointerId: 1, clientX: 200, clientY: 100, target: {} })
+  listeners.get('pointermove')({ clientX: 220, clientY: 100 })
+  listeners.get('pointerup')({ pointerId: 1, clientX: 220, clientY: 100 })
+
+  assert.equal(clicks, 0)
 })
 
 test('robot map route segments break across legacy frame context changes', () => {

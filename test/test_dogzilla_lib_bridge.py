@@ -1750,7 +1750,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(result["executed"])
         self.assertIn(("move", "y", 1.0), runtime.robot.calls)
 
-    def test_nav2_cmd_vel_to_locomotion_preserves_forward_motion_with_stable_walk(self):
+    def test_nav2_cmd_vel_to_locomotion_uses_steady_trot_for_forward_motion(self):
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
             "linear": {"x": 0.13, "y": 0.0},
             "angular": {"z": 0.2},
@@ -1760,11 +1760,11 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(params["mapping"]["linearFullScale"], 0.26)
         self.assertEqual(params["mapping"]["maxXStep"], 8.0)
         self.assertEqual(params["y_step"], 0.0)
-        self.assertEqual(params["gait"], "walk")
-        self.assertEqual(params["pace"], "slow")
+        self.assertEqual(params["gait"], "trot")
+        self.assertEqual(params["pace"], "normal")
         self.assertGreater(params["turn_rate"], 0)
         self.assertLess(params["turn_rate"], 5)
-        self.assertFalse(params["mapping"]["allowTrot"])
+        self.assertTrue(params["mapping"]["allowTrot"])
         self.assertEqual(params["source"], "nav2_cmd_vel")
 
         recovery = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
@@ -1774,7 +1774,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(recovery["x_step"], -4.0)
         self.assertEqual(recovery["y_step"], 0.0)
         self.assertEqual(recovery["gait"], "walk")
-        self.assertEqual(recovery["pace"], "slow")
+        self.assertEqual(recovery["pace"], "normal")
 
     def test_nav2_approved_wood_floor_scale_ignores_stale_override(self):
         globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
@@ -1816,7 +1816,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertEqual(params["x_step"], 0.0)
         self.assertEqual(params["y_step"], 0.0)
         self.assertEqual(params["gait"], "walk")
-        self.assertEqual(params["pace"], "slow")
+        self.assertEqual(params["pace"], "normal")
 
     def test_nav2_gait_safety_cannot_be_overridden(self):
         globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
@@ -1832,13 +1832,13 @@ class DogzillaLibBridgeTests(unittest.TestCase):
 
         self.assertEqual(params["x_step"], 8.0)
         self.assertEqual(params["y_step"], 0.0)
-        self.assertEqual(params["gait"], "walk")
-        self.assertEqual(params["pace"], "slow")
+        self.assertEqual(params["gait"], "trot")
+        self.assertEqual(params["pace"], "normal")
 
-    def test_nav2_cmd_vel_to_locomotion_rejects_trot_override(self):
+    def test_nav2_cmd_vel_to_locomotion_keeps_forward_trot_when_config_disables_it(self):
         globals_ = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion.__globals__
         previous = globals_["_SPEED_CONFIG"]["allowTrot"]
-        globals_["_SPEED_CONFIG"]["allowTrot"] = True
+        globals_["_SPEED_CONFIG"]["allowTrot"] = False
         self.addCleanup(lambda: globals_["_SPEED_CONFIG"].__setitem__("allowTrot", previous))
 
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
@@ -1846,9 +1846,9 @@ class DogzillaLibBridgeTests(unittest.TestCase):
             "angular": {"z": 0.2},
         })
 
-        self.assertEqual(params["gait"], "walk")
-        self.assertEqual(params["pace"], "slow")
-        self.assertFalse(params["mapping"]["allowTrot"])
+        self.assertEqual(params["gait"], "trot")
+        self.assertEqual(params["pace"], "normal")
+        self.assertTrue(params["mapping"]["allowTrot"])
 
     def test_nav2_cmd_vel_to_locomotion_limits_in_place_turn_when_nav2_requests_it(self):
         params = dogzilla_lib_bridge.nav2_cmd_vel_to_locomotion({
@@ -1904,7 +1904,7 @@ class DogzillaLibBridgeTests(unittest.TestCase):
         self.assertTrue(result["executed"])
         self.assertEqual(result["kind"], "nav2.cmd_vel.gait_adapter")
         self.assertFalse(runtime.navigation_cancel.is_set())
-        self.assertEqual(runtime.robot.calls[:2], [("pace", "slow"), ("gait_type", "walk")])
+        self.assertEqual(runtime.robot.calls[:2], [("pace", "normal"), ("gait_type", "trot")])
         self.assertEqual(runtime.robot.calls[-3][0], "move")
         self.assertEqual(runtime.robot.calls[-3][1], "x")
         self.assertGreater(runtime.robot.calls[-3][2], 0)

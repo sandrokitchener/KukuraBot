@@ -498,6 +498,31 @@ test('sendRobotCommand does not bypass strict waypoint readiness with loose acti
   )
 })
 
+test('sendRobotCommand reports the Pi localization blocker when Nav2 itself is ready', async () => {
+  await withMockedFetch(
+    async (url) => defaultBridgeResponse(url) ?? jsonResponse(nav2HealthBody({
+      navigation: {
+        available: false,
+        primary: 'unavailable',
+        actionServerAvailable: true,
+        waypointReady: false,
+        blockers: ['Recovered pose disagrees with the saved map pose hint (position error 8.44 m).'],
+      },
+    })),
+    async () => {
+      const result = await sendRobotCommandWithDefaultPose(
+        waypointGotoPreview(),
+        dogzillaDirectRuntime(),
+        dogzillaTransportConfig(),
+      )
+
+      assert.equal(result.status, 'navigation-unavailable')
+      assert.match(result.recovery, /position error 8\.44 m/)
+      assert.doesNotMatch(result.recovery, /Check robodoge-navigation\.service/)
+    },
+  )
+})
+
 test('sendRobotCommand sends trusted config waypoint outside active DOGZILLA map bounds', async () => {
   const requests = []
 

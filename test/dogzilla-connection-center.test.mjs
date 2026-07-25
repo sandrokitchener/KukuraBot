@@ -192,6 +192,7 @@ test('buildDogzillaActionPlan starts map pose localization through the lidar con
   assert.equal(plan.args[plan.args.indexOf('-PosePort') + 1], '9090')
   assert.ok(plan.args.includes('-Mode'))
   assert.equal(plan.args[plan.args.indexOf('-Mode') + 1], 'localization')
+  assert.ok(plan.args.includes('-AllowPoseHintJump'))
 })
 
 test('buildDogzillaActionPlan starts waypoint navigation through the lidar container', () => {
